@@ -32,6 +32,7 @@ if not dep_hidapi.found()
 	dep_hidapi = proj_hidapi.get_variable('hidapi_dep')
 endif
 dep_threads = dependency('threads')
+dep_libusb = dependency('libusb-1.0')
 
 deps = [
 	dep_libm,
@@ -78,10 +79,14 @@ if _drivers.contains('rift')
 		'src/drv_oculus_rift/rift.c',
 		'src/drv_oculus_rift/rift-hmd-radio.c',
 		'src/drv_oculus_rift/packet.c',
-		'src/ext_deps/nxjson.c',
+		'src/drv_oculus_rift/rift-sensor-ar0134.c',
+		'src/drv_oculus_rift/rift-sensor-esp770u.c',
+		'src/drv_oculus_rift/rift-sensor-uvc.c',
+		'src/ext_deps/nxjson.c'
 	]
 	c_args += '-DDRIVER_OCULUS_RIFT'
 	deps += dep_hidapi
+	deps += dep_libusb
 endif
 
 if _drivers.contains('rift-s')
