@@ -20,6 +20,7 @@
 
 #include "rift.h"
 #include "rift-hmd-radio.h"
+#include "rift-sensor-tracker.h"
 #include "../hid.h"
 
 #define OHMD_GRAVITY_EARTH 9.80665 // m/s²
@@ -58,6 +59,8 @@ struct rift_hmd_s {
 	uint8_t num_leds;
 
 	uint16_t remote_buttons_state;
+
+	rift_sensor_ctx *sensor_ctx;
 
 	/* OpenHMD output devices */
 	rift_device_priv hmd_dev;
@@ -964,6 +967,9 @@ static rift_hmd_t *open_hmd(ohmd_driver* driver, ohmd_device_desc* desc)
 	hmd_dev->id = 0;
 	hmd_dev->hmd = priv;
 
+	// Find and attach Rift sensors if available
+	rift_sensor_tracker_init (&priv->sensor_ctx);
+
 	// initialize sensor fusion
 	ofusion_init(&priv->sensor_fusion);
 
@@ -980,6 +986,8 @@ static void close_hmd(rift_hmd_t *hmd)
 	if (hmd->leds)
 		free (hmd->leds);
 
+	if (hmd->sensor_ctx)
+		rift_sensor_tracker_free(hmd->sensor_ctx);
 	if (hmd->radio_handle)
 		hid_close(hmd->radio_handle);
 	hid_close(hmd->handle);
@@ -1151,6 +1159,7 @@ static void get_device_list(ohmd_driver* driver, ohmd_device_list* list)
 static void destroy_driver(ohmd_driver* drv)
 {
 	LOGD("shutting down driver");
+
 	hid_exit();
 	free(drv);
 

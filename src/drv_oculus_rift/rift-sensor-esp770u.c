@@ -14,7 +14,12 @@
 
 #define REG_SEL         3
 
-int esp770u_read_reg(libusb_device_handle *dev, uint8_t reg, uint8_t *val)
+#define ESP_DEBUG 0
+
+#define esp770u_read_reg(d,r,v) rift_sensor_esp770u_read_reg((d),(r),(v))
+#define esp770u_write_reg(d,r,v) rift_sensor_esp770u_write_reg((d),(r),(v))
+
+int rift_sensor_esp770u_read_reg(libusb_device_handle *dev, uint8_t reg, uint8_t *val)
 {
 	unsigned char buf[4] = { 0x82, 0xf0, reg };
 	int ret;
@@ -32,7 +37,8 @@ int esp770u_read_reg(libusb_device_handle *dev, uint8_t reg, uint8_t *val)
 	return ret;
 }
 
-int esp770u_read_reg_f1(libusb_device_handle *dev, uint8_t reg, uint8_t *val)
+#if ESP_DEBUG
+static int esp770u_read_reg_f1(libusb_device_handle *dev, uint8_t reg, uint8_t *val)
 {
 	unsigned char buf[4] = { 0x82, 0xf1, reg };
 	int ret;
@@ -49,8 +55,9 @@ int esp770u_read_reg_f1(libusb_device_handle *dev, uint8_t reg, uint8_t *val)
 	*val = buf[1];
 	return ret;
 }
+#endif
 
-int esp770u_write_reg(libusb_device_handle *dev, uint8_t reg, uint8_t val)
+int rift_sensor_esp770u_write_reg(libusb_device_handle *dev, uint8_t reg, uint8_t val)
 {
 	unsigned char buf[4] = { 0x02, 0xf0, reg, val };
 	int ret;
@@ -193,7 +200,7 @@ static int radio_write(libusb_device_handle *devhandle, const uint8_t *buf, size
 	return 0;
 }
 
-int esp770u_setup_radio(libusb_device_handle *devhandle, uint32_t radio_id)
+int rift_sensor_esp770u_setup_radio(libusb_device_handle *devhandle, uint32_t radio_id)
 {
 	int ret;
 
@@ -226,7 +233,7 @@ int esp770u_setup_radio(libusb_device_handle *devhandle, uint32_t radio_id)
 }
 
 /* Initial register setup, only after camera plugin */
-int esp770u_init_regs(libusb_device_handle *devhandle)
+int rift_sensor_esp770u_init_regs(libusb_device_handle *devhandle)
 {
 	int ret;
 	uint8_t val;
@@ -259,7 +266,7 @@ int esp770u_init_regs(libusb_device_handle *devhandle)
 	ret = esp770u_read_reg(devhandle, 0x14, &val);
 	if (ret < 0) return ret;
 
-#if 0
+#if ESP_DEBUG
 	for (int i = 0; i < 256; i += 1) {
 		uint8_t rval;
 		if (i % 16 == 0)

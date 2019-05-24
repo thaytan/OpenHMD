@@ -8,7 +8,7 @@
 #define XU_ENTITY	4
 #define SENSOR_REG_SEL	2
 
-int ar0134_read_reg(libusb_device_handle *dev, uint16_t reg, uint16_t *val)
+static int ar0134_read_reg(libusb_device_handle *dev, uint16_t reg, uint16_t *val)
 {
 	unsigned char buf[6] = { 0x86, 0x20, reg >> 8, reg & 0xff, 0x00, 0x00 };
 	int ret;
@@ -26,7 +26,7 @@ int ar0134_read_reg(libusb_device_handle *dev, uint16_t reg, uint16_t *val)
 	return ret;
 }
 
-int ar0134_write_reg(libusb_device_handle *dev, uint16_t reg, uint16_t val)
+static int ar0134_write_reg(libusb_device_handle *dev, uint16_t reg, uint16_t val)
 {
 	unsigned char buf[64] = { 0x06, 0x20, reg >> 8, reg & 0xff, val >> 8, val & 0xff };
 	int ret;
@@ -47,7 +47,7 @@ int ar0134_write_reg(libusb_device_handle *dev, uint16_t reg, uint16_t val)
 }
 
 /* Sensor setup after stream start */
-int ar0134_init(libusb_device_handle *devh)
+int rift_sensor_ar0134_init(libusb_device_handle *devh)
 {
 	uint16_t val;
 	int ret;
