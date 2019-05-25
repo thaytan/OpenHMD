@@ -228,7 +228,7 @@ int rift_sensor_uvc_stream_start(libusb_context *ctx, libusb_device_handle *devh
 
 	ret = libusb_claim_interface(devh, 1);
 	if (ret < 0) {
-		printf("could claim data interface\n");
+		printf("could not claim UVC data interface\n");
 		return ret;
 	}
 

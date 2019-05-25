@@ -968,7 +968,7 @@ static rift_hmd_t *open_hmd(ohmd_driver* driver, ohmd_device_desc* desc)
 	hmd_dev->hmd = priv;
 
 	// Find and attach Rift sensors if available
-	rift_sensor_tracker_init (&priv->sensor_ctx);
+	rift_sensor_tracker_init (&priv->sensor_ctx, priv->radio_address);
 
 	// initialize sensor fusion
 	ofusion_init(&priv->sensor_fusion);

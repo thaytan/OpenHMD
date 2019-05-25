@@ -200,14 +200,12 @@ static int radio_write(libusb_device_handle *devhandle, const uint8_t *buf, size
 	return 0;
 }
 
-int rift_sensor_esp770u_setup_radio(libusb_device_handle *devhandle, uint32_t radio_id)
+int rift_sensor_esp770u_setup_radio(libusb_device_handle *devhandle, const uint8_t radio_id[5])
 {
 	int ret;
 
-	const uint8_t buf1[7] = { 0x40, 0x10, radio_id & 0xff,
-				  (radio_id >> 8) & 0xff,
-				  (radio_id >> 16) & 0xff,
-				  radio_id >> 24, 0x8c };
+	const uint8_t buf1[7] = { 0x40, 0x10, radio_id[0], radio_id[1],
+				radio_id[2], radio_id[3], radio_id[4] };
 	ret = radio_write(devhandle, buf1, sizeof buf1);
 	if (ret < 0)
 		return ret;

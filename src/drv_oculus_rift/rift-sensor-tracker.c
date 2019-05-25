@@ -19,9 +19,6 @@
 
 #define ASSERT_MSG(_v, ...) if(!(_v)){ fprintf(stderr, __VA_ARGS__); exit(1); }
 
-/* change this to the Rift HMD's radio id */
-#define RIFT_RADIO_ID 0x3c309307
-
 struct rift_sensor_ctx_s
 {
   libusb_context *usb_ctx;
@@ -70,7 +67,7 @@ static void new_frame_cb(struct rift_sensor_uvc_stream *stream)
 }
 
 int
-rift_sensor_tracker_init (rift_sensor_ctx **ctx)
+rift_sensor_tracker_init (rift_sensor_ctx **ctx, const uint8_t radio_id[5])
 {
   rift_sensor_ctx *sensor_ctx = NULL;
   int ret;
@@ -97,7 +94,10 @@ rift_sensor_tracker_init (rift_sensor_ctx **ctx)
   if (ret < 0)
     goto fail;
 
-  ret = rift_sensor_esp770u_setup_radio(sensor_ctx->usb_devh, RIFT_RADIO_ID);
+  printf ("Found Rift Sensor. Connecting to Radio address 0x%02x%02x%02x%02x%02x\n",
+    radio_id[0], radio_id[1], radio_id[2], radio_id[3], radio_id[4]);
+
+  ret = rift_sensor_esp770u_setup_radio(sensor_ctx->usb_devh, radio_id);
   if (ret < 0)
     goto fail;
 
