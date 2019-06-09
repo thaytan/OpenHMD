@@ -10,9 +10,18 @@
 #include "rift-sensor-esp770u.h"
 #include "rift-sensor-uvc.h"
 
-#define XU_ENTITY       4
+#define ESP770U_EXTENSION_UNIT		4
 
-#define REG_SEL         3
+#define ESP770U_SELECTOR_I2C		2
+#define ESP770U_SELECTOR_REG		3
+#define ESP770U_SELECTOR_COUNTER	10
+#define ESP770U_SELECTOR_CONTROL	11
+#define ESP770U_SELECTOR_DATA		12
+
+#define XU_ENTITY       ESP770U_EXTENSION_UNIT
+#define REG_SEL         ESP770U_SELECTOR_REG
+#define CONTROL_SEL	    ESP770U_SELECTOR_CONTROL
+#define DATA_SEL				ESP770U_SELECTOR_DATA
 
 #define ESP_DEBUG 0
 
@@ -96,28 +105,87 @@ static int set_get_verify_a0(libusb_device_handle *dev, uint8_t val,
 	return 0;
 }
 
-#define CONTROL_SEL	11
-#define DATA_SEL	12
-
-static int setup_control(libusb_device_handle *devhandle, uint8_t a, size_t len)
+/*
+ * Read self-incrementing counter.
+ */
+static int esp770u_get_counter(libusb_device_handle *devh, uint8_t *count)
 {
-	unsigned char control[16];
+	return rift_sensor_uvc_get_cur(devh, 0, ESP770U_EXTENSION_UNIT,
+			   ESP770U_SELECTOR_COUNTER, count, 1);
+}
+
+/*
+ * Write back self-incrementing counter.
+ */
+static int esp770u_set_counter(libusb_device_handle *devh, uint8_t count)
+{
+	return rift_sensor_uvc_set_cur(devh, 0, ESP770U_EXTENSION_UNIT,
+			   ESP770U_SELECTOR_COUNTER, &count, 1);
+}
+
+/*
+ * Reads a buffer from the flash storage.
+ */
+int rift_sensor_esp770u_flash_read(libusb_device_handle *devh, uint32_t addr,
+		       uint8_t *data, uint16_t len)
+{
+	uint8_t control[16];
+	uint8_t count;
 	int ret;
 
-	/* prepare */
-	memset(control, 0, sizeof control);
-	control[1] = a; /* alternating, 0x81 or 0x41 */
-	control[2] = 0x80;
-	control[3] = 0x01;
-	control[9] = len;
-	ret = rift_sensor_uvc_set_cur(devhandle, 0, XU_ENTITY, CONTROL_SEL, control,
-			  sizeof control);
+	ret = esp770u_get_counter(devh, &count);
 	if (ret < 0)
 		return ret;
 
-	ohmd_sleep (0.020); /* 20ms */
+	memset(control, 0, sizeof control);
+	control[0] = count;
+	control[1] = 0x41;
+	control[2] = 0x03;
+	control[3] = 0x01;
 
-	return 0;
+	control[5] = (addr >> 16) & 0xff;
+	control[6] = (addr >> 8) & 0xff;
+	control[7] = addr & 0xff;
+
+	control[8] = len >> 8;
+	control[9] = len & 0xff;
+
+	ret = rift_sensor_uvc_set_cur(devh, 0, ESP770U_EXTENSION_UNIT,
+			  ESP770U_SELECTOR_CONTROL, control, sizeof control);
+	if (ret < 0)
+		return ret;
+
+	memset(data, 0, len);
+	ret = rift_sensor_uvc_get_cur(devh, 0, ESP770U_EXTENSION_UNIT,
+			  ESP770U_SELECTOR_DATA, data, len);
+	if (ret < 0)
+		return ret;
+
+	return esp770u_set_counter(devh, count);
+}
+
+static int esp770u_spi_set_control(libusb_device_handle *devh, uint8_t a,
+				   size_t len)
+{
+	/* a is alternating, 0x81 or 0x41 */
+	uint8_t control[16] = { 0x00, a, 0x80, 0x01, [9] = len };
+
+	return rift_sensor_uvc_set_cur(devh, 0, ESP770U_EXTENSION_UNIT,
+			   ESP770U_SELECTOR_CONTROL, control, sizeof control);
+}
+
+static int esp770u_spi_set_data(libusb_device_handle *devh, uint8_t *data,
+				size_t len)
+{
+	return rift_sensor_uvc_set_cur(devh, 0, ESP770U_EXTENSION_UNIT,
+			   ESP770U_SELECTOR_DATA, data, len);
+}
+
+static int esp770u_spi_get_data(libusb_device_handle *devh, uint8_t *data,
+				size_t len)
+{
+	return rift_sensor_uvc_get_cur(devh, 0, ESP770U_EXTENSION_UNIT,
+			   ESP770U_SELECTOR_DATA, data, len);
 }
 
 static int radio_write(libusb_device_handle *devhandle, const uint8_t *buf, size_t len)
@@ -135,63 +203,50 @@ static int radio_write(libusb_device_handle *devhandle, const uint8_t *buf, size
 		data[126] -= buf[i]; /* calculate checksum */
 	}
 
-	ret = setup_control(devhandle, 0x81, sizeof data);
+	ret = esp770u_spi_set_control(devhandle, 0x81, sizeof data);
 	if (ret < 0) return ret;
 
 	/* send data */
-	ret = rift_sensor_uvc_set_cur(devhandle, 0, XU_ENTITY, DATA_SEL, data,
-			  sizeof data);
-	if (ret < 0)
-		return ret;
+	ret = esp770u_spi_set_data(devhandle, data, sizeof data);
+	if (ret < 0) return ret;
 
-	ohmd_sleep (0.020); /* 20ms */
-
-	ret = setup_control(devhandle, 0x41, sizeof data);
+	ret = esp770u_spi_set_control(devhandle, 0x41, sizeof data);
 	if (ret < 0) return ret;
 
 	/* expect all zeros */
-	ret = rift_sensor_uvc_get_cur(devhandle, 0, XU_ENTITY, DATA_SEL, data,
-			  sizeof data);
-	if (ret < 0)
-		return ret;
-#if 0
-	for (i = 0; i < 127; i++)
-		if (data[i])
-			break;
-	if (i != 127) {
-		printf("not clear\n");
-		for (i = 0; i < 127; i++)
-			printf("%02x ", data[i]);
-		printf("\n");
-	}
-#endif
+	ret = esp770u_spi_get_data(devhandle, data, sizeof data);
+	if (ret < 0) return ret;
 
-	ohmd_sleep (0.020); /* 20ms */
-
-	ret = setup_control(devhandle, 0x81, sizeof data);
+	ret = esp770u_spi_set_control(devhandle, 0x81, sizeof data);
 	if (ret < 0) return ret;
 
 	/* clear */
 	memset(data, 0, sizeof data);
-	ret = rift_sensor_uvc_set_cur(devhandle, 0, XU_ENTITY, DATA_SEL, data, sizeof data);
-	if (ret < 0)
-		return ret;
-
-	ohmd_sleep (0.020); /* 20ms */
-
-	ret = setup_control(devhandle, 0x41, sizeof data);
+	ret = esp770u_spi_set_data(devhandle, data, sizeof data);
 	if (ret < 0) return ret;
 
-	ret = rift_sensor_uvc_get_cur(devhandle, 0, XU_ENTITY, DATA_SEL, data, sizeof data);
-	if (ret < 0)
-		return ret;
+	ret = esp770u_spi_set_control(devhandle, 0x41, sizeof data);
+	if (ret < 0) return ret;
+
+	ret = esp770u_spi_get_data(devhandle, data, sizeof data);
+	if (ret < 0) return ret;
+
+	/* Expect zeros */
 	for (i = 2; i < 126; i++)
 		if (data[i])
 			break;
-	/* uint8_t chksum = 0 - data[0] - data[1]; */
-	if (data[0] != buf[0] || data[1] != buf[1] /* || i != 126 ||
-	    data[126] != chksum*/) {
-		printf("unexpected read\n");
+	if (data[0] != buf[0] || data[1] != buf[1]) {
+		printf("eSP770U: Unexpected read (%02x %02x):\n", buf[0], buf[1]);
+		for (i = 0; i < 127; i++)
+			printf("%02x ", data[i]);
+		printf("\n");
+	}
+
+	uint8_t chksum = 0;
+	for (i = 0; i < 127; i++)
+		chksum += data[i];
+	if (chksum) {
+		printf("eSP770U: Checksum mismatch: %02x\n", chksum);
 		for (i = 0; i < 127; i++)
 			printf("%02x ", data[i]);
 		printf("\n");

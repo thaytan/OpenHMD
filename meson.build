@@ -1,5 +1,5 @@
 project(
-	'openhmd', 'c',
+	'openhmd', 'c', 'cpp',
 	default_options: 'c_std=c99',
 	version: '0.3.0',
 	meson_version: '>= 0.44',
@@ -33,6 +33,7 @@ if not dep_hidapi.found()
 endif
 dep_threads = dependency('threads')
 dep_libusb = dependency('libusb-1.0')
+dep_opencv = dependency('opencv')
 
 deps = [
 	dep_libm,
@@ -79,6 +80,8 @@ if _drivers.contains('rift')
 		'src/drv_oculus_rift/rift.c',
 		'src/drv_oculus_rift/rift-hmd-radio.c',
 		'src/drv_oculus_rift/packet.c',
+		'src/drv_oculus_rift/rift-sensor-opencv.cpp',
+		'src/drv_oculus_rift/rift-sensor-maths.c',
 		'src/drv_oculus_rift/rift-sensor-ar0134.c',
 		'src/drv_oculus_rift/rift-sensor-blobwatch.c',
 		'src/drv_oculus_rift/rift-sensor-esp770u.c',
@@ -87,8 +90,10 @@ if _drivers.contains('rift')
 		'src/ext_deps/nxjson.c'
 	]
 	c_args += '-DDRIVER_OCULUS_RIFT'
+	c_args += '-DHAVE_OPENCV=1'
 	deps += dep_hidapi
 	deps += dep_libusb
+	deps += dep_opencv
 endif
 
 if _drivers.contains('rift-s')
@@ -187,6 +192,7 @@ openhmd_lib = library(
 	sources,
 	include_directories: include_directories('./include'),
 	c_args: c_args,
+	cpp_args: c_args,
 	dependencies: deps,
 	install: true,
 	version: library_version,
