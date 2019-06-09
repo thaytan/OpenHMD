@@ -85,6 +85,7 @@ if _drivers.contains('rift')
 		'src/drv_oculus_rift/rift-sensor-ar0134.c',
 		'src/drv_oculus_rift/rift-sensor-blobwatch.c',
 		'src/drv_oculus_rift/rift-sensor-esp770u.c',
+		'src/drv_oculus_rift/rift-sensor-flicker.c',
 		'src/drv_oculus_rift/rift-sensor-tracker.c',
 		'src/drv_oculus_rift/rift-sensor-uvc.c',
 		'src/ext_deps/nxjson.c'

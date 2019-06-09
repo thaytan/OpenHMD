@@ -10,7 +10,7 @@
 #include <unistd.h>
 
 #include "rift-sensor-blobwatch.h"
-//#include "rift-sensor-flicker.h"
+#include "rift-sensor-flicker.h"
 
 struct leds;
 
@@ -53,14 +53,12 @@ struct blobwatch {
 	struct blobservation history[NUM_FRAMES_HISTORY];
 	struct extent_line *el;
 	bool debug;
+	bool flicker_enable;
 };
 
-/* temporary global */
-bool rift_flicker;
-
-void blobwatch_set_flicker(bool enable)
+void blobwatch_set_flicker(struct blobwatch *bw, bool enable)
 {
-	rift_flicker = enable;
+	bw->flicker_enable = enable;
 }
 
 /*
@@ -80,6 +78,7 @@ struct blobwatch *blobwatch_new(int width, int height)
 	bw->height = height;
 	bw->last_observation = -1;
 	bw->debug = true;
+	bw->flicker_enable = true;
 	bw->el = calloc(height, sizeof(*bw->el));
 
 	return bw;
@@ -264,7 +263,8 @@ static int find_free_track(uint8_t *tracked)
  */
 void blobwatch_process(struct blobwatch *bw, uint8_t *frame,
 		       int width, int height, uint8_t led_pattern_phase,
-		       struct leds *leds, struct blobservation **output)
+		       rift_led *leds, uint8_t num_leds,
+		       struct blobservation **output)
 {
 	int last = bw->last_observation;
 	int current = (last + 1) % NUM_FRAMES_HISTORY;
@@ -358,13 +358,11 @@ void blobwatch_process(struct blobwatch *bw, uint8_t *frame,
 		}
 	}
 
-#if 0 // FIXME
-	if (rift_flicker) {
+	if (bw->flicker_enable) {
 		/* Identify blobs by their blinking pattern */
-		flicker_process(ob->blobs, ob->num_blobs, led_pattern_phase,
-				leds);
+		rift_sensor_flicker_process(ob->blobs, ob->num_blobs, led_pattern_phase,
+				leds, num_leds);
 	}
-#endif
 
 	/* Return observed blobs */
 	if (output)

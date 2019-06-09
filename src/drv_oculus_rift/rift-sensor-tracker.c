@@ -114,7 +114,12 @@ static void new_frame_cb(struct rift_sensor_uvc_stream *stream)
 	rift_sensor_ctx *sensor_ctx = stream->user_data;
 	assert (sensor_ctx);
 
-	blobwatch_process(sensor_ctx->bw, stream->frame, width, height, 0, NULL, &sensor_ctx->bwobs);
+	/* FIXME: Get led pattern phase from sensor reports */
+	uint8_t led_pattern_phase = 0;
+
+	blobwatch_process(sensor_ctx->bw, stream->frame, width, height,
+		led_pattern_phase, sensor_ctx->leds, sensor_ctx->num_leds,
+		&sensor_ctx->bwobs);
 
 	if (sensor_ctx->bwobs)
 	{
