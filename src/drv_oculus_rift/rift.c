@@ -845,7 +845,7 @@ static rift_hmd_t *open_hmd(ohmd_driver* driver, ohmd_device_desc* desc)
 		if (send_feature_report(priv, buf, size) == -1)
 			LOGE("error turning the screens on");
 
-		rift_send_tracking_config (priv, false, RIFT_TRACKING_EXPOSURE_US_CV1,
+		rift_send_tracking_config (priv, true, RIFT_TRACKING_EXPOSURE_US_CV1,
 				RIFT_TRACKING_PERIOD_US_CV1);
 
 		/* Read the radio ID for CV1 to enable camera sensor sync */
@@ -853,7 +853,7 @@ static rift_hmd_t *open_hmd(ohmd_driver* driver, ohmd_device_desc* desc)
 	}
 	else if (desc->revision == REV_DK2)
 	{
-		rift_send_tracking_config (priv, false, RIFT_TRACKING_EXPOSURE_US_DK2,
+		rift_send_tracking_config (priv, true, RIFT_TRACKING_EXPOSURE_US_DK2,
 				RIFT_TRACKING_PERIOD_US_DK2);
 	}
 
