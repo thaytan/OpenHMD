@@ -236,6 +236,9 @@ static void handle_tracker_sensor_msg(rift_hmd_t* priv, unsigned char* buffer, i
 	}
 
 	priv->last_imu_timestamp = s->timestamp;
+
+	if (priv->sensor_ctx != NULL)
+		rift_sensor_tracker_new_exposure (priv->sensor_ctx, priv->sensor.led_pattern_phase);
 }
 
 static void handle_touch_controller_message(rift_hmd_t *hmd,

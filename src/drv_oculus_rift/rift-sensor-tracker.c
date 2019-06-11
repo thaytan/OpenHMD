@@ -30,6 +30,7 @@ struct rift_sensor_ctx_s
 
   rift_led *leds;
 	uint8_t num_leds;
+  uint8_t led_pattern_phase;
 
   int stream_started;
   struct rift_sensor_uvc_stream stream;
@@ -52,9 +53,13 @@ void tracker_process_blobs(rift_sensor_ctx *ctx)
   /*
    * Estimate initial pose without previously known [rot|trans].
    */
-  estimate_initial_pose(bwobs->blobs, bwobs->num_blobs, ctx->leds,
+  if (estimate_initial_pose(bwobs->blobs, bwobs->num_blobs, ctx->leds,
             ctx->num_leds, camera_matrix, dist_coeffs, &rot, &trans,
-            false);
+            false)) {
+    printf ("Got PnP pose quat %f %f %f %f  pos %f %f %f\n",
+            rot.x, rot.y, rot.z, rot.w,
+            trans.x, trans.y, trans.z);
+  }
 }
 
 static int
@@ -106,7 +111,6 @@ static void new_frame_cb(struct rift_sensor_uvc_stream *stream)
 	int width = stream->width;
 	int height = stream->height;
 
-	printf(".");
 	if(stream->payload_size != width * height) {
 		printf("bad frame: %d\n", (int)stream->payload_size);
 	}
@@ -126,18 +130,19 @@ static void new_frame_cb(struct rift_sensor_uvc_stream *stream)
 		if (sensor_ctx->bwobs->num_blobs > 0)
 		{
 			tracker_process_blobs (sensor_ctx); 
-#if 1
+#if 0
 			printf("Blobs: %d\n", sensor_ctx->bwobs->num_blobs);
 
 			for (int index = 0; index < sensor_ctx->bwobs->num_blobs; index++)
 			{
-				printf("Blob[%d]: %d,%d\n",
+				printf("Blob[%d]: %d,%d id %d\n",
 					index,
 					sensor_ctx->bwobs->blobs[index].x,
 					sensor_ctx->bwobs->blobs[index].y);
+					sensor_ctx->bwobs->blobs[index].led_id);
 			}
-		}
 #endif
+		}
 	}
 }
 
@@ -192,6 +197,11 @@ fail:
   if (sensor_ctx)
     rift_sensor_tracker_free (sensor_ctx);
   return ret;
+}
+
+void rift_sensor_tracker_new_exposure (rift_sensor_ctx *ctx, uint8_t led_pattern_phase)
+{
+	ctx->led_pattern_phase = led_pattern_phase;
 }
 
 void

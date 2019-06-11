@@ -10,13 +10,13 @@
 #include "rift-sensor-maths.h"
 
 #if HAVE_OPENCV
-void estimate_initial_pose(struct blob *blobs, int num_blobs,
+bool estimate_initial_pose(struct blob *blobs, int num_blobs,
 			   rift_led *leds, int num_leds,
 			   dmat3 *camera_matrix, double dist_coeffs[5],
 			   dquat *rot, dvec3 *trans, bool use_extrinsic_guess);
 #else
 static inline
-void estimate_initial_pose(struct blob *blobs, int num_blobs,
+bool estimate_initial_pose(struct blob *blobs, int num_blobs,
 			   rift_led *leds, int num_leds,
 			   dmat3 *camera_matrix, double dist_coeffs[5],
 			   dquat *rot, dvec3 *trans, bool use_extrinsic_guess)
@@ -30,6 +30,7 @@ void estimate_initial_pose(struct blob *blobs, int num_blobs,
 	(void)rot;
 	(void)trans;
 	(void)use_extrinsic_guess;
+  return false;
 }
 #endif /* HAVE_OPENCV */
 

@@ -13,7 +13,7 @@ extern "C" {
 }
 
 
-extern "C" void estimate_initial_pose(struct blob *blobs, int num_blobs,
+extern "C" bool estimate_initial_pose(struct blob *blobs, int num_blobs,
     rift_led *leds, int num_led_pos,
     dmat3 *camera_matrix, double dist_coeffs[5],
     dquat *rot, dvec3 *trans, bool use_extrinsic_guess)
@@ -44,7 +44,7 @@ extern "C" void estimate_initial_pose(struct blob *blobs, int num_blobs,
 	}
 
 	if (num_leds < 4)
-		return;
+		return false;
 
 	std::vector<cv::Point3f> list_points3d(num_leds);
 	std::vector<cv::Point2f> list_points2d(num_leds);
@@ -76,4 +76,6 @@ extern "C" void estimate_initial_pose(struct blob *blobs, int num_blobs,
 	v.y = rvec.at<double>(1) * inorm;
 	v.z = rvec.at<double>(2) * inorm;
 	dquat_from_axis_angle(rot, &v, angle);
+
+  return true;
 }
