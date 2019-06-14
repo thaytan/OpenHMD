@@ -214,12 +214,10 @@ int rift_sensor_uvc_stream_start(libusb_context *ctx, libusb_device_handle *devh
 	int num_packets;
 	int packet_size;
 
-	if (libusb_kernel_driver_active(devh, 0)) {
-		ret = libusb_detach_kernel_driver(devh, 0);
-		if (ret < 0) {
-			printf("could not detach uvcvideo driver\n");
-			return ret;
-		}
+	ret = libusb_set_auto_detach_kernel_driver(devh, 1);
+	if (ret < 0) {
+		printf("could not detach uvcvideo driver\n");
+		return ret;
 	}
 
 	ret = libusb_claim_interface(devh, 0);
