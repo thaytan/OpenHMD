@@ -12,13 +12,13 @@
 #if HAVE_OPENCV
 bool estimate_initial_pose(struct blob *blobs, int num_blobs,
 			   rift_led *leds, int num_leds,
-			   dmat3 *camera_matrix, double dist_coeffs[5],
+			   dmat3 *camera_matrix, double dist_coeffs[4],
 			   dquat *rot, dvec3 *trans, bool use_extrinsic_guess);
 #else
 static inline
 bool estimate_initial_pose(struct blob *blobs, int num_blobs,
 			   rift_led *leds, int num_leds,
-			   dmat3 *camera_matrix, double dist_coeffs[5],
+			   dmat3 *camera_matrix, double dist_coeffs[4],
 			   dquat *rot, dvec3 *trans, bool use_extrinsic_guess)
 {
 	(void)blobs;

@@ -55,7 +55,7 @@ void tracker_process_blobs(rift_sensor_ctx *ctx)
    */
   if (estimate_initial_pose(bwobs->blobs, bwobs->num_blobs, ctx->leds,
             ctx->num_leds, camera_matrix, dist_coeffs, &rot, &trans,
-            false)) {
+            true)) {
     printf ("Got PnP pose quat %f %f %f %f  pos %f %f %f\n",
             rot.x, rot.y, rot.z, rot.w,
             trans.x, trans.y, trans.z);
@@ -69,7 +69,7 @@ rift_sensor_get_calibration(rift_sensor_ctx *ctx)
         double * const A = ctx->camera_matrix.m;
         double * const k = ctx->dist_coeffs;
         double fx, fy, cx, cy;
-        double k1, k2, p1, p2;
+        double k1, k2, k3, k4;
         int ret;
 
         /* Read a 128-byte block at EEPROM address 0x1d000 */
@@ -77,17 +77,18 @@ rift_sensor_get_calibration(rift_sensor_ctx *ctx)
         if (ret < 0)
                 return ret;
 
+        /* Fisheye distortion model parameters from firmware */
         fx = fy = *(float *)(buf + 0x30);
         cx = *(float *)(buf + 0x34);
         cy = *(float *)(buf + 0x38);
 
         k1 = *(float *)(buf + 0x48);
         k2 = *(float *)(buf + 0x4c);
-        p1 = *(float *)(buf + 0x50);
-        p2 = *(float *)(buf + 0x54);
+        k3 = *(float *)(buf + 0x50);
+        k4 = *(float *)(buf + 0x54);
 
         printf (" f = [ %7.3f %7.3f ], c = [ %7.3f %7.3f ]\n", fx, fy, cx, cy);
-        printf (" k = [ %9.6f %9.6f %9.6f %9.6f ]\n", k1, k2, p1, p2);
+        printf (" k = [ %9.6f %9.6f %9.6f %9.6f ]\n", k1, k2, k3, k4);
 
         /*
          *     ⎡ fx 0  cx ⎤
@@ -99,9 +100,9 @@ rift_sensor_get_calibration(rift_sensor_ctx *ctx)
         A[6] = 0.0; A[7] = 0.0; A[8] = 1.0;
 
         /*
-         * k = [ k₁ k₂, p₁, p₂, k₃ ]
+         * k = [ k₁ k₂, k₃, k4 ]
          */
-        k[0] = k1; k[1] = k2; k[2] = p1; k[3] = p2;// k[4] = k3;
+        k[0] = k1; k[1] = k2; k[3] = k3; k[4] = k4;
 
         return 0;
 }
@@ -138,7 +139,7 @@ static void new_frame_cb(struct rift_sensor_uvc_stream *stream)
 				printf("Blob[%d]: %d,%d id %d\n",
 					index,
 					sensor_ctx->bwobs->blobs[index].x,
-					sensor_ctx->bwobs->blobs[index].y);
+					sensor_ctx->bwobs->blobs[index].y,
 					sensor_ctx->bwobs->blobs[index].led_id);
 			}
 #endif
