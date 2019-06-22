@@ -175,6 +175,11 @@ typedef struct {
 } rift_led;
 
 typedef struct {
+	rift_led *points;
+	uint8_t num_points;
+} rift_leds;
+
+typedef struct {
 	vec3f imu_position;
 	float gyro_calibration[12];
 	float acc_calibration[12];
@@ -195,6 +200,7 @@ typedef struct {
 	bool middle_flipped;
 	uint16_t cap_sense_min[8];
 	uint16_t cap_sense_touch[8];
+	rift_leds leds;
 } rift_touch_calibration;
 
 typedef struct rift_hmd_s rift_hmd_t;
@@ -337,4 +343,6 @@ void dump_packet_sensor_config(const pkt_sensor_config* config);
 void dump_packet_sensor_display_info(const pkt_sensor_display_info* info);
 void dump_packet_tracker_sensor(const pkt_tracker_sensor* sensor);
 
+void rift_leds_init (rift_leds *leds, uint8_t num_points);
+void rift_leds_clear (rift_leds *leds);
 #endif

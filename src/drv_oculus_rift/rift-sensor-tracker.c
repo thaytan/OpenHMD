@@ -28,8 +28,7 @@ struct rift_sensor_ctx_s
   libusb_context *usb_ctx;
 	libusb_device_handle *usb_devh;
 
-  rift_led *leds;
-	uint8_t num_leds;
+  rift_leds *leds;
   uint8_t led_pattern_phase;
 
   int stream_started;
@@ -53,8 +52,8 @@ void tracker_process_blobs(rift_sensor_ctx *ctx)
   /*
    * Estimate initial pose without previously known [rot|trans].
    */
-  if (estimate_initial_pose(bwobs->blobs, bwobs->num_blobs, ctx->leds,
-            ctx->num_leds, camera_matrix, dist_coeffs, &rot, &trans,
+  if (estimate_initial_pose(bwobs->blobs, bwobs->num_blobs, ctx->leds->points,
+            ctx->leds->num_points, camera_matrix, dist_coeffs, &rot, &trans,
             true)) {
     printf ("Got PnP pose quat %f %f %f %f  pos %f %f %f\n",
             rot.x, rot.y, rot.z, rot.w,
@@ -123,7 +122,7 @@ static void new_frame_cb(struct rift_sensor_uvc_stream *stream)
 	uint8_t led_pattern_phase = 0;
 
 	blobwatch_process(sensor_ctx->bw, stream->frame, width, height,
-		led_pattern_phase, sensor_ctx->leds, sensor_ctx->num_leds,
+		led_pattern_phase, sensor_ctx->leds->points, sensor_ctx->leds->num_points,
 		&sensor_ctx->bwobs);
 
 	if (sensor_ctx->bwobs)
@@ -149,14 +148,13 @@ static void new_frame_cb(struct rift_sensor_uvc_stream *stream)
 
 int
 rift_sensor_tracker_init (rift_sensor_ctx **ctx,
-		const uint8_t radio_id[5], rift_led *leds, uint8_t num_leds)
+		const uint8_t radio_id[5], rift_leds *leds)
 {
   rift_sensor_ctx *sensor_ctx = NULL;
   int ret;
 
   sensor_ctx = calloc(1, sizeof (rift_sensor_ctx));
 	sensor_ctx->leds = leds;
-	sensor_ctx->num_leds = num_leds;
 
   ret = libusb_init(&sensor_ctx->usb_ctx);
   ASSERT_MSG(ret >= 0, "could not initialize libusb\n");

@@ -55,8 +55,7 @@ struct rift_hmd_s {
 	} imu;
 
 	uint8_t radio_address[5];
-	rift_led *leds;
-	uint8_t num_leds;
+	rift_leds leds;
 
 	uint16_t remote_buttons_state;
 
@@ -589,6 +588,20 @@ static void close_device(ohmd_device* device)
 	release_hmd (dev_priv->hmd);
 }
 
+void
+rift_leds_init (rift_leds *leds, uint8_t num_points)
+{
+	leds->points = calloc(num_points, sizeof(rift_led));
+	leds->num_points = num_points;
+}
+
+void
+rift_leds_clear (rift_leds *leds)
+{
+	free (leds->points);
+	leds->points = NULL;
+}
+
 /*
  * Obtains the positions and blinking patterns of the IR LEDs from the Rift.
  */
@@ -611,7 +624,7 @@ static int rift_get_led_info(rift_hmd_t *priv)
 
 		if (first_index < 0) {
 			first_index = pos.index;
-			priv->leds = calloc(pos.num, sizeof(rift_led));
+			rift_leds_init (&priv->leds, pos.num);
 		}
 
 		if (pos.flags == 1) { //reports 0's
@@ -620,20 +633,21 @@ static int rift_get_led_info(rift_hmd_t *priv)
 			priv->imu.pos.z = (float)pos.pos_z;
 			LOGV ("IMU index %d pos x/y/x %d/%d/%d\n", pos.index, pos.pos_x, pos.pos_y, pos.pos_z);
 		} else if (pos.flags == 2) {
-			rift_led *led = &priv->leds[pos.index];
+			rift_led *led = &priv->leds.points[pos.index];
 			led->pos.x = (float)pos.pos_x;
 			led->pos.y = (float)pos.pos_y;
 			led->pos.z = (float)pos.pos_z;
 			led->dir.x = (float)pos.dir_x;
 			led->dir.y = (float)pos.dir_y;
 			led->dir.z = (float)pos.dir_z;
+			led->pattern = 0xff;
 			ovec3f_normalize_me(&led->dir);
 			if (pos.index >= num_leds)
 				num_leds = pos.index + 1;
 			LOGV ("LED index %d pos x/y/x %d/%d/%d\n", pos.index, pos.pos_x, pos.pos_y, pos.pos_z);
 		}
 	}
-	priv->num_leds = num_leds;
+	priv->leds.num_points = num_leds;
 
 	// Get LED patterns
 	first_index = -1;
@@ -650,13 +664,13 @@ static int rift_get_led_info(rift_hmd_t *priv)
 
 		if (first_index < 0) {
 			first_index = pkt.index;
-			if (priv->num_leds != pkt.num) {
-				LOGE("LED positions count doesn't match pattern count - got %d patterns for %d LEDs", pkt.num, priv->num_leds);
+			if (priv->leds.num_points != pkt.num) {
+				LOGE("LED positions count doesn't match pattern count - got %d patterns for %d LEDs", pkt.num, priv->leds.num_points);
 				return -1;
 			}
 		}
-		if (pkt.index >= priv->num_leds) {
-			LOGE("Invalid LED pattern index %d (%d LEDs)", pkt.index, priv->num_leds);
+		if (pkt.index >= priv->leds.num_points) {
+			LOGE("Invalid LED pattern index %d (%d LEDs)", pkt.index, priv->leds.num_points);
 			return -1;
 		}
 
@@ -691,7 +705,7 @@ static int rift_get_led_info(rift_hmd_t *priv)
 		pattern |= pattern >> 8;
 		pattern = (pattern >> 1) & 0x3ff;
 
-		priv->leds[pkt.index].pattern = pattern;
+		priv->leds.points[pkt.index].pattern = pattern;
 	}
 
 	return 0;
@@ -971,8 +985,7 @@ static rift_hmd_t *open_hmd(ohmd_driver* driver, ohmd_device_desc* desc)
 	hmd_dev->hmd = priv;
 
 	// Find and attach Rift sensors if available
-	rift_sensor_tracker_init (&priv->sensor_ctx, priv->radio_address,
-			priv->leds, priv->num_leds);
+	rift_sensor_tracker_init (&priv->sensor_ctx, priv->radio_address, &priv->leds);
 
 	// initialize sensor fusion
 	ofusion_init(&priv->sensor_fusion);
@@ -987,8 +1000,10 @@ cleanup:
 
 static void close_hmd(rift_hmd_t *hmd)
 {
-	if (hmd->leds)
-		free (hmd->leds);
+	rift_touch_clear_calibration (&hmd->touch_dev[0].calibration);
+	rift_touch_clear_calibration (&hmd->touch_dev[1].calibration);
+
+	rift_leds_clear (&hmd->leds);
 
 	if (hmd->sensor_ctx)
 		rift_sensor_tracker_free(hmd->sensor_ctx);
