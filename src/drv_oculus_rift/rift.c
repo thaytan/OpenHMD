@@ -500,6 +500,7 @@ static int getf_hmd(rift_hmd_t *hmd, ohmd_float_value type, float* out)
 		}
 
 	case OHMD_ROTATION_QUAT: {
+			//*(quatf*)out = hmd->touch_dev[0].imu_fusion.orient;
 			*(quatf*)out = hmd->sensor_fusion.orient;
 			break;
 		}
@@ -1127,8 +1128,22 @@ static void get_device_list(ohmd_driver* driver, ohmd_device_list* list)
 				desc->driver_ptr = driver;
 				desc->id = id++;
 
-				/* For CV1, publish touch controllers */
+				/* For CV1, publish devices for the remote and touch controllers */
 				if (desc->revision == REV_CV1) {
+					// Remote Control
+					desc = &list->devices[list->num_devices++];
+					desc->revision = rd[i].rev;
+					desc->driver_ptr = driver;
+					desc->device_class = OHMD_DEVICE_CLASS_CONTROLLER;
+					desc->device_flags = 0;
+					desc->id = 0;
+
+					strcpy(desc->driver, "OpenHMD Rift Driver");
+					strcpy(desc->vendor, "Oculus VR, Inc.");
+					sprintf(desc->product, "%s: Remote Control", rd[i].name);
+
+					strcpy(desc->path, cur_dev->path);
+
 					//Controller 0 (right)
 					desc = &list->devices[list->num_devices++];
 					desc->revision = rd[i].rev;
