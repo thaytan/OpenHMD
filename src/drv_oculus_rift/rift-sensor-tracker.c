@@ -7,6 +7,7 @@
 
 #include <libusb.h>
 #include <stdio.h>
+#include <string.h>
 #include <stdlib.h>
 #include <assert.h>
 
@@ -104,6 +105,17 @@ rift_sensor_get_calibration(rift_sensor_ctx *ctx)
         k[0] = k1; k[1] = k2; k[3] = k3; k[4] = k4;
 
         return 0;
+}
+
+static void dump_bin(const char* label, const unsigned char* data, int length)
+{
+        printf("D %s:\nD ", label);
+        for(int i = 0; i < length; i++){
+                printf("%02x ", data[i]);
+                if((i % 16) == 15)
+                        printf("\nD ");
+        }
+        printf("\n");
 }
 
 static void new_frame_cb(struct rift_sensor_uvc_stream *stream)

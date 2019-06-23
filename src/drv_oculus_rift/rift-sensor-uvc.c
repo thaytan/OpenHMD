@@ -19,6 +19,11 @@
 #define VS_PROBE_CONTROL	1
 #define VS_COMMIT_CONTROL	2
 
+#define RIFT_SENSOR_CLOCK_FREQ	(40000000)
+#define RIFT_SENSOR_WIDTH       1280
+#define RIFT_SENSOR_HEIGHT      960
+#define RIFT_SENSOR_FRAME_SIZE  (RIFT_SENSOR_WIDTH * RIFT_SENSOR_HEIGHT)
+
 struct uvc_probe_commit_control {
 	__le16 bmHint;
 	__u8 bFormatIndex;
@@ -31,13 +36,16 @@ struct uvc_probe_commit_control {
 	__le16 wDelay;
 	__le32 dwMaxVideoFrameSize;
 	__le32 dwMaxPayloadTransferSize;
+	__le32 dwClockFrequency;
+	__u8 bmFramingInfo;
 } __attribute__((packed));
 
 struct uvc_payload_header {
 	__u8 bHeaderLength;
 	__u8 bmHeaderInfo;
 	__le32 dwPresentationTime;
-	__u8 scrSourceClock[6];
+	__le16 wSofCounter;
+	__le32 scrSourceClock;
 } __attribute__((packed));
 
 int rift_sensor_uvc_set_cur(libusb_device_handle *dev, uint8_t interface, uint8_t entity,
@@ -86,8 +94,9 @@ void process_payload(struct rift_sensor_uvc_stream *stream, unsigned char *paylo
 	struct uvc_payload_header *h = (struct uvc_payload_header *)payload;
 	int payload_len;
 	int frame_id;
-	uint32_t pts;
-	bool error;
+	uint32_t pts = (uint32_t)(-1);
+	uint32_t scr = (uint32_t)(-1);
+	bool error, have_pts, have_scr, is_eof;
 
 	if (len == 0)
 		return;
@@ -102,25 +111,37 @@ void process_payload(struct rift_sensor_uvc_stream *stream, unsigned char *paylo
 	payload += h->bHeaderLength;
 	payload_len = len - h->bHeaderLength;
 	frame_id = h->bmHeaderInfo & 0x01;
+	is_eof = h->bmHeaderInfo & 0x02;
+	have_pts = h->bmHeaderInfo & 0x04;
+	have_scr = h->bmHeaderInfo & 0x08;
 	error = h->bmHeaderInfo & 0x40;
 
 	if (error) {
-		printf("frame error\n");
+		printf("UVC frame error\n");
 		return;
 	}
 
-	pts = __le32_to_cpu(h->dwPresentationTime);
-	if (stream->payload_size == 0) {
-		stream->pts = pts;
+	if (have_pts) {
+		pts = __le32_to_cpu(h->dwPresentationTime);
+		if (stream->payload_size != 0 && pts != stream->pts) {
+			printf("UVC PTS changed in-frame at %u bytes. Lost %u ms\n",
+			    stream->payload_size,
+			    (pts - stream->pts * 1000) / RIFT_SENSOR_CLOCK_FREQ);
+			stream->pts = pts;
+		}
+	}
+	if (have_scr) {
+		scr = __le32_to_cpu(h->scrSourceClock);
 	}
 
 	if (frame_id != stream->frame_id) {
 		struct timespec ts;
 		uint64_t time;
 
-		if (stream->payload_size != stream->frame_size) {
-			printf("Dropping short frame: %u < %u\n",
-					stream->payload_size, stream->frame_size);
+		if (stream->payload_size > 0) {
+			printf("UVC Dropping short frame: %u < %u (%d lost)\n",
+			    stream->payload_size, stream->frame_size,
+			    stream->frame_size - stream->payload_size);
 		}
 
 		/* Start of new frame */
@@ -132,16 +153,24 @@ void process_payload(struct rift_sensor_uvc_stream *stream, unsigned char *paylo
 		stream->pts = pts;
 		stream->time = time;
 		stream->payload_size = 0;
+
+#if 0
+		printf ("UVC dt %f PTS %f SCR %f delta %d\n",
+		    (double) (stream->dt) / (1000000000.0),
+		    (double) (pts) / RIFT_SENSOR_CLOCK_FREQ,
+		    (double) (scr) / RIFT_SENSOR_CLOCK_FREQ,
+		    scr - pts);
+#endif
 	} else {
-		if (pts != stream->pts) {
-			printf("PTS changed in-frame at %u!\n",
-			       stream->payload_size);
+		if (stream->payload_size > 0 && have_pts && pts != stream->pts) {
+			//printf("UVC PTS changed in-frame at %u!\n",
+			       //stream->payload_size);
 			stream->pts = pts;
 		}
 	}
 
 	if (stream->payload_size + payload_len > stream->frame_size) {
-		printf("frame buffer overflow: %u %u %u\n",
+		printf("UVC frame buffer overflow: %u + %u > %u\n",
 		       stream->payload_size, payload_len, stream->frame_size);
 		return;
 	}
@@ -153,6 +182,14 @@ void process_payload(struct rift_sensor_uvc_stream *stream, unsigned char *paylo
 	if (stream->payload_size == stream->frame_size) {
 		if (stream->frame_cb)
 			stream->frame_cb(stream);
+		stream->payload_size = 0;
+	}
+
+	if (is_eof) {
+		/* Always restart a frame after eof.
+		 * CV1 sensor never seems to set this
+		 * bit, but others might in the future */
+		stream->payload_size = 0;
 	}
 }
 
@@ -208,7 +245,6 @@ int rift_sensor_uvc_stream_start(libusb_context *ctx, libusb_device_handle *devh
 		.bFormatIndex = 1,
 		.bFrameIndex = 1,
 	};
-	struct uvc_probe_commit_control probe_result;
 	int alt_setting;
 	int ret;
 	int num_packets;
@@ -240,32 +276,25 @@ int rift_sensor_uvc_stream_start(libusb_context *ctx, libusb_device_handle *devh
 	case CV1_PID:
 		control.bFrameIndex = 4;
 		control.dwFrameInterval = __cpu_to_le32(192000);
-		control.dwMaxVideoFrameSize = __cpu_to_le32(1280 * 960);
+		control.dwMaxVideoFrameSize = __cpu_to_le32(RIFT_SENSOR_FRAME_SIZE);
 		control.dwMaxPayloadTransferSize = __cpu_to_le16(3072);
+		control.dwClockFrequency = __cpu_to_le32(RIFT_SENSOR_CLOCK_FREQ);
 
-		stream->stride = 1280;
-		stream->width = 1280;
-		stream->height = 960;
+		stream->stride = RIFT_SENSOR_WIDTH;
+		stream->width = RIFT_SENSOR_WIDTH;
+		stream->height = RIFT_SENSOR_HEIGHT;
 
-		num_packets = 24;
-		packet_size = 16384;
 		alt_setting = 2;
 		break;
 	}
 
 	ret = rift_sensor_uvc_set_cur(devh, 1, 0, VS_PROBE_CONTROL, &control,
 			sizeof control);
-	if (ret < 0) {
-		printf("failed to set PROBE\n");
-		for (int i = 0; i < sizeof control; i++) {
-			printf("%02x ", ((uint8_t *)&control)[i]);
-		}
-		printf("\n");
+	if (ret < 0)
 		return ret;
-	}
 
-	ret = rift_sensor_uvc_get_cur(devh, 1, 0, VS_PROBE_CONTROL, &probe_result,
-			sizeof probe_result);
+	ret = rift_sensor_uvc_get_cur(devh, 1, 0, VS_PROBE_CONTROL, &control,
+			sizeof control);
 	if (ret < 0) {
 		printf("failed to get PROBE\n");
 		return ret;
@@ -278,6 +307,14 @@ int rift_sensor_uvc_stream_start(libusb_context *ctx, libusb_device_handle *devh
 		return ret;
 	}
 
+	control.dwFrameInterval = __le32_to_cpu(control.dwFrameInterval);
+	control.wDelay = __le16_to_cpu(control.wDelay);
+	control.dwMaxVideoFrameSize = __le32_to_cpu(control.dwMaxVideoFrameSize);
+	control.dwClockFrequency = __le32_to_cpu(control.dwClockFrequency);
+
+	control.dwMaxPayloadTransferSize = __le32_to_cpu(control.dwMaxPayloadTransferSize);
+	packet_size = 16384;
+
 	ret = libusb_set_interface_alt_setting(devh, 1, alt_setting);
 	if (ret) {
 		printf("failed to set interface alt setting\n");
@@ -289,7 +326,10 @@ int rift_sensor_uvc_stream_start(libusb_context *ctx, libusb_device_handle *devh
 	if (!stream->frame)
 		return -ENOMEM;
 
-	stream->num_transfers = 7;
+	num_packets = (stream->frame_size + packet_size - 1) / packet_size;
+	stream->num_transfers = (num_packets + 31) / 32;
+	num_packets = num_packets / stream->num_transfers;
+
 	stream->transfer = calloc(stream->num_transfers,
 			sizeof(*stream->transfer));
 	if (!stream->transfer)
