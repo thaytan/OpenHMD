@@ -57,8 +57,24 @@ if host_machine.system() == 'windows'
 else
 	sources += 'src/platform-posix.c'
 endif
+
 c_args = []
 publish_c_args = []
+
+debugging_mode = get_option('debugging_mode')
+have_pipewire = false
+if debugging_mode
+	c_args += '-DOHMD_DEBUGGING_MODE'
+
+	pw_dep = dependency('libpipewire-0.2', version : '>= 0.2.2', required : false)
+	spa_dep = dependency('libspa-0.1', version : '>= 0.2.2', required: false)
+	have_pipewire = debugging_mode and pw_dep.found() and spa_dep.found()
+endif
+
+if have_pipewire
+	add_global_arguments('-DHAVE_PIPEWIRE=1', language : 'c')
+	add_global_arguments('-DHAVE_DEBUG_STREAM=1', language : 'c')
+endif
 
 if get_option('default_library') == 'shared'
 	if host_machine.system() == 'windows'
