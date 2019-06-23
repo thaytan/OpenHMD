@@ -597,6 +597,19 @@ rift_leds_init (rift_leds *leds, uint8_t num_points)
 }
 
 void
+rift_leds_dump (rift_leds *leds, const char *desc)
+{
+	int i;
+	printf ("LED model: %s\n", desc);
+	for (i = 0; i < leds->num_points; i++) {
+		rift_led *p = leds->points + i;
+		printf ("%f;%f;%f;%f;%f;%f;255;255;0;1.0\n",
+		    p->pos.x, p->pos.y, p->pos.z,
+		    p->dir.x, p->dir.y, p->dir.z);
+	}
+}
+
+void
 rift_leds_clear (rift_leds *leds)
 {
 	free (leds->points);
@@ -708,6 +721,8 @@ static int rift_get_led_info(rift_hmd_t *priv)
 
 		priv->leds.points[pkt.index].pattern = pattern;
 	}
+
+	rift_leds_dump (&priv->leds, "HMD LEDs");
 
 	return 0;
 }

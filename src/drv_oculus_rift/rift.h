@@ -344,5 +344,6 @@ void dump_packet_sensor_display_info(const pkt_sensor_display_info* info);
 void dump_packet_tracker_sensor(const pkt_tracker_sensor* sensor);
 
 void rift_leds_init (rift_leds *leds, uint8_t num_points);
+void rift_leds_dump (rift_leds *leds, const char *desc);
 void rift_leds_clear (rift_leds *leds);
 #endif

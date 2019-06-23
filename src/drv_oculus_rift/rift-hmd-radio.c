@@ -273,7 +273,12 @@ int rift_touch_get_calibration(hid_device *handle, int device_id,
 	if (ret < 0)
 		return ret;
 
-	rift_touch_parse_calibration(json, calibration);
+	if (rift_touch_parse_calibration(json, calibration) < 0)
+		return ret;
+
+	char control_name[20];
+	snprintf (control_name, 20, "Controller %u", device_id);
+	rift_leds_dump (&calibration->leds, control_name);
 
 	free(json);
 	return 0;
