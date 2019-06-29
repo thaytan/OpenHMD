@@ -59,7 +59,7 @@ struct rift_hmd_s {
 
 	uint16_t remote_buttons_state;
 
-	rift_sensor_ctx *sensor_ctx;
+	rift_tracker_ctx *tracker_ctx;
 
 	/* OpenHMD output devices */
 	rift_device_priv hmd_dev;
@@ -236,8 +236,8 @@ static void handle_tracker_sensor_msg(rift_hmd_t* priv, unsigned char* buffer, i
 
 	priv->last_imu_timestamp = s->timestamp;
 
-	if (priv->sensor_ctx != NULL)
-		rift_sensor_tracker_new_exposure (priv->sensor_ctx, priv->sensor.led_pattern_phase);
+	if (priv->tracker_ctx != NULL)
+		rift_sensor_tracker_new_exposure (priv->tracker_ctx, priv->sensor.led_pattern_phase);
 }
 
 static void handle_touch_controller_message(rift_hmd_t *hmd,
@@ -1001,7 +1001,7 @@ static rift_hmd_t *open_hmd(ohmd_driver* driver, ohmd_device_desc* desc)
 	hmd_dev->hmd = priv;
 
 	// Find and attach Rift sensors if available
-	rift_sensor_tracker_init (&priv->sensor_ctx, priv->radio_address, &priv->leds);
+	rift_sensor_tracker_init (&priv->tracker_ctx, priv->radio_address, &priv->leds);
 
 	// initialize sensor fusion
 	ofusion_init(&priv->sensor_fusion);
@@ -1021,8 +1021,8 @@ static void close_hmd(rift_hmd_t *hmd)
 
 	rift_leds_clear (&hmd->leds);
 
-	if (hmd->sensor_ctx)
-		rift_sensor_tracker_free(hmd->sensor_ctx);
+	if (hmd->tracker_ctx)
+		rift_sensor_tracker_free(hmd->tracker_ctx);
 	if (hmd->radio_handle)
 		hid_close(hmd->radio_handle);
 	hid_close(hmd->handle);

@@ -21,17 +21,18 @@
 #include "rift-sensor-maths.h"
 #include "rift-sensor-opencv.h"
 
-#define ASSERT_MSG(_v, ...) if(!(_v)){ fprintf(stderr, __VA_ARGS__); exit(1); }
+#define ASSERT_MSG(_v, label, ...) if(!(_v)){ fprintf(stderr, __VA_ARGS__); goto label; }
 #define min(a,b) ((a) < (b) ? (a) : (b))
+
+#define MAX_SENSORS 4
+
+typedef struct rift_sensor_ctx_s rift_sensor_ctx;
 
 struct rift_sensor_ctx_s
 {
-  libusb_context *usb_ctx;
-	libusb_device_handle *usb_devh;
+  rift_tracker_ctx *tracker;
 
-  rift_leds *leds;
-  uint8_t led_pattern_phase;
-
+  libusb_device_handle *usb_devh;
   int stream_started;
   struct rift_sensor_uvc_stream stream;
   struct blobwatch* bw;
@@ -39,6 +40,17 @@ struct rift_sensor_ctx_s
 
   dmat3 camera_matrix;
   double dist_coeffs[5];
+};
+
+struct rift_tracker_ctx_s
+{
+  libusb_context *usb_ctx;
+
+  rift_leds *leds;
+  uint8_t led_pattern_phase;
+
+  rift_sensor_ctx *sensors[MAX_SENSORS];
+  uint8_t n_sensors;
 };
 
 void tracker_process_blobs(rift_sensor_ctx *ctx)
@@ -53,10 +65,10 @@ void tracker_process_blobs(rift_sensor_ctx *ctx)
   /*
    * Estimate initial pose without previously known [rot|trans].
    */
-  if (estimate_initial_pose(bwobs->blobs, bwobs->num_blobs, ctx->leds->points,
-            ctx->leds->num_points, camera_matrix, dist_coeffs, &rot, &trans,
+  if (estimate_initial_pose(bwobs->blobs, bwobs->num_blobs, ctx->tracker->leds->points,
+            ctx->tracker->leds->num_points, camera_matrix, dist_coeffs, &rot, &trans,
             true)) {
-    printf ("Got PnP pose quat %f %f %f %f  pos %f %f %f\n",
+    printf ("sensor %p Got PnP pose quat %f %f %f %f  pos %f %f %f\n", ctx,
             rot.x, rot.y, rot.z, rot.w,
             trans.x, trans.y, trans.z);
   }
@@ -134,8 +146,8 @@ static void new_frame_cb(struct rift_sensor_uvc_stream *stream)
 	uint8_t led_pattern_phase = 0;
 
 	blobwatch_process(sensor_ctx->bw, stream->frame, width, height,
-		led_pattern_phase, sensor_ctx->leds->points, sensor_ctx->leds->num_points,
-		&sensor_ctx->bwobs);
+		led_pattern_phase, sensor_ctx->tracker->leds->points,
+		sensor_ctx->tracker->leds->num_points, &sensor_ctx->bwobs);
 
 	if (sensor_ctx->bwobs)
 	{
@@ -158,28 +170,29 @@ static void new_frame_cb(struct rift_sensor_uvc_stream *stream)
 	}
 }
 
-int
-rift_sensor_tracker_init (rift_sensor_ctx **ctx,
-		const uint8_t radio_id[5], rift_leds *leds)
+
+static void rift_sensor_free (rift_sensor_ctx *sensor_ctx);
+
+static int
+rift_sensor_init (rift_sensor_ctx **ctx, libusb_device_handle *usb_devh,
+    rift_tracker_ctx *tracker, const uint8_t radio_id[5])
 {
   rift_sensor_ctx *sensor_ctx = NULL;
   int ret;
 
   sensor_ctx = calloc(1, sizeof (rift_sensor_ctx));
-	sensor_ctx->leds = leds;
 
-  ret = libusb_init(&sensor_ctx->usb_ctx);
-  ASSERT_MSG(ret >= 0, "could not initialize libusb\n");
-
-  /* FIXME: Traverse USB devices with libusb_get_device_list() */
-  sensor_ctx->usb_devh = libusb_open_device_with_vid_pid(sensor_ctx->usb_ctx, 0x2833, CV1_PID);
-  ASSERT_MSG(sensor_ctx->usb_devh, "could not find or open the Rift sensor camera\n");
+  sensor_ctx->tracker = tracker;
+  sensor_ctx->usb_devh = usb_devh;
 
   sensor_ctx->stream.frame_cb = new_frame_cb;
   sensor_ctx->stream.user_data = sensor_ctx;
 
-  ret = rift_sensor_uvc_stream_start(sensor_ctx->usb_ctx, sensor_ctx->usb_devh, &sensor_ctx->stream);
-  ASSERT_MSG(ret >= 0, "could not start streaming\n");
+  printf ("Found Rift Sensor. Connecting to Radio address 0x%02x%02x%02x%02x%02x\n",
+    radio_id[0], radio_id[1], radio_id[2], radio_id[3], radio_id[4]);
+
+  ret = rift_sensor_uvc_stream_start(sensor_ctx->tracker->usb_ctx, sensor_ctx->usb_devh, &sensor_ctx->stream);
+  ASSERT_MSG(ret >= 0, fail, "could not start streaming\n");
   sensor_ctx->stream_started = 1;
 
   sensor_ctx->bw = blobwatch_new(sensor_ctx->stream.width, sensor_ctx->stream.height);
@@ -187,9 +200,6 @@ rift_sensor_tracker_init (rift_sensor_ctx **ctx,
   ret = rift_sensor_ar0134_init(sensor_ctx->usb_devh);
   if (ret < 0)
     goto fail;
-
-  printf ("Found Rift Sensor. Connecting to Radio address 0x%02x%02x%02x%02x%02x\n",
-    radio_id[0], radio_id[1], radio_id[2], radio_id[3], radio_id[4]);
 
   ret = rift_sensor_esp770u_setup_radio(sensor_ctx->usb_devh, radio_id);
   if (ret < 0)
@@ -205,28 +215,99 @@ rift_sensor_tracker_init (rift_sensor_ctx **ctx,
   return 0;
 
 fail:
-  if (sensor_ctx)
-    rift_sensor_tracker_free (sensor_ctx);
-  return ret;
+	if (sensor_ctx)
+		rift_sensor_free (sensor_ctx);
+	return -1;
 }
 
-void rift_sensor_tracker_new_exposure (rift_sensor_ctx *ctx, uint8_t led_pattern_phase)
+static void
+rift_sensor_free (rift_sensor_ctx *sensor_ctx)
+{
+	if (sensor_ctx == NULL)
+		return;
+
+	if (sensor_ctx->stream_started)
+		rift_sensor_uvc_stream_stop(&sensor_ctx->stream);
+
+	if (sensor_ctx->usb_devh)
+		libusb_close (sensor_ctx->usb_devh);
+	free (sensor_ctx);
+}
+
+int
+rift_sensor_tracker_init (rift_tracker_ctx **ctx,
+		const uint8_t radio_id[5], rift_leds *leds)
+{
+	rift_tracker_ctx *tracker_ctx = NULL;
+	int ret, i;
+	libusb_device **devs;
+
+	tracker_ctx = calloc(1, sizeof (rift_tracker_ctx));
+	tracker_ctx->leds = leds;
+
+	ret = libusb_init(&tracker_ctx->usb_ctx);
+	ASSERT_MSG(ret >= 0, fail, "could not initialize libusb\n");
+
+	ret = libusb_get_device_list(tracker_ctx->usb_ctx, &devs);
+	ASSERT_MSG(ret >= 0, fail, "Could not get USB device list\n");
+
+	for (i = 0; devs[i]; ++i) {
+		struct libusb_device_descriptor desc;
+		libusb_device_handle *usb_devh;
+		rift_sensor_ctx *sensor_ctx = NULL;
+
+		ret = libusb_get_device_descriptor(devs[i], &desc);
+		if (ret < 0)
+			continue; /* Can't access this device */
+		if (desc.idVendor != 0x2833 || desc.idProduct != CV1_PID)
+			continue;
+		ret = libusb_open(devs[i], &usb_devh);
+		if (ret) {
+			fprintf (stderr, "Failed to open Rift Sensor device. Check permissions\n");
+			continue;
+		}
+		if (!rift_sensor_init (&sensor_ctx,
+		    usb_devh, tracker_ctx, radio_id)) {
+
+			tracker_ctx->sensors[tracker_ctx->n_sensors] = sensor_ctx;
+			tracker_ctx->n_sensors++;
+			if (tracker_ctx->n_sensors == MAX_SENSORS)
+				break;
+		}
+	}
+	libusb_free_device_list(devs, 1);
+
+	printf ("Opened %u Rift Sensor cameras\n", tracker_ctx->n_sensors);
+
+	*ctx = tracker_ctx;
+	return 0;
+
+fail:
+	if (tracker_ctx)
+		rift_sensor_tracker_free (tracker_ctx);
+	return ret;
+}
+
+void rift_sensor_tracker_new_exposure (rift_tracker_ctx *ctx, uint8_t led_pattern_phase)
 {
 	ctx->led_pattern_phase = led_pattern_phase;
 }
 
 void
-rift_sensor_tracker_free (rift_sensor_ctx *sensor_ctx)
+rift_sensor_tracker_free (rift_tracker_ctx *tracker_ctx)
 {
-  if (!sensor_ctx)
-    return;
+	int i;
 
-  if (sensor_ctx->stream_started)
-    rift_sensor_uvc_stream_stop(&sensor_ctx->stream);
+	if (!tracker_ctx)
+		return;
 
-  if (sensor_ctx->usb_devh)
-    libusb_close (sensor_ctx->usb_devh);
-  if (sensor_ctx->usb_ctx)
-    libusb_exit (sensor_ctx->usb_ctx);
-  free (sensor_ctx);
+	for (i = 0; i < tracker_ctx->n_sensors; i++) {
+		rift_sensor_ctx *sensor_ctx = tracker_ctx->sensors[i];
+		rift_sensor_free (sensor_ctx);
+	}
+
+	if (tracker_ctx->usb_ctx)
+		libusb_exit (tracker_ctx->usb_ctx);
+
+	free (tracker_ctx);
 }
