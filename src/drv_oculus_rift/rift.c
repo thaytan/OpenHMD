@@ -1019,13 +1019,13 @@ static void close_hmd(rift_hmd_t *hmd)
 	rift_touch_clear_calibration (&hmd->touch_dev[0].calibration);
 	rift_touch_clear_calibration (&hmd->touch_dev[1].calibration);
 
-	rift_leds_clear (&hmd->leds);
-
 	if (hmd->tracker_ctx)
 		rift_sensor_tracker_free(hmd->tracker_ctx);
 	if (hmd->radio_handle)
 		hid_close(hmd->radio_handle);
 	hid_close(hmd->handle);
+
+	rift_leds_clear (&hmd->leds);
 	free(hmd);
 }
 
