@@ -236,8 +236,8 @@ static void *uvc_handle_events(void *arg)
 	return NULL;
 }
 
-int rift_sensor_uvc_stream_start(libusb_context *ctx, libusb_device_handle *devh,
-                     struct rift_sensor_uvc_stream *stream)
+int rift_sensor_uvc_stream_setup (libusb_context *ctx, libusb_device_handle *devh,
+         struct rift_sensor_uvc_stream *stream)
 {
 	libusb_device *dev = libusb_get_device(devh);
 	struct libusb_device_descriptor desc;
@@ -350,7 +350,20 @@ int rift_sensor_uvc_stream_start(libusb_context *ctx, libusb_device_handle *devh
 					 num_packets, iso_transfer_cb, stream,
 					 TIMEOUT);
 		libusb_set_iso_packet_lengths(stream->transfer[i], packet_size);
+	}
 
+	stream->ctx = ctx;
+	stream->devh = devh;
+	stream->completed = false;
+
+	return 0;
+}
+
+int rift_sensor_uvc_stream_start(struct rift_sensor_uvc_stream *stream)
+{
+	int ret;
+
+	for (int i = 0; i < stream->num_transfers; i++) {
 		ret = libusb_submit_transfer(stream->transfer[i]);
 		if (ret < 0) {
 			fprintf(stderr, "failed to submit iso transfer %d\n", i);
@@ -358,20 +371,13 @@ int rift_sensor_uvc_stream_start(libusb_context *ctx, libusb_device_handle *devh
 		}
 	}
 
-	stream->ctx = ctx;
-	stream->devh = devh;
-
 	pthread_create(&stream->thread, NULL, uvc_handle_events, stream);
-
-	stream->completed = false;
-
 	return 0;
 }
 
 int rift_sensor_uvc_stream_stop(struct rift_sensor_uvc_stream *stream)
 {
 	int ret;
-	int i;
 
 	ret = libusb_set_interface_alt_setting(stream->devh, 1, 0);
 	if (ret)
@@ -381,11 +387,23 @@ int rift_sensor_uvc_stream_stop(struct rift_sensor_uvc_stream *stream)
 
 	pthread_join(stream->thread, NULL);
 
-	for (i = 0; i < stream->num_transfers; i++)
+	return 0;
+}
+
+int rift_sensor_uvc_stream_clear (struct rift_sensor_uvc_stream *stream)
+{
+	int i;
+
+	for (i = 0; i < stream->num_transfers; i++) {
 		libusb_free_transfer(stream->transfer[i]);
+		stream->transfer[i] = NULL;
+	}
+
 	free(stream->transfer);
+	stream->transfer = NULL;
+
 	free(stream->frame);
+	stream->frame = NULL;
 
 	return 0;
-
 }

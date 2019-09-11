@@ -191,7 +191,10 @@ rift_sensor_init (rift_sensor_ctx **ctx, libusb_device_handle *usb_devh,
   printf ("Found Rift Sensor. Connecting to Radio address 0x%02x%02x%02x%02x%02x\n",
     radio_id[0], radio_id[1], radio_id[2], radio_id[3], radio_id[4]);
 
-  ret = rift_sensor_uvc_stream_start(sensor_ctx->tracker->usb_ctx, sensor_ctx->usb_devh, &sensor_ctx->stream);
+  ret = rift_sensor_uvc_stream_setup (sensor_ctx->tracker->usb_ctx, sensor_ctx->usb_devh, &sensor_ctx->stream);
+  ASSERT_MSG(ret >= 0, fail, "could not prepare for streaming\n");
+
+  ret = rift_sensor_uvc_stream_start (&sensor_ctx->stream);
   ASSERT_MSG(ret >= 0, fail, "could not start streaming\n");
   sensor_ctx->stream_started = 1;
 
@@ -228,6 +231,7 @@ rift_sensor_free (rift_sensor_ctx *sensor_ctx)
 
 	if (sensor_ctx->stream_started)
 		rift_sensor_uvc_stream_stop(&sensor_ctx->stream);
+	rift_sensor_uvc_stream_clear(&sensor_ctx->stream);
 
 	if (sensor_ctx->usb_devh)
 		libusb_close (sensor_ctx->usb_devh);

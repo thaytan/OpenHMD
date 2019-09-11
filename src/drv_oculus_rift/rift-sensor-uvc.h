@@ -33,8 +33,11 @@ int rift_sensor_uvc_set_cur(libusb_device_handle *devh, uint8_t interface, uint8
 int rift_sensor_uvc_get_cur(libusb_device_handle *devh, uint8_t interface, uint8_t entity,
 		uint8_t selector, void *data, uint16_t wLength);
 
-int rift_sensor_uvc_stream_start(libusb_context *ctx, libusb_device_handle *devh,
-                     struct rift_sensor_uvc_stream *stream);
+int rift_sensor_uvc_stream_setup (libusb_context *ctx, libusb_device_handle *devh,
+         struct rift_sensor_uvc_stream *stream);
+int rift_sensor_uvc_stream_clear (struct rift_sensor_uvc_stream *stream);
+
+int rift_sensor_uvc_stream_start(struct rift_sensor_uvc_stream *stream);
 int rift_sensor_uvc_stream_stop(struct rift_sensor_uvc_stream *stream);
 
 #endif /* __UVC_H__ */
