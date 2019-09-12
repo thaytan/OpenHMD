@@ -16,7 +16,7 @@ extern "C" {
 extern "C" bool estimate_initial_pose(struct blob *blobs, int num_blobs,
     rift_led *leds, int num_led_pos,
     dmat3 *camera_matrix, double dist_coeffs[4],
-    dquat *rot, dvec3 *trans, bool use_extrinsic_guess)
+    dquat *rot, dvec3 *trans, int *num_leds_out, bool use_extrinsic_guess)
 {
 	int i, j;
 	int num_leds = 0;
@@ -44,6 +44,7 @@ extern "C" bool estimate_initial_pose(struct blob *blobs, int num_blobs,
 		taken |= (1ULL << blobs[i].led_id);
 		num_leds++;
 	}
+	*num_leds_out = num_leds;
 
 	if (num_leds < 4)
 		return false;

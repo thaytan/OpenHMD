@@ -13,13 +13,14 @@
 bool estimate_initial_pose(struct blob *blobs, int num_blobs,
 			   rift_led *leds, int num_leds,
 			   dmat3 *camera_matrix, double dist_coeffs[4],
-			   dquat *rot, dvec3 *trans, bool use_extrinsic_guess);
+			   dquat *rot, dvec3 *trans, int *num_leds_out,
+			   bool use_extrinsic_guess);
 #else
 static inline
 bool estimate_initial_pose(struct blob *blobs, int num_blobs,
 			   rift_led *leds, int num_leds,
-			   dmat3 *camera_matrix, double dist_coeffs[4],
-			   dquat *rot, dvec3 *trans, bool use_extrinsic_guess)
+			   dquat *rot, dvec3 *trans, int *num_leds_out,
+			   bool use_extrinsic_guess);
 {
 	(void)blobs;
 	(void)num_blobs;
@@ -29,6 +30,7 @@ bool estimate_initial_pose(struct blob *blobs, int num_blobs,
 	(void)dist_coeffs;
 	(void)rot;
 	(void)trans;
+	(void)num_leds_out;
 	(void)use_extrinsic_guess;
   return false;
 }

@@ -30,6 +30,7 @@ typedef struct rift_sensor_ctx_s rift_sensor_ctx;
 
 struct rift_sensor_ctx_s
 {
+  int id;
   rift_tracker_ctx *tracker;
 
   libusb_device_handle *usb_devh;
@@ -61,16 +62,18 @@ void tracker_process_blobs(rift_sensor_ctx *ctx)
  	double dist_coeffs[5] = { 0, };
   dquat rot = { 0, };
 	dvec3 trans = { 0, };
+  int num_leds = 0;
 
   /*
    * Estimate initial pose without previously known [rot|trans].
    */
   if (estimate_initial_pose(bwobs->blobs, bwobs->num_blobs, ctx->tracker->leds->points,
             ctx->tracker->leds->num_points, camera_matrix, dist_coeffs, &rot, &trans,
-            true)) {
-    printf ("sensor %p Got PnP pose quat %f %f %f %f  pos %f %f %f\n", ctx,
+            &num_leds, true)) {
+    printf ("sensor %u Got PnP pose quat %f %f %f %f  pos %f %f %f from %d LEDs\n", ctx->id,
             rot.x, rot.y, rot.z, rot.w,
-            trans.x, trans.y, trans.z);
+            trans.x, trans.y, trans.z,
+	    num_leds);
   }
 }
 
@@ -174,7 +177,7 @@ static void new_frame_cb(struct rift_sensor_uvc_stream *stream)
 static void rift_sensor_free (rift_sensor_ctx *sensor_ctx);
 
 static int
-rift_sensor_init (rift_sensor_ctx **ctx, libusb_device_handle *usb_devh,
+rift_sensor_init (rift_sensor_ctx **ctx, int id, libusb_device_handle *usb_devh,
     rift_tracker_ctx *tracker, const uint8_t radio_id[5])
 {
   rift_sensor_ctx *sensor_ctx = NULL;
@@ -182,6 +185,7 @@ rift_sensor_init (rift_sensor_ctx **ctx, libusb_device_handle *usb_devh,
 
   sensor_ctx = calloc(1, sizeof (rift_sensor_ctx));
 
+  sensor_ctx->id = id;
   sensor_ctx->tracker = tracker;
   sensor_ctx->usb_devh = usb_devh;
 
@@ -270,7 +274,7 @@ rift_sensor_tracker_init (rift_tracker_ctx **ctx,
 			fprintf (stderr, "Failed to open Rift Sensor device. Check permissions\n");
 			continue;
 		}
-		if (!rift_sensor_init (&sensor_ctx,
+		if (!rift_sensor_init (&sensor_ctx, tracker_ctx->n_sensors,
 		    usb_devh, tracker_ctx, radio_id)) {
 
 			tracker_ctx->sensors[tracker_ctx->n_sensors] = sensor_ctx;
