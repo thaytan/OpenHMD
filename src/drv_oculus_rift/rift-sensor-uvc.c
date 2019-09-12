@@ -1,7 +1,6 @@
 #include <asm/byteorder.h>
 #include <errno.h>
 #include <libusb.h>
-#include <pthread.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -226,16 +225,6 @@ static void iso_transfer_cb(struct libusb_transfer *transfer)
 	}
 }
 
-static void *uvc_handle_events(void *arg)
-{
-	struct rift_sensor_uvc_stream *stream = arg;
-
-	while (!stream->completed)
-		libusb_handle_events_completed(stream->ctx, &stream->completed);
-
-	return NULL;
-}
-
 int rift_sensor_uvc_stream_setup (libusb_context *ctx, libusb_device_handle *devh,
          struct rift_sensor_uvc_stream *stream)
 {
@@ -371,7 +360,6 @@ int rift_sensor_uvc_stream_start(struct rift_sensor_uvc_stream *stream)
 		}
 	}
 
-	pthread_create(&stream->thread, NULL, uvc_handle_events, stream);
 	return 0;
 }
 
@@ -384,8 +372,6 @@ int rift_sensor_uvc_stream_stop(struct rift_sensor_uvc_stream *stream)
 		return ret;
 
 	stream->completed = true;
-
-	pthread_join(stream->thread, NULL);
 
 	return 0;
 }

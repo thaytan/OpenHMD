@@ -1,7 +1,6 @@
 #ifndef __UVC_H__
 #define __UVC_H__
 
-#include <pthread.h>
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -24,7 +23,6 @@ struct rift_sensor_uvc_stream {
 	void (*frame_cb)(struct rift_sensor_uvc_stream *stream);
 	libusb_context *ctx;
 	libusb_device_handle *devh;
-	pthread_t thread;
 	void *user_data;
 };
 

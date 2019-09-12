@@ -46,6 +46,8 @@ struct rift_sensor_ctx_s
 struct rift_tracker_ctx_s
 {
   libusb_context *usb_ctx;
+	ohmd_thread* usb_thread;
+	int usb_completed;
 
   rift_leds *leds;
   uint8_t led_pattern_phase;
@@ -176,14 +178,14 @@ static void new_frame_cb(struct rift_sensor_uvc_stream *stream)
 
 static void rift_sensor_free (rift_sensor_ctx *sensor_ctx);
 
-static int
-rift_sensor_init (rift_sensor_ctx **ctx, int id, libusb_device_handle *usb_devh,
+static rift_sensor_ctx *
+rift_sensor_new (ohmd_context* ohmd_ctx, int id, libusb_device_handle *usb_devh,
     rift_tracker_ctx *tracker, const uint8_t radio_id[5])
 {
   rift_sensor_ctx *sensor_ctx = NULL;
   int ret;
 
-  sensor_ctx = calloc(1, sizeof (rift_sensor_ctx));
+  sensor_ctx = ohmd_alloc(ohmd_ctx, sizeof (rift_sensor_ctx));
 
   sensor_ctx->id = id;
   sensor_ctx->tracker = tracker;
@@ -215,16 +217,15 @@ rift_sensor_init (rift_sensor_ctx **ctx, int id, libusb_device_handle *usb_devh,
   ret = rift_sensor_get_calibration(sensor_ctx);
   if (ret < 0) {
     LOGE("Failed to read Rift sensor calibration data");
-    return ret;
+		goto fail;
   }
 
-  *ctx = sensor_ctx;
-  return 0;
+  return sensor_ctx;
 
 fail:
 	if (sensor_ctx)
 		rift_sensor_free (sensor_ctx);
-	return -1;
+	return NULL;
 }
 
 static void
@@ -242,15 +243,25 @@ rift_sensor_free (rift_sensor_ctx *sensor_ctx)
 	free (sensor_ctx);
 }
 
-int
-rift_sensor_tracker_init (rift_tracker_ctx **ctx,
+static unsigned int uvc_handle_events(void *arg)
+{
+	rift_tracker_ctx *tracker_ctx = arg;
+
+	while (!tracker_ctx->usb_completed)
+		libusb_handle_events_completed(tracker_ctx->usb_ctx, &tracker_ctx->usb_completed);
+
+	return 0;
+}
+
+rift_tracker_ctx *
+rift_sensor_tracker_new (ohmd_context* ohmd_ctx,
 		const uint8_t radio_id[5], rift_leds *leds)
 {
 	rift_tracker_ctx *tracker_ctx = NULL;
 	int ret, i;
 	libusb_device **devs;
 
-	tracker_ctx = calloc(1, sizeof (rift_tracker_ctx));
+	tracker_ctx = ohmd_alloc(ohmd_ctx, sizeof (rift_tracker_ctx));
 	tracker_ctx->leds = leds;
 
 	ret = libusb_init(&tracker_ctx->usb_ctx);
@@ -258,6 +269,10 @@ rift_sensor_tracker_init (rift_tracker_ctx **ctx,
 
 	ret = libusb_get_device_list(tracker_ctx->usb_ctx, &devs);
 	ASSERT_MSG(ret >= 0, fail, "Could not get USB device list\n");
+
+	/* Start USB event thread */
+	tracker_ctx->usb_completed = false;
+	tracker_ctx->usb_thread = ohmd_create_thread (ohmd_ctx, uvc_handle_events, tracker_ctx);
 
 	for (i = 0; devs[i]; ++i) {
 		struct libusb_device_descriptor desc;
@@ -274,9 +289,8 @@ rift_sensor_tracker_init (rift_tracker_ctx **ctx,
 			fprintf (stderr, "Failed to open Rift Sensor device. Check permissions\n");
 			continue;
 		}
-		if (!rift_sensor_init (&sensor_ctx, tracker_ctx->n_sensors,
-		    usb_devh, tracker_ctx, radio_id)) {
-
+		sensor_ctx = rift_sensor_new (ohmd_ctx, tracker_ctx->n_sensors, usb_devh, tracker_ctx, radio_id);
+		if (sensor_ctx != NULL) {
 			tracker_ctx->sensors[tracker_ctx->n_sensors] = sensor_ctx;
 			tracker_ctx->n_sensors++;
 			if (tracker_ctx->n_sensors == MAX_SENSORS)
@@ -287,13 +301,12 @@ rift_sensor_tracker_init (rift_tracker_ctx **ctx,
 
 	printf ("Opened %u Rift Sensor cameras\n", tracker_ctx->n_sensors);
 
-	*ctx = tracker_ctx;
-	return 0;
+	return tracker_ctx;
 
 fail:
 	if (tracker_ctx)
 		rift_sensor_tracker_free (tracker_ctx);
-	return ret;
+	return NULL;
 }
 
 void rift_sensor_tracker_new_exposure (rift_tracker_ctx *ctx, uint8_t led_pattern_phase)
@@ -313,6 +326,10 @@ rift_sensor_tracker_free (rift_tracker_ctx *tracker_ctx)
 		rift_sensor_ctx *sensor_ctx = tracker_ctx->sensors[i];
 		rift_sensor_free (sensor_ctx);
 	}
+
+	/* Stop USB event thread */
+	tracker_ctx->usb_completed = true;
+	ohmd_destroy_thread (tracker_ctx->usb_thread);
 
 	if (tracker_ctx->usb_ctx)
 		libusb_exit (tracker_ctx->usb_ctx);
