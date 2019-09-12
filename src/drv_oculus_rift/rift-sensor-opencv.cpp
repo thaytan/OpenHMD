@@ -65,7 +65,8 @@ extern "C" bool estimate_initial_pose(struct blob *blobs, int num_blobs,
 		list_points2d[j].x = blobs[i].x;
 		list_points2d[j].y = blobs[i].y;
 		j++;
-		printf ("LED %d at %d,%d (3D %f %f %f)\n",
+
+		LOGD ("LED %d at %d,%d (3D %f %f %f)\n",
 		    blobs[i].led_id, blobs[i].x, blobs[i].y,
 		    leds[blobs[i].led_id].pos.x,
 		    leds[blobs[i].led_id].pos.y,
@@ -97,8 +98,8 @@ extern "C" bool estimate_initial_pose(struct blob *blobs, int num_blobs,
 	v.z = rvec.at<double>(2) * inorm;
 	dquat_from_axis_angle(rot, &v, angle);
 
-	printf ("Got PnP pose quat %f %f %f %f  pos %f %f %f\n",
+	LOGV ("Got PnP pose quat %f %f %f %f  pos %f %f %f\n",
 	     rot->x, rot->y, rot->z, rot->w,
-       trans->x, trans->y, trans->z);
-  return true;
+	     trans->x, trans->y, trans->z);
+	return true;
 }
