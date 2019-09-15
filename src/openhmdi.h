@@ -134,6 +134,7 @@ struct ohmd_context {
 	uint64_t monotonic_ticks_per_sec;
 
 	char error_msg[OHMD_STR_SIZE];
+	char config_dir[OHMD_STR_SIZE];
 };
 
 // helper functions
@@ -145,6 +146,9 @@ void ohmd_set_default_device_properties(ohmd_device_properties* props);
 void ohmd_calc_default_proj_matrices(ohmd_device_properties* props);
 void ohmd_set_universal_distortion_k(ohmd_device_properties* props, float a, float b, float c, float d);
 void ohmd_set_universal_aberration_k(ohmd_device_properties* props, float r, float g, float b);
+
+const char *ohmd_get_config_dir(ohmd_context *ctx);
+int ohmd_get_config(ohmd_context *ctx, const char *key, char **out_buf, unsigned long *out_len);
 
 // drivers
 ohmd_driver* ohmd_create_dummy_drv(ohmd_context* ctx);

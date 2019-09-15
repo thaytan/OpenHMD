@@ -19,6 +19,7 @@
 #include <time.h>
 #include <sys/time.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <pthread.h>
 #include <string.h>
 #include <errno.h>
@@ -233,6 +234,28 @@ int ohmd_read_file(const char* filename, char **out_buf, unsigned long *out_len)
 fail:
 	fclose(f);
 	return ret;
+}
+
+const char *ohmd_get_config_dir(ohmd_context *ctx)
+{
+  char *env;
+
+  if (ctx->config_dir[0] != 0)
+    return ctx->config_dir;
+
+  env = getenv("XDG_CONFIG_HOME");
+  if (env) {
+    snprintf (ctx->config_dir, OHMD_STR_SIZE, "%s/openhmd", env);
+    return ctx->config_dir;
+  }
+  env = getenv("HOME");
+  if (env) {
+    snprintf (ctx->config_dir, OHMD_STR_SIZE, "%s/.config/openhmd", env);
+    return ctx->config_dir;
+  }
+
+  snprintf (ctx->config_dir, OHMD_STR_SIZE, "/tmp/openhmd");
+  return ctx->config_dir;
 }
 
 #endif

@@ -598,6 +598,19 @@ void ohmd_set_universal_aberration_k(ohmd_device_properties* props, float r, flo
 	props->universal_aberration_k[2] = b;
 }
 
+int ohmd_get_config(ohmd_context *ctx, const char *key, char **out_buf, unsigned long *out_len)
+{
+	char filename[OHMD_STR_SIZE];
+
+  /* TODO: Check that the key is a valid filename */
+	if (snprintf (filename, OHMD_STR_SIZE, "%s/%s", ohmd_get_config_dir(ctx), key) >= OHMD_STR_SIZE) {
+		ohmd_set_error (ctx, "Could not read config file");
+		return -1;
+	}
+
+  return ohmd_read_file (filename, out_buf, out_len);
+}
+
 uint64_t ohmd_monotonic_per_sec(ohmd_context* ctx)
 {
 	return ctx->monotonic_ticks_per_sec;
