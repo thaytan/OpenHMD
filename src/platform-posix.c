@@ -21,6 +21,7 @@
 #include <stdio.h>
 #include <pthread.h>
 #include <string.h>
+#include <errno.h>
 
 #include "platform.h"
 #include "openhmdi.h"
@@ -188,4 +189,50 @@ int findEndPoint(char* path, int endpoint)
 	}
 	return 0;
 }
+
+int ohmd_read_file(const char* filename, char **out_buf, unsigned long *out_len)
+{
+	FILE* f = fopen(filename, "rb");
+  long file_len, total_read = 0;
+  char *buffer;
+  int ret;
+
+  if (f == NULL)
+    return errno;
+
+	ret = fseek(f, 0, SEEK_END);
+  if (ret != 0)
+    goto fail;
+
+	file_len = ftell(f);
+  if (file_len < 0) {
+    ret = errno;
+    goto fail;
+  }
+
+	ret = fseek(f, 0, SEEK_SET);
+
+	buffer = malloc(file_len + 1);
+  buffer[file_len] = 0;
+
+  while (total_read < file_len) {
+	  size_t n_read = fread(buffer, file_len, 1, f);
+    if (n_read > 0) {
+      total_read += file_len;
+    } else {
+      if (feof(f))
+        break;
+      ret = errno;
+      if (ret != EINTR)
+        goto fail;
+    }
+  }
+
+  *out_buf = buffer;
+  *out_len = (unsigned long) file_len;
+fail:
+	fclose(f);
+	return ret;
+}
+
 #endif

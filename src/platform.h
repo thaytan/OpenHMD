@@ -28,6 +28,8 @@ void ohmd_unlock_mutex(ohmd_mutex* mutex);
 ohmd_thread* ohmd_create_thread(ohmd_context* ctx, unsigned int (*routine)(void* arg), void* arg);
 void ohmd_destroy_thread(ohmd_thread* thread);
 
+int ohmd_read_file(const char* filename, char **out_buf, unsigned long *out_len);
+
 /* String functions */
 
 int findEndPoint(char* path, int endpoint);
