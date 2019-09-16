@@ -194,31 +194,37 @@ rift_sensor_new (ohmd_context* ohmd_ctx, int id, libusb_device_handle *usb_devh,
   sensor_ctx->stream.frame_cb = new_frame_cb;
   sensor_ctx->stream.user_data = sensor_ctx;
 
-  printf ("Found Rift Sensor. Connecting to Radio address 0x%02x%02x%02x%02x%02x\n",
-    radio_id[0], radio_id[1], radio_id[2], radio_id[3], radio_id[4]);
+  printf ("Found Rift Sensor %d. Connecting to Radio address 0x%02x%02x%02x%02x%02x\n",
+    id, radio_id[0], radio_id[1], radio_id[2], radio_id[3], radio_id[4]);
 
   ret = rift_sensor_uvc_stream_setup (sensor_ctx->tracker->usb_ctx, sensor_ctx->usb_devh, &sensor_ctx->stream);
   ASSERT_MSG(ret >= 0, fail, "could not prepare for streaming\n");
 
+  sensor_ctx->bw = blobwatch_new(sensor_ctx->stream.width, sensor_ctx->stream.height);
+
+  LOGI("Sensor %d starting stream\n", id);
   ret = rift_sensor_uvc_stream_start (&sensor_ctx->stream);
   ASSERT_MSG(ret >= 0, fail, "could not start streaming\n");
   sensor_ctx->stream_started = 1;
 
-  sensor_ctx->bw = blobwatch_new(sensor_ctx->stream.width, sensor_ctx->stream.height);
-
+  LOGV("Sensor %d enabling exposure sync\n", id);
   ret = rift_sensor_ar0134_init(sensor_ctx->usb_devh);
   if (ret < 0)
     goto fail;
 
+  LOGV("Sensor %d - setting up radio\n", id);
   ret = rift_sensor_esp770u_setup_radio(sensor_ctx->usb_devh, radio_id);
   if (ret < 0)
     goto fail;
 
+  LOGV("Sensor %d - reading Calibration\n", id);
   ret = rift_sensor_get_calibration(sensor_ctx);
   if (ret < 0) {
-    LOGE("Failed to read Rift sensor calibration data");
-		goto fail;
+	LOGE("Failed to read Rift sensor calibration data");
+	goto fail;
   }
+
+  LOGI("Sensor %d ready\n", id);
 
   return sensor_ctx;
 
