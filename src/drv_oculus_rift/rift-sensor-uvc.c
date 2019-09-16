@@ -200,7 +200,9 @@ static void iso_transfer_cb(struct libusb_transfer *transfer)
 
 	/* Handle error conditions */
 	if (transfer->status != LIBUSB_TRANSFER_COMPLETED) {
-		printf("transfer error: %u\n", transfer->status);
+		if (transfer->status != LIBUSB_TRANSFER_CANCELLED)
+			printf("transfer error: %u\n", transfer->status);
+		stream->active_transfers--;
 		return;
 	}
 
@@ -214,8 +216,11 @@ static void iso_transfer_cb(struct libusb_transfer *transfer)
 		process_payload(stream, payload, payload_len);
 	}
 
-	if (stream->completed)
+	if (stream->completed) {
+		/* Not resubmitting. Reduce transfer count */
+		stream->active_transfers--;
 		return;
+	}
 
 	/* Resubmit transfer */
 	ret = libusb_submit_transfer(transfer);
@@ -352,10 +357,12 @@ int rift_sensor_uvc_stream_start(struct rift_sensor_uvc_stream *stream)
 {
 	int ret;
 
+	stream->active_transfers = stream->num_transfers;
 	for (int i = 0; i < stream->num_transfers; i++) {
 		ret = libusb_submit_transfer(stream->transfer[i]);
 		if (ret < 0) {
-			fprintf(stderr, "failed to submit iso transfer %d\n", i);
+			fprintf(stderr, "failed to submit iso transfer %d. Error %d\n", i, ret);
+			stream->active_transfers--;
 			return ret;
 		}
 	}
@@ -372,6 +379,16 @@ int rift_sensor_uvc_stream_stop(struct rift_sensor_uvc_stream *stream)
 		return ret;
 
 	stream->completed = true;
+
+	for (int i = 0; i < stream->num_transfers; i++) {
+		if (ret < 0)
+			fprintf(stderr, "failed to cancel iso transfer %d. Error %d\n", i, ret);
+	}
+
+	while (stream->active_transfers > 0) {
+		if (libusb_try_lock_events (stream->ctx))
+			libusb_unlock_events (stream->ctx);
+	}
 
 	return 0;
 }
