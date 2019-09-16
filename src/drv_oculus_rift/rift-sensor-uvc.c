@@ -206,6 +206,12 @@ static void iso_transfer_cb(struct libusb_transfer *transfer)
 		return;
 	}
 
+	if (stream->completed) {
+		/* Not resubmitting. Reduce transfer count */
+		stream->active_transfers--;
+		return;
+	}
+
 	/* Handle contained isochronous packets */
 	for (i = 0; i < transfer->num_iso_packets; i++) {
 		unsigned char *payload;
@@ -214,12 +220,6 @@ static void iso_transfer_cb(struct libusb_transfer *transfer)
 		payload = libusb_get_iso_packet_buffer_simple(transfer, i);
 		payload_len = transfer->iso_packet_desc[i].actual_length;
 		process_payload(stream, payload, payload_len);
-	}
-
-	if (stream->completed) {
-		/* Not resubmitting. Reduce transfer count */
-		stream->active_transfers--;
-		return;
 	}
 
 	/* Resubmit transfer */
