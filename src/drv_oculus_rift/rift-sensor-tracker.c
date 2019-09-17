@@ -22,6 +22,7 @@
 #include "rift-sensor-opencv.h"
 
 #include "kalman.h"
+#include "ohmd-pipewire.h"
 
 #define ASSERT_MSG(_v, label, ...) if(!(_v)){ fprintf(stderr, __VA_ARGS__); goto label; }
 #define min(a,b) ((a) < (b) ? (a) : (b))
@@ -55,6 +56,7 @@ struct rift_sensor_ctx_s
 
 	vec3f led_out_points[MAX_OBJECT_LEDS];
 
+  ohmd_pw_video_stream *debug_vid;
 };
 
 struct rift_tracker_ctx_s
@@ -275,6 +277,8 @@ static void new_frame_cb(struct rift_sensor_uvc_stream *stream)
 			}
 #endif
 	}
+  if (sensor_ctx->debug_vid)
+    ohmd_pw_video_stream_push (sensor_ctx->debug_vid, stream->frame);
 }
 
 
@@ -306,6 +310,8 @@ rift_sensor_new (ohmd_context* ohmd_ctx, int id, libusb_device_handle *usb_devh,
 
   ret = rift_sensor_uvc_stream_setup (sensor_ctx->tracker->usb_ctx, sensor_ctx->usb_devh, &sensor_ctx->stream);
   ASSERT_MSG(ret >= 0, fail, "could not prepare for streaming\n");
+
+  sensor_ctx->debug_vid = ohmd_pw_video_stream_new (sensor_ctx->stream.width, sensor_ctx->stream.height, 625, 12);
 
   sensor_ctx->bw = blobwatch_new(sensor_ctx->stream.width, sensor_ctx->stream.height);
 
@@ -352,6 +358,10 @@ rift_sensor_free (rift_sensor_ctx *sensor_ctx)
 		
 	if (sensor_ctx->stream_started)
 		rift_sensor_uvc_stream_stop(&sensor_ctx->stream);
+
+  if (sensor_ctx->debug_vid != NULL)
+    ohmd_pw_video_stream_free (sensor_ctx->debug_vid);
+
 	rift_sensor_uvc_stream_clear(&sensor_ctx->stream);
 
 	if (sensor_ctx->usb_devh)
