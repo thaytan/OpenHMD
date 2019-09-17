@@ -307,7 +307,9 @@ void ohmd_pw_video_stream_push (ohmd_pw_video_stream *v, uint8_t *pixels)
 		struct spa_buffer *b;
 		void *p;
 
+		pw_thread_loop_lock (gdata->thread);
 		buf = pw_stream_dequeue_buffer(v->stream);
+		pw_thread_loop_unlock (gdata->thread);
 		if (buf == NULL)
 			return;
 
@@ -328,5 +330,7 @@ void ohmd_pw_video_stream_push (ohmd_pw_video_stream *v, uint8_t *pixels)
 		b->datas[0].chunk->size = b->datas[0].maxsize;
 
 done:
+		pw_thread_loop_lock (gdata->thread);
 		pw_stream_queue_buffer(v->stream, buf);
+		pw_thread_loop_unlock (gdata->thread);
 }
