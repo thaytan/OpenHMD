@@ -36,6 +36,8 @@ struct rift_sensor_ctx_s
   libusb_device_handle *usb_devh;
   int stream_started;
   struct rift_sensor_uvc_stream stream;
+  uint64_t frame_sof_ts;
+  uint64_t led_pattern_sof_ts;
   uint8_t led_pattern_phase;
   struct blobwatch* bw;
 	struct blobservation* bwobs;
@@ -46,6 +48,7 @@ struct rift_sensor_ctx_s
 
 struct rift_tracker_ctx_s
 {
+	ohmd_context* ohmd_ctx;
   libusb_context *usb_ctx;
 	ohmd_mutex *tracker_lock;
 
@@ -54,12 +57,13 @@ struct rift_tracker_ctx_s
 
   rift_leds *leds;
   uint8_t led_pattern_phase;
+  uint64_t led_pattern_phase_ts;
 
   rift_sensor_ctx *sensors[MAX_SENSORS];
   uint8_t n_sensors;
 };
 
-static uint8_t rift_sensor_tracker_get_led_pattern_phase (rift_tracker_ctx *ctx);
+static uint8_t rift_sensor_tracker_get_led_pattern_phase (rift_tracker_ctx *ctx, uint64_t *ts);
 
 void tracker_process_blobs(rift_sensor_ctx *ctx)
 {
@@ -143,9 +147,19 @@ static void dump_bin(const char* label, const unsigned char* data, int length)
 static void new_frame_start_cb(struct rift_sensor_uvc_stream *stream)
 {
 	rift_sensor_ctx *sensor_ctx = stream->user_data;
-	uint8_t led_pattern_phase = rift_sensor_tracker_get_led_pattern_phase (sensor_ctx->tracker);
-	LOGV("Sensor %d SOF phase %d\n", sensor_ctx->id, led_pattern_phase);
+	rift_tracker_ctx *tracker_ctx = sensor_ctx->tracker;
+
+	uint64_t now = ohmd_monotonic_get(tracker_ctx->ohmd_ctx);
+	uint64_t phase_ts;
+	uint8_t led_pattern_phase = rift_sensor_tracker_get_led_pattern_phase (sensor_ctx->tracker, &phase_ts);
+
+	LOGD ("%f ms Sensor %d SOF phase %d\n",
+		(double) (ohmd_monotonic_get(sensor_ctx->tracker->ohmd_ctx)) / 1000000.0,
+		sensor_ctx->id, led_pattern_phase);
+
 	sensor_ctx->led_pattern_phase = led_pattern_phase;
+	sensor_ctx->led_pattern_sof_ts = phase_ts;
+	sensor_ctx->frame_sof_ts = now;
 }
 
 static void new_frame_cb(struct rift_sensor_uvc_stream *stream)
@@ -159,10 +173,35 @@ static void new_frame_cb(struct rift_sensor_uvc_stream *stream)
 
 	rift_sensor_ctx *sensor_ctx = stream->user_data;
 	assert (sensor_ctx);
+	rift_tracker_ctx *tracker_ctx = sensor_ctx->tracker;
 
 	/* led pattern phase comes from sensor reports */
 	uint8_t led_pattern_phase = sensor_ctx->led_pattern_phase;
-	LOGV("Sensor %d Frame phase %d\n", sensor_ctx->id, led_pattern_phase);
+	uint64_t cur_phase_ts;
+	uint8_t cur_led_pattern_phase = rift_sensor_tracker_get_led_pattern_phase (sensor_ctx->tracker, &cur_phase_ts);
+
+	if (cur_led_pattern_phase != led_pattern_phase) {
+		/* The LED phase changed mid-frame. Choose which one to keep */
+		uint64_t now = ohmd_monotonic_get(tracker_ctx->ohmd_ctx);
+		uint64_t frame_midpoint = sensor_ctx->frame_sof_ts + (now - sensor_ctx->frame_sof_ts)/2;
+		uint8_t chosen_phase;
+
+		if (cur_phase_ts < frame_midpoint) {
+			chosen_phase = cur_led_pattern_phase;
+		} else {
+			chosen_phase = led_pattern_phase;
+		}
+
+		LOGD ("%f Sensor %d Frame (sof %f) phase mismatch old %d new %d (@ %f) chose %d\n",
+			(double) (now) / 1000000.0, sensor_ctx->id,
+			(double) (sensor_ctx->led_pattern_sof_ts) / 1000000.0,
+			led_pattern_phase, cur_led_pattern_phase,
+			(double) (cur_phase_ts) / 1000000.0,
+			chosen_phase);
+		led_pattern_phase = chosen_phase;
+	}
+
+	LOGV ("Sensor %d Handling frame phase %d\n", sensor_ctx->id, led_pattern_phase);
 
 	blobwatch_process(sensor_ctx->bw, stream->frame, width, height,
 		led_pattern_phase, sensor_ctx->tracker->leds->points,
@@ -172,7 +211,7 @@ static void new_frame_cb(struct rift_sensor_uvc_stream *stream)
 	{
 		if (sensor_ctx->bwobs->num_blobs > 0)
 		{
-			tracker_process_blobs (sensor_ctx); 
+			tracker_process_blobs (sensor_ctx);
 #if 0
 			printf("Sensor %d phase %d Blobs: %d\n", sensor_ctx->id, led_pattern_phase, sensor_ctx->bwobs->num_blobs);
 
@@ -286,6 +325,7 @@ rift_sensor_tracker_new (ohmd_context* ohmd_ctx,
 	libusb_device **devs;
 
 	tracker_ctx = ohmd_alloc(ohmd_ctx, sizeof (rift_tracker_ctx));
+	tracker_ctx->ohmd_ctx = ohmd_ctx;
 	tracker_ctx->leds = leds;
 	tracker_ctx->tracker_lock = ohmd_create_mutex(ohmd_ctx);
 
@@ -335,11 +375,13 @@ fail:
 }
 
 static uint8_t
-rift_sensor_tracker_get_led_pattern_phase (rift_tracker_ctx *ctx) {
+rift_sensor_tracker_get_led_pattern_phase (rift_tracker_ctx *ctx, uint64_t *ts) {
 	uint8_t led_pattern_phase;
 
 	ohmd_lock_mutex (ctx->tracker_lock);
 	led_pattern_phase = ctx->led_pattern_phase;
+	if (ts)
+		*ts = ctx->led_pattern_phase_ts;
 	ohmd_unlock_mutex (ctx->tracker_lock);
 
 	return led_pattern_phase;
@@ -348,9 +390,13 @@ rift_sensor_tracker_get_led_pattern_phase (rift_tracker_ctx *ctx) {
 void rift_sensor_tracker_new_exposure (rift_tracker_ctx *ctx, uint8_t led_pattern_phase)
 {
 	if (ctx->led_pattern_phase != led_pattern_phase) {
-		LOGV ("LED pattern phase changed to %d\n", led_pattern_phase);
+		uint64_t now = ohmd_monotonic_get(ctx->ohmd_ctx);
+		LOGD ("%f LED pattern phase changed to %d\n",
+			(double) (now) / 1000000.0,
+			led_pattern_phase);
 		ohmd_lock_mutex (ctx->tracker_lock);
 		ctx->led_pattern_phase = led_pattern_phase;
+		ctx->led_pattern_phase_ts = now;
 		ohmd_unlock_mutex (ctx->tracker_lock);
 	}
 }
