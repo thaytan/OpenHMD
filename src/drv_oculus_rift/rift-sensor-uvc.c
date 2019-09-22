@@ -153,6 +153,8 @@ void process_payload(struct rift_sensor_uvc_stream *stream, unsigned char *paylo
 		stream->time = time;
 		stream->payload_size = 0;
 
+		if (stream->sof_cb)
+			stream->sof_cb(stream);
 #if 0
 		printf ("UVC dt %f PTS %f SCR %f delta %d\n",
 		    (double) (stream->dt) / (1000000000.0),

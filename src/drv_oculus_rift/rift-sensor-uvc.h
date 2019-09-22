@@ -21,6 +21,7 @@ struct rift_sensor_uvc_stream {
 	struct libusb_transfer **transfer;
 	int completed;
 	int active_transfers;
+	void (*sof_cb)(struct rift_sensor_uvc_stream *stream);
 	void (*frame_cb)(struct rift_sensor_uvc_stream *stream);
 	libusb_context *ctx;
 	libusb_device_handle *devh;

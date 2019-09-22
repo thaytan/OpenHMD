@@ -36,6 +36,7 @@ struct rift_sensor_ctx_s
   libusb_device_handle *usb_devh;
   int stream_started;
   struct rift_sensor_uvc_stream stream;
+  uint8_t led_pattern_phase;
   struct blobwatch* bw;
 	struct blobservation* bwobs;
 
@@ -46,6 +47,8 @@ struct rift_sensor_ctx_s
 struct rift_tracker_ctx_s
 {
   libusb_context *usb_ctx;
+	ohmd_mutex *tracker_lock;
+
 	ohmd_thread* usb_thread;
 	int usb_completed;
 
@@ -55,6 +58,8 @@ struct rift_tracker_ctx_s
   rift_sensor_ctx *sensors[MAX_SENSORS];
   uint8_t n_sensors;
 };
+
+static uint8_t rift_sensor_tracker_get_led_pattern_phase (rift_tracker_ctx *ctx);
 
 void tracker_process_blobs(rift_sensor_ctx *ctx)
 {
@@ -135,20 +140,29 @@ static void dump_bin(const char* label, const unsigned char* data, int length)
         printf("\n");
 }
 
+static void new_frame_start_cb(struct rift_sensor_uvc_stream *stream)
+{
+	rift_sensor_ctx *sensor_ctx = stream->user_data;
+	uint8_t led_pattern_phase = rift_sensor_tracker_get_led_pattern_phase (sensor_ctx->tracker);
+	LOGV("Sensor %d SOF phase %d\n", sensor_ctx->id, led_pattern_phase);
+	sensor_ctx->led_pattern_phase = led_pattern_phase;
+}
+
 static void new_frame_cb(struct rift_sensor_uvc_stream *stream)
 {
 	int width = stream->width;
 	int height = stream->height;
 
 	if(stream->payload_size != width * height) {
-		printf("bad frame: %d\n", (int)stream->payload_size);
+		LOGW("bad frame: %d\n", (int)stream->payload_size);
 	}
 
 	rift_sensor_ctx *sensor_ctx = stream->user_data;
 	assert (sensor_ctx);
 
-	/* FIXME: Get led pattern phase from sensor reports */
-	uint8_t led_pattern_phase = 0;
+	/* led pattern phase comes from sensor reports */
+	uint8_t led_pattern_phase = sensor_ctx->led_pattern_phase;
+	LOGV("Sensor %d Frame phase %d\n", sensor_ctx->id, led_pattern_phase);
 
 	blobwatch_process(sensor_ctx->bw, stream->frame, width, height,
 		led_pattern_phase, sensor_ctx->tracker->leds->points,
@@ -160,15 +174,18 @@ static void new_frame_cb(struct rift_sensor_uvc_stream *stream)
 		{
 			tracker_process_blobs (sensor_ctx); 
 #if 0
-			printf("Blobs: %d\n", sensor_ctx->bwobs->num_blobs);
+			printf("Sensor %d phase %d Blobs: %d\n", sensor_ctx->id, led_pattern_phase, sensor_ctx->bwobs->num_blobs);
 
 			for (int index = 0; index < sensor_ctx->bwobs->num_blobs; index++)
 			{
-				printf("Blob[%d]: %d,%d id %d\n",
+				printf("Sensor %d Blob[%d]: %d,%d %dx%d id %d pattern %x\n", sensor_ctx->id,
 					index,
 					sensor_ctx->bwobs->blobs[index].x,
 					sensor_ctx->bwobs->blobs[index].y,
-					sensor_ctx->bwobs->blobs[index].led_id);
+					sensor_ctx->bwobs->blobs[index].width,
+					sensor_ctx->bwobs->blobs[index].height,
+					sensor_ctx->bwobs->blobs[index].led_id,
+					sensor_ctx->bwobs->blobs[index].pattern);
 			}
 #endif
 		}
@@ -191,6 +208,7 @@ rift_sensor_new (ohmd_context* ohmd_ctx, int id, libusb_device_handle *usb_devh,
   sensor_ctx->tracker = tracker;
   sensor_ctx->usb_devh = usb_devh;
 
+  sensor_ctx->stream.sof_cb = new_frame_start_cb;
   sensor_ctx->stream.frame_cb = new_frame_cb;
   sensor_ctx->stream.user_data = sensor_ctx;
 
@@ -269,6 +287,7 @@ rift_sensor_tracker_new (ohmd_context* ohmd_ctx,
 
 	tracker_ctx = ohmd_alloc(ohmd_ctx, sizeof (rift_tracker_ctx));
 	tracker_ctx->leds = leds;
+	tracker_ctx->tracker_lock = ohmd_create_mutex(ohmd_ctx);
 
 	ret = libusb_init(&tracker_ctx->usb_ctx);
 	ASSERT_MSG(ret >= 0, fail, "could not initialize libusb\n");
@@ -315,9 +334,25 @@ fail:
 	return NULL;
 }
 
+static uint8_t
+rift_sensor_tracker_get_led_pattern_phase (rift_tracker_ctx *ctx) {
+	uint8_t led_pattern_phase;
+
+	ohmd_lock_mutex (ctx->tracker_lock);
+	led_pattern_phase = ctx->led_pattern_phase;
+	ohmd_unlock_mutex (ctx->tracker_lock);
+
+	return led_pattern_phase;
+}
+
 void rift_sensor_tracker_new_exposure (rift_tracker_ctx *ctx, uint8_t led_pattern_phase)
 {
-	ctx->led_pattern_phase = led_pattern_phase;
+	if (ctx->led_pattern_phase != led_pattern_phase) {
+		LOGV ("LED pattern phase changed to %d\n", led_pattern_phase);
+		ohmd_lock_mutex (ctx->tracker_lock);
+		ctx->led_pattern_phase = led_pattern_phase;
+		ohmd_unlock_mutex (ctx->tracker_lock);
+	}
 }
 
 void
@@ -340,5 +375,6 @@ rift_sensor_tracker_free (rift_tracker_ctx *tracker_ctx)
 	if (tracker_ctx->usb_ctx)
 		libusb_exit (tracker_ctx->usb_ctx);
 
+	ohmd_destroy_mutex (tracker_ctx->tracker_lock);
 	free (tracker_ctx);
 }
