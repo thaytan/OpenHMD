@@ -27,6 +27,10 @@ struct blob {
 	uint32_t age;
 	int16_t track_index;
 	uint16_t pattern;
+
+	uint32_t pattern_age;
+	int8_t pattern_bits[10];
+	int8_t pattern_prev_phase;
 	int8_t led_id;
 };
 

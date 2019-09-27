@@ -101,6 +101,9 @@ static inline void store_blob(struct extent *e, int y, struct blob *b)
 	b->age = 0;
 	b->track_index = -1;
 	b->pattern = 0;
+	b->pattern_age = 0;
+	b->pattern_prev_phase = -1;
+	memset (b->pattern_bits, 0, sizeof (b->pattern_bits));
 	b->led_id = -1;
 }
 
@@ -324,7 +327,10 @@ void blobwatch_process(struct blobwatch *bw, uint8_t *frame,
 				/* Only overwrite tracks that are not already set */
 				b2->track_index = b1->track_index;
 				ob->tracked[b2->track_index] = i + 1;
+				memcpy (b2->pattern_bits, b1->pattern_bits, sizeof (b1->pattern_bits));
 				b2->pattern = b1->pattern;
+				b2->pattern_age = b1->pattern_age;
+				b2->pattern_prev_phase = b1->pattern_prev_phase;
 				b2->led_id = b1->led_id;
 			}
 			b2->vx = b2->x - b1->x;

@@ -217,14 +217,15 @@ static void new_frame_cb(struct rift_sensor_uvc_stream *stream)
 
 			for (int index = 0; index < sensor_ctx->bwobs->num_blobs; index++)
 			{
-				printf("Sensor %d Blob[%d]: %d,%d %dx%d id %d pattern %x\n", sensor_ctx->id,
+				printf("Sensor %d Blob[%d]: %d,%d %dx%d id %d pattern %x age %u\n", sensor_ctx->id,
 					index,
 					sensor_ctx->bwobs->blobs[index].x,
 					sensor_ctx->bwobs->blobs[index].y,
 					sensor_ctx->bwobs->blobs[index].width,
 					sensor_ctx->bwobs->blobs[index].height,
 					sensor_ctx->bwobs->blobs[index].led_id,
-					sensor_ctx->bwobs->blobs[index].pattern);
+					sensor_ctx->bwobs->blobs[index].pattern,
+					sensor_ctx->bwobs->blobs[index].pattern_age);
 			}
 #endif
 		}

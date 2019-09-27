@@ -55,40 +55,89 @@ void rift_sensor_flicker_process(struct blob *blobs, int num_blobs,
 {
 	struct blob *b;
 	int success = 0;
-	int phase = (led_pattern_phase + 1) % 10;
+	uint8_t phase = led_pattern_phase % 10;
+	int thresh = 0;
 
 	for (b = blobs; b < blobs + num_blobs; b++) {
 		uint16_t pattern;
 
 		/* Update pattern only if blob was observed previously */
-		if (b->age < 1)
+		if (b->age < 1 || b->pattern_prev_phase == -1) {
+			b->pattern_prev_phase = phase;
 			continue;
+		}
+
+		if (((phase - b->pattern_prev_phase) % 10) > 2) {
+			/* We can miss one frame and still guess the
+			 * correct transition based on a brightness change,
+			 * but if we missed 2 we might guess wrong, so don't */
+			b->pattern_prev_phase = phase;
+			continue;
+		}
 
 		/*
 		 * Interpret brightness change of more than 10% as rising
-		 * or falling edge. Right shift the pattern and add the
-		 * new brightness level as MSB.
+		 * or falling edge and set/clear the appropriate pattern bit
+		 * and increment / decrement the accumulator. This provides
+		 * some hysteresis against spurious changes in LED id from
+		 * the headset moving, while still providing for reasonably
+		 * quick reacquisition if the ID changes due to mis-tracking.
 		 */
-		pattern = (b->pattern >> 1) & 0x1ff;
-		if (b->area * 10 > b->last_area * 11)
-			pattern |= (1 << 9);
-		else if (b->area * 11 < b->last_area * 10)
-			pattern |= (0 << 9);
-		else
-			pattern |= b->pattern & (1 << 9);
-		b->pattern = pattern;
+		pattern = b->pattern;
+		if (b->area * 10 > b->last_area * 11) {
+			if (b->pattern_bits[phase] < 3)
+				b->pattern_bits[phase]++;
+		} else if (b->area * 11 < b->last_area * 10) {
+			if (b->pattern_bits[phase] > -3)
+				b->pattern_bits[phase]--;
+		}
+		else {
+			/* No change. Bias back toward zero */
+			if (b->pattern_bits[phase] > 0)
+			  b->pattern_bits[phase]--;
+			else if (b->pattern_bits[phase] > 0)
+			  b->pattern_bits[phase]++;
+		}
+
+		/* If we've seen this blob for a while, get more serious about
+		 * the flicker tracking and require a threshold of at least +/- 1 */
+		if (b->age > 9)
+			thresh = 1;
+
+		if (b->pattern_bits[phase] > thresh) {
+			pattern |= (1 << phase);
+		} else if (b->pattern_bits[phase] < -thresh) {
+			pattern &= ~(1 << phase);
+		}
+		else {
+			uint16_t prev_bit = (pattern >> b->pattern_prev_phase) & 0x1;
+			pattern &= ~(1 << phase);
+			pattern |= (prev_bit << phase);
+		}
+
+		b->pattern_prev_phase = phase;
 
 		/*
 		 * Determine LED ID only if a full pattern was recorded and
 		 * consensus about the blinking phase is established
 		 */
-		if (b->age < 9 || phase < 0)
+		if (b->age < 10)
 			continue;
 
-		/* Rotate the pattern bits according to the phase */
-		pattern = ((pattern >> (10 - phase)) | (pattern << phase)) &
-			  0x3ff;
+#if 0
+		printf ("blob %d age %d pattern %x phase %d bits %d %d %d %d %d %d %d %d %d %d\n",
+			(int)((b-blobs)), b->age, pattern, phase,
+			b->pattern_bits[0], b->pattern_bits[1], b->pattern_bits[2],
+			b->pattern_bits[3], b->pattern_bits[4], b->pattern_bits[5],
+			b->pattern_bits[6], b->pattern_bits[7], b->pattern_bits[8],
+			b->pattern_bits[9]);
+#endif
+		if (b->pattern == pattern)
+			b->pattern_age++;
+		else
+			b->pattern_age = 0;
 
+		b->pattern = pattern;
 		success += pattern_find_id(leds, num_leds, pattern,
 					   &b->led_id);
 	}
