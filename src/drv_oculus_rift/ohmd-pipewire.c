@@ -13,7 +13,10 @@
 
 #include "ohmd-pipewire.h"
 
+#define MAX_DEBUG_BLOB_SIZE 8192
+
 typedef struct ohmd_pw_global_data_s ohmd_pw_global_data;
+typedef struct ohmd_pw_base_stream_s ohmd_pw_base_stream;
 
 struct ohmd_pw_types_cache {
 	struct spa_type_media_type media_type;
@@ -36,19 +39,26 @@ struct ohmd_pw_global_data_s {
 	struct spa_hook remote_listener;
 };
 
+struct ohmd_pw_base_stream_s {
+	ohmd_pw_global_data *gdata;
+	struct pw_stream *stream;
+	struct spa_hook listener;
+	enum pw_stream_state state;
+	uint32_t seq;
+};
+
 struct ohmd_pw_video_stream_s {
-		ohmd_pw_global_data *gdata;
+	ohmd_pw_base_stream base;
 
-		int width;
-		int height;
-		int fps_n, fps_d;
+	int width;
+	int height;
+	int fps_n, fps_d;
 
-		struct pw_stream *stream;
-		struct spa_hook listener;
-		struct spa_video_info_raw format;
-		enum pw_stream_state state;
+	struct spa_video_info_raw format;
+};
 
-		uint32_t seq;
+struct ohmd_pw_debug_stream_s {
+		ohmd_pw_base_stream base;
 };
 
 static ohmd_pw_global_data *ohmd_pw_global_data_ptr = NULL;
@@ -80,16 +90,16 @@ static void on_stream_state_changed(void *_data, enum pw_stream_state old, enum 
 }
 
 static void
-on_stream_format_changed(void *_data, const struct spa_pod *format)
+on_video_stream_format_changed(void *_data, const struct spa_pod *format)
 {
 	ohmd_pw_video_stream *v = _data;
-	ohmd_pw_global_data *gdata = v->gdata;
-	struct pw_stream *stream = v->stream;
+	ohmd_pw_global_data *gdata = v->base.gdata;
+	struct pw_stream *stream = v->base.stream;
 	struct pw_type *types = gdata->type_map;
 	uint8_t params_buffer[1024];
 	struct spa_pod_builder b = SPA_POD_BUILDER_INIT(params_buffer, sizeof(params_buffer));
 	const struct spa_pod *params[2];
-  int stride, h;
+	int stride, h;
 
 	if (format == NULL) {
 		pw_stream_finish_format(stream, 0, NULL, 0);
@@ -116,10 +126,10 @@ on_stream_format_changed(void *_data, const struct spa_pod *format)
 	pw_stream_finish_format(stream, 0, params, 2);
 }
 
-static const struct pw_stream_events stream_events = {
+static const struct pw_stream_events video_stream_events = {
 	PW_VERSION_STREAM_EVENTS,
 	.state_changed = on_stream_state_changed,
-	.format_changed = on_stream_format_changed,
+	.format_changed = on_video_stream_format_changed,
 };
 
 static void on_state_changed(void *_data, enum pw_remote_state old, enum pw_remote_state state, const char *error)
@@ -150,9 +160,9 @@ static const struct pw_remote_events remote_events = {
 
 static ohmd_pw_global_data *ohmd_pipewire_global_init()
 {
-  ohmd_pw_global_data *gdata;
+	ohmd_pw_global_data *gdata;
 
-  if (ohmd_pw_global_data_ptr != NULL) {
+	if (ohmd_pw_global_data_ptr != NULL) {
 			ohmd_pw_global_data_ptr->use_count++;
 			return ohmd_pw_global_data_ptr;
 	}
@@ -163,7 +173,7 @@ static ohmd_pw_global_data *ohmd_pipewire_global_init()
 	pw_init(NULL, NULL);
 
 	gdata->loop = pw_loop_new(NULL);
-  gdata->thread = pw_thread_loop_new(gdata->loop, "pipewire-loop");
+	gdata->thread = pw_thread_loop_new(gdata->loop, "pipewire-loop");
 	gdata->core = pw_core_new(gdata->loop, NULL);
 	gdata->type_map = pw_core_get_type(gdata->core);
 	gdata->remote = pw_remote_new(gdata->core, NULL, 0);
@@ -177,16 +187,16 @@ static ohmd_pw_global_data *ohmd_pipewire_global_init()
 	if (pw_thread_loop_start(gdata->thread) != 0) {
 			ohmd_pipewire_global_deinit();
 			return NULL;
-  }
+	}
 
 	return gdata;
 }
 
 static void ohmd_pipewire_global_deinit()
 {
-  ohmd_pw_global_data *gdata = ohmd_pw_global_data_ptr;
+	ohmd_pw_global_data *gdata = ohmd_pw_global_data_ptr;
 
-  if (gdata == NULL || gdata->use_count < 1) {
+	if (gdata == NULL || gdata->use_count < 1) {
 		LOGE ("Pipewire debugging init/deinit mismatch!");
 		return;
 	}
@@ -195,10 +205,10 @@ static void ohmd_pipewire_global_deinit()
 	if (gdata->use_count > 0)
 		return;
 
-  pw_thread_loop_stop(gdata->thread);
+	pw_thread_loop_stop(gdata->thread);
 
 	pw_core_destroy(gdata->core);
-  pw_thread_loop_destroy(gdata->thread);
+	pw_thread_loop_destroy(gdata->thread);
 	pw_loop_destroy(gdata->loop);
 
 	free (gdata);
@@ -208,42 +218,42 @@ static void ohmd_pipewire_global_deinit()
 }
 
 ohmd_pw_video_stream *
-ohmd_pw_video_stream_new (int w, int h, int fps_n, int fps_d)
+ohmd_pw_video_stream_new (const char *stream_id, int w, int h, int fps_n, int fps_d)
 {
-		ohmd_pw_video_stream *ret = NULL;
-		ohmd_pw_global_data *gdata;
+	ohmd_pw_video_stream *ret = NULL;
+	ohmd_pw_base_stream *base = NULL;
+	ohmd_pw_global_data *gdata;
 
-		const struct spa_pod *params[1];
-		uint8_t buffer[1024];
-		struct spa_pod_builder b = SPA_POD_BUILDER_INIT(buffer, sizeof(buffer));
+	const struct spa_pod *params[1];
+	uint8_t buffer[1024];
+	struct spa_pod_builder b = SPA_POD_BUILDER_INIT(buffer, sizeof(buffer));
 
-		/* Start pipewire connection if needed */
-		gdata = ohmd_pipewire_global_init();
-		if (gdata == NULL)
-				goto fail;
+	/* Start pipewire connection if needed */
+	gdata = ohmd_pipewire_global_init();
+	if (gdata == NULL)
+		goto fail;
 
-		/* Create data store */
-	  ret	= calloc (sizeof(ohmd_pw_video_stream), 1);
+	/* Create data store */
+	ret = calloc (sizeof(ohmd_pw_video_stream), 1);
+	base = (ohmd_pw_base_stream *)(ret);
 
-		ret->gdata = gdata;
-		ret->width = w;
-		ret->height = h;
-		ret->fps_n = fps_n;
-		ret->fps_d = fps_d;
+	base->gdata = gdata;
+	ret->width = w;
+	ret->height = h;
+	ret->fps_n = fps_n;
+	ret->fps_d = fps_d;
 
-		/* Publish the stream */
-		pw_thread_loop_lock(gdata->thread);
+	/* Publish the stream */
+	pw_thread_loop_lock(gdata->thread);
 
-		ret->stream = pw_stream_new(gdata->remote,
-				"ohmd-rift-sensor",
-				pw_properties_new(
-					"media.class", "Video/Source",
+	base->stream = pw_stream_new(gdata->remote, stream_id,
+				pw_properties_new("media.class", "Video/Source",
 					PW_NODE_PROP_MEDIA, "Video",
 					PW_NODE_PROP_CATEGORY, "Source",
 					PW_NODE_PROP_ROLE, "Rift Sensor",
 					NULL));
 
-		params[0] = spa_pod_builder_object(&b,
+	params[0] = spa_pod_builder_object(&b,
 			gdata->type_map->param.idEnumFormat, gdata->type_map->spa_format,
 			"I", gdata->types.media_type.video,
 			"I", gdata->types.media_subtype.raw,
@@ -251,86 +261,193 @@ ohmd_pw_video_stream_new (int w, int h, int fps_n, int fps_d)
 			":", gdata->types.format_video.size,      "R", &SPA_RECTANGLE(ret->width, ret->height),
 			":", gdata->types.format_video.framerate, "F", &SPA_FRACTION(ret->fps_n, ret->fps_d));
 
-		pw_stream_add_listener(ret->stream,
-				       &ret->listener,
-				       &stream_events,
-				       ret);
+	pw_stream_add_listener(base->stream, &base->listener, &video_stream_events, ret);
 
-		pw_stream_connect(ret->stream,
-				  PW_DIRECTION_OUTPUT,
-				  NULL,
-				  PW_STREAM_FLAG_DRIVER |
-				  PW_STREAM_FLAG_MAP_BUFFERS,
-				  params, 1);
+	pw_stream_connect(base->stream, PW_DIRECTION_OUTPUT, NULL,
+			  PW_STREAM_FLAG_DRIVER | PW_STREAM_FLAG_MAP_BUFFERS, params, 1);
 
-		pw_thread_loop_unlock(gdata->thread);
-
-		return ret;
+	pw_thread_loop_unlock(gdata->thread);
+	return ret;
 
 fail:
-		if (ret)
-				free (ret);
-		return NULL;
+	if (ret)
+		free (ret);
+	return NULL;
+}
+
+void ohmd_pw_stream_free_common (ohmd_pw_base_stream *s)
+{
+	ohmd_pw_global_data *gdata;
+
+	 if (s == NULL)
+		return;
+
+	gdata = s->gdata;
+
+	/* Stop and unpublish this source */
+	pw_thread_loop_lock (gdata->thread);
+	pw_stream_disconnect(s->stream);
+	pw_stream_destroy(s->stream);
+	pw_thread_loop_unlock(gdata->thread);
+
+	/* Free the struct */
+	free (s);
+	
+	/* Release the global pipewire state */
+	ohmd_pipewire_global_deinit();
 }
 
 void ohmd_pw_video_stream_free (ohmd_pw_video_stream *v)
 {
-		ohmd_pw_global_data *gdata;
-
-    if (v == NULL)
-				return;
-
-		gdata = v->gdata;
-
-		/* Stop and unpublish this source */
-		pw_thread_loop_lock (gdata->thread);
-		pw_stream_disconnect(v->stream);
-		pw_stream_destroy(v->stream);
-		pw_thread_loop_unlock(gdata->thread);
-
-		/* Free the struct */
-		free (v);
-		
-		/* Release the global pipewire state */
-		ohmd_pipewire_global_deinit();
+	ohmd_pw_stream_free_common ((ohmd_pw_base_stream *) v);
 }
 
-void ohmd_pw_video_stream_push (ohmd_pw_video_stream *v, uint8_t *pixels)
+void ohmd_pw_stream_push_common (ohmd_pw_base_stream *base, int64_t pts, const uint8_t *data, size_t data_len)
 {
-		/* Get a buffer from pipewire and copy into it */
-		/* FIXME: When using pipewire support, we could capture directly into pipewire buffers */
-		ohmd_pw_global_data *gdata = v->gdata;
-		struct pw_type *types = gdata->type_map;
+	/* Get a buffer from pipewire and copy into it */
+	/* FIXME: When using pipewire support, we could capture directly into pipewire buffers */
+	ohmd_pw_global_data *gdata = base->gdata;
+	struct pw_type *types = gdata->type_map;
 
-		struct spa_meta_header *h;
-		struct pw_buffer *buf;
-		struct spa_buffer *b;
-		void *p;
+	struct spa_meta_header *h;
+	struct pw_buffer *buf;
+	struct spa_buffer *b;
+	void *p;
 
-		pw_thread_loop_lock (gdata->thread);
-		buf = pw_stream_dequeue_buffer(v->stream);
-		pw_thread_loop_unlock (gdata->thread);
-		if (buf == NULL)
-			return;
+	pw_thread_loop_lock (gdata->thread);
+	buf = pw_stream_dequeue_buffer(base->stream);
+	pw_thread_loop_unlock (gdata->thread);
+	if (buf == NULL)
+		return;
 
-		b = buf->buffer;
+	b = buf->buffer;
 
-		if ((p = b->datas[0].data) == NULL)
-				goto done;
+	if ((p = b->datas[0].data) == NULL)
+			goto done;
 
-		if ((h = spa_buffer_find_meta(b, types->meta.Header))) {
-				h->pts = -1;
-				h->flags = 0;
-				h->seq = v->seq++;
-				h->dts_offset = 0;
-		}
+	if ((h = spa_buffer_find_meta(b, types->meta.Header))) {
+			h->pts = pts;
+			h->flags = 0;
+			h->seq = base->seq++;
+			h->dts_offset = 0;
+	}
 
-		/* FIXME: Other frame formats */
-		memcpy (p, pixels, v->width * v->height);
-		b->datas[0].chunk->size = b->datas[0].maxsize;
+	memcpy (p, data, data_len);
+	b->datas[0].chunk->size = b->datas[0].maxsize;
 
 done:
-		pw_thread_loop_lock (gdata->thread);
-		pw_stream_queue_buffer(v->stream, buf);
-		pw_thread_loop_unlock (gdata->thread);
+	pw_thread_loop_lock (gdata->thread);
+	pw_stream_queue_buffer(base->stream, buf);
+	pw_thread_loop_unlock (gdata->thread);
+}
+
+void ohmd_pw_video_stream_push (ohmd_pw_video_stream *v, int64_t pts, const uint8_t *pixels)
+{
+	/* FIXME: Other frame formats */
+	ohmd_pw_stream_push_common((ohmd_pw_base_stream *) v, pts, pixels, v->width * v->height);
+}
+
+static void
+on_debug_stream_format_changed(void *_data, const struct spa_pod *format)
+{
+	ohmd_pw_debug_stream *s = _data;
+	ohmd_pw_global_data *gdata = s->base.gdata;
+	struct pw_stream *stream = s->base.stream;
+	struct pw_type *types = gdata->type_map;
+	uint8_t params_buffer[1024];
+	struct spa_pod_builder b = SPA_POD_BUILDER_INIT(params_buffer, sizeof(params_buffer));
+	const struct spa_pod *params[2];
+
+	if (format == NULL) {
+		pw_stream_finish_format(stream, 0, NULL, 0);
+		return;
+	}
+
+	params[0] = spa_pod_builder_object(&b,
+		types->param.idBuffers, types->param_buffers.Buffers,
+		":", types->param_buffers.size,    "i", MAX_DEBUG_BLOB_SIZE,
+		":", types->param_buffers.stride,  "i", 1,
+		":", types->param_buffers.buffers, "iru", 2,
+			SPA_POD_PROP_MIN_MAX(1, 32),
+		":", types->param_buffers.align,   "i", 16);
+
+	params[1] = spa_pod_builder_object(&b,
+		types->param.idMeta, types->param_meta.Meta,
+		":", types->param_meta.type, "I", types->meta.Header,
+		":", types->param_meta.size, "i", sizeof(struct spa_meta_header));
+
+	pw_stream_finish_format(stream, 0, params, 2);
+}
+
+static const struct pw_stream_events debug_stream_events = {
+	PW_VERSION_STREAM_EVENTS,
+	.state_changed = on_stream_state_changed,
+	.format_changed = on_debug_stream_format_changed,
+};
+
+ohmd_pw_debug_stream *ohmd_pw_debug_stream_new (const char *stream_id)
+{
+	ohmd_pw_debug_stream *ret = NULL;
+	ohmd_pw_base_stream *base = NULL;
+	ohmd_pw_global_data *gdata;
+	uint32_t text_type;
+
+	const struct spa_pod *params[1];
+	uint8_t buffer[1024];
+	struct spa_pod_builder b = SPA_POD_BUILDER_INIT(buffer, sizeof(buffer));
+
+	/* Start pipewire connection if needed */
+	gdata = ohmd_pipewire_global_init();
+	if (gdata == NULL)
+		goto fail;
+
+	text_type = spa_type_map_get_id(gdata->type_map->map, "text");
+
+	/* Create data store */
+	ret = calloc (sizeof(ohmd_pw_debug_stream), 1);
+	base = (ohmd_pw_base_stream *)(ret);
+
+	base->gdata = gdata;
+
+	/* Publish the stream */
+	pw_thread_loop_lock(gdata->thread);
+
+	base->stream = pw_stream_new(gdata->remote, stream_id,
+				pw_properties_new("media.class", "Text/Source",
+					PW_NODE_PROP_MEDIA, "Text",
+					PW_NODE_PROP_CATEGORY, "Source",
+					PW_NODE_PROP_ROLE, "OpenHMD Debug",
+					NULL));
+
+	params[0] = spa_pod_builder_object(&b,
+			gdata->type_map->param.idEnumFormat, gdata->type_map->spa_format,
+			"I", text_type, "I", gdata->types.media_subtype.raw);
+
+	pw_stream_add_listener(base->stream, &base->listener, &debug_stream_events, ret);
+
+	pw_stream_connect(base->stream, PW_DIRECTION_OUTPUT, NULL,
+			  PW_STREAM_FLAG_DRIVER | PW_STREAM_FLAG_MAP_BUFFERS, params, 1);
+
+	pw_thread_loop_unlock(gdata->thread);
+	return ret;
+
+fail:
+	if (ret)
+		free (ret);
+	return NULL;
+}
+
+void ohmd_pw_debug_stream_push (ohmd_pw_debug_stream *s, int64_t pts, const char *debug_str)
+{
+	size_t debug_blob_size = strlen (debug_str);
+
+	if (debug_blob_size > MAX_DEBUG_BLOB_SIZE) {
+		LOGE ("Debug blob of length %u > max %u\n", (unsigned int)(debug_blob_size), (unsigned int)(MAX_DEBUG_BLOB_SIZE));
+	}
+	ohmd_pw_stream_push_common((ohmd_pw_base_stream *) s, pts, (const uint8_t *) debug_str, debug_blob_size);
+}
+
+void ohmd_pw_debug_stream_free (ohmd_pw_debug_stream *s)
+{
+	ohmd_pw_stream_free_common ((ohmd_pw_base_stream *) s);
 }

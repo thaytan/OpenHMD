@@ -36,6 +36,7 @@ typedef struct rift_sensor_ctx_s rift_sensor_ctx;
 struct rift_sensor_ctx_s
 {
   int id;
+  char serial_no[32];
   rift_tracker_ctx *tracker;
 
   libusb_device_handle *usb_devh;
@@ -57,6 +58,7 @@ struct rift_sensor_ctx_s
 	vec3f led_out_points[MAX_OBJECT_LEDS];
 
   ohmd_pw_video_stream *debug_vid;
+  ohmd_pw_debug_stream *debug_metadata;
 };
 
 struct rift_tracker_ctx_s
@@ -277,23 +279,27 @@ static void new_frame_cb(struct rift_sensor_uvc_stream *stream)
 			}
 #endif
 	}
-  if (sensor_ctx->debug_vid)
-    ohmd_pw_video_stream_push (sensor_ctx->debug_vid, stream->frame);
+	if (sensor_ctx->debug_vid)
+		ohmd_pw_video_stream_push (sensor_ctx->debug_vid, -1, stream->frame);
+	if (sensor_ctx->debug_metadata)
+		ohmd_pw_debug_stream_push (sensor_ctx->debug_metadata, -1, "{ debug: \"debug!\" }");
 }
 
 
 static void rift_sensor_free (rift_sensor_ctx *sensor_ctx);
 
 static rift_sensor_ctx *
-rift_sensor_new (ohmd_context* ohmd_ctx, int id, libusb_device_handle *usb_devh,
+rift_sensor_new (ohmd_context* ohmd_ctx, int id, const char *serial_no, libusb_device_handle *usb_devh,
     rift_tracker_ctx *tracker, const uint8_t radio_id[5])
 {
   rift_sensor_ctx *sensor_ctx = NULL;
+  char stream_id[64];
   int ret;
 
   sensor_ctx = ohmd_alloc(ohmd_ctx, sizeof (rift_sensor_ctx));
 
   sensor_ctx->id = id;
+  strcpy ((char *) sensor_ctx->serial_no, (char *) serial_no);
   sensor_ctx->tracker = tracker;
   sensor_ctx->usb_devh = usb_devh;
 
@@ -305,13 +311,17 @@ rift_sensor_new (ohmd_context* ohmd_ctx, int id, libusb_device_handle *usb_devh,
   sensor_ctx->stream.frame_cb = new_frame_cb;
   sensor_ctx->stream.user_data = sensor_ctx;
 
-  printf ("Found Rift Sensor %d. Connecting to Radio address 0x%02x%02x%02x%02x%02x\n",
-    id, radio_id[0], radio_id[1], radio_id[2], radio_id[3], radio_id[4]);
+  printf ("Found Rift Sensor %d w/ Serial %s. Connecting to Radio address 0x%02x%02x%02x%02x%02x\n",
+    id, serial_no, radio_id[0], radio_id[1], radio_id[2], radio_id[3], radio_id[4]);
 
   ret = rift_sensor_uvc_stream_setup (sensor_ctx->tracker->usb_ctx, sensor_ctx->usb_devh, &sensor_ctx->stream);
   ASSERT_MSG(ret >= 0, fail, "could not prepare for streaming\n");
 
-  sensor_ctx->debug_vid = ohmd_pw_video_stream_new (sensor_ctx->stream.width, sensor_ctx->stream.height, 625, 12);
+  snprintf(stream_id,64,"openhmd-rift-sensor-%s", sensor_ctx->serial_no);
+  stream_id[63] = 0;
+
+  sensor_ctx->debug_vid = ohmd_pw_video_stream_new (stream_id, sensor_ctx->stream.width, sensor_ctx->stream.height, 625, 12);
+  sensor_ctx->debug_metadata = ohmd_pw_debug_stream_new (stream_id);
 
   sensor_ctx->bw = blobwatch_new(sensor_ctx->stream.width, sensor_ctx->stream.height);
 
@@ -359,8 +369,10 @@ rift_sensor_free (rift_sensor_ctx *sensor_ctx)
 	if (sensor_ctx->stream_started)
 		rift_sensor_uvc_stream_stop(&sensor_ctx->stream);
 
-  if (sensor_ctx->debug_vid != NULL)
-    ohmd_pw_video_stream_free (sensor_ctx->debug_vid);
+	if (sensor_ctx->debug_vid != NULL)
+		ohmd_pw_video_stream_free (sensor_ctx->debug_vid);
+	if (sensor_ctx->debug_metadata != NULL)
+		ohmd_pw_debug_stream_free (sensor_ctx->debug_metadata);
 
 	rift_sensor_uvc_stream_clear(&sensor_ctx->stream);
 
@@ -408,6 +420,7 @@ rift_sensor_tracker_new (ohmd_context* ohmd_ctx,
 		struct libusb_device_descriptor desc;
 		libusb_device_handle *usb_devh;
 		rift_sensor_ctx *sensor_ctx = NULL;
+		unsigned char serial[33];
 
 		ret = libusb_get_device_descriptor(devs[i], &desc);
 		if (ret < 0)
@@ -419,7 +432,17 @@ rift_sensor_tracker_new (ohmd_context* ohmd_ctx,
 			fprintf (stderr, "Failed to open Rift Sensor device. Check permissions\n");
 			continue;
 		}
-		sensor_ctx = rift_sensor_new (ohmd_ctx, tracker_ctx->n_sensors, usb_devh, tracker_ctx, radio_id);
+
+		sprintf ((char *) serial, "UNKNOWN");
+		serial[32] = '\0';
+
+		if (desc.iSerialNumber) {
+			ret = libusb_get_string_descriptor_ascii(usb_devh, desc.iSerialNumber, serial, 32);
+			if (ret < 0)
+				fprintf (stderr, "Failed to read the Rift Sensor Serial number.\n");
+		}
+
+		sensor_ctx = rift_sensor_new (ohmd_ctx, tracker_ctx->n_sensors, (char *) serial, usb_devh, tracker_ctx, radio_id);
 		if (sensor_ctx != NULL) {
 			tracker_ctx->sensors[tracker_ctx->n_sensors] = sensor_ctx;
 			tracker_ctx->n_sensors++;
