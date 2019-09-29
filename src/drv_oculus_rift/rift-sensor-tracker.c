@@ -21,6 +21,8 @@
 #include "rift-sensor-maths.h"
 #include "rift-sensor-opencv.h"
 
+#include "kalman.h"
+
 #define ASSERT_MSG(_v, label, ...) if(!(_v)){ fprintf(stderr, __VA_ARGS__); goto label; }
 #define min(a,b) ((a) < (b) ? (a) : (b))
 
@@ -44,6 +46,10 @@ struct rift_sensor_ctx_s
 
   dmat3 camera_matrix;
   double dist_coeffs[5];
+
+  kalman_pose *pose_filter;
+  vec3f pose_pos;
+  quatf pose_orient;
 };
 
 struct rift_tracker_ctx_s
@@ -71,8 +77,8 @@ void tracker_process_blobs(rift_sensor_ctx *ctx)
 
   dmat3 *camera_matrix = &ctx->camera_matrix;
  	double dist_coeffs[5] = { 0, };
-  dquat rot = { 0, };
-	dvec3 trans = { 0, };
+  dquat rot = { ctx->pose_orient.x, ctx->pose_orient.y, ctx->pose_orient.z, ctx->pose_orient.w };
+	dvec3 trans = { ctx->pose_pos.x, ctx->pose_pos.y, ctx->pose_pos.z };
   int num_leds = 0;
 
   /*
@@ -81,10 +87,16 @@ void tracker_process_blobs(rift_sensor_ctx *ctx)
   if (estimate_initial_pose(bwobs->blobs, bwobs->num_blobs, ctx->tracker->leds->points,
             ctx->tracker->leds->num_points, camera_matrix, dist_coeffs, &rot, &trans,
             &num_leds, true)) {
+    vec3f transf = {{ trans.x, trans.y, trans.z }};
+    quatf rotf = {{ rot.x, rot.y, rot.z, rot.w }};
+
+    kalman_pose_update (ctx->pose_filter, ctx->frame_sof_ts, &transf, &rotf);
+    kalman_pose_get_estimated (ctx->pose_filter, &ctx->pose_pos, &ctx->pose_orient);
+
     printf ("sensor %u Got PnP pose quat %f %f %f %f  pos %f %f %f from %d LEDs\n", ctx->id,
-            rot.x, rot.y, rot.z, rot.w,
-            trans.x, trans.y, trans.z,
-	    num_leds);
+				ctx->pose_orient.x, ctx->pose_orient.y, ctx->pose_orient.z, ctx->pose_orient.w,
+				ctx->pose_pos.x, ctx->pose_pos.y, ctx->pose_pos.z,
+				num_leds);
   }
 }
 
@@ -248,6 +260,10 @@ rift_sensor_new (ohmd_context* ohmd_ctx, int id, libusb_device_handle *usb_devh,
   sensor_ctx->tracker = tracker;
   sensor_ctx->usb_devh = usb_devh;
 
+  sensor_ctx->pose_filter = kalman_pose_new (ohmd_ctx);
+  memset (&sensor_ctx->pose_pos, 0, sizeof(sensor_ctx->pose_pos));
+  memset (&sensor_ctx->pose_orient, 0, sizeof(sensor_ctx->pose_orient));
+
   sensor_ctx->stream.sof_cb = new_frame_start_cb;
   sensor_ctx->stream.frame_cb = new_frame_cb;
   sensor_ctx->stream.user_data = sensor_ctx;
@@ -304,6 +320,8 @@ rift_sensor_free (rift_sensor_ctx *sensor_ctx)
 
 	if (sensor_ctx->usb_devh)
 		libusb_close (sensor_ctx->usb_devh);
+
+  kalman_pose_free (sensor_ctx->pose_filter);
 	free (sensor_ctx);
 }
 
