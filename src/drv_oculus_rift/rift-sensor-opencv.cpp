@@ -4,6 +4,9 @@
  * SPDX-License-Identifier:	LGPL-2.0+ or BSL-1.0
  */
 #include <opencv2/calib3d/calib3d.hpp>
+#include <iostream>
+
+using namespace std;
 
 extern "C" {
 #include <stdio.h>
@@ -12,6 +15,20 @@ extern "C" {
 #include "rift-sensor-blobwatch.h"
 }
 
+static void
+dquat_to_3x3 (cv::Mat &mat, dquat *me) {
+        mat.at<double>(0,0) = 1 - 2 * me->y * me->y - 2 * me->z * me->z;
+        mat.at<double>(0,1) =     2 * me->x * me->y - 2 * me->w * me->z;
+        mat.at<double>(0,2) =     2 * me->x * me->z + 2 * me->w * me->y;
+
+        mat.at<double>(1,0) =     2 * me->x * me->y + 2 * me->w * me->z;
+        mat.at<double>(1,1) = 1 - 2 * me->x * me->x - 2 * me->z * me->z;
+        mat.at<double>(1,2) =     2 * me->y * me->z - 2 * me->w * me->x;
+
+        mat.at<double>(2,0) =     2 * me->x * me->z - 2 * me->w * me->y;
+        mat.at<double>(2,1) =     2 * me->y * me->z + 2 * me->w * me->x;
+        mat.at<double>(2,2) = 1 - 2 * me->x * me->x - 2 * me->y * me->y;
+}
 
 extern "C" bool estimate_initial_pose(struct blob *blobs, int num_blobs,
     rift_led *leds, int num_led_pos,
@@ -32,8 +49,12 @@ extern "C" bool estimate_initial_pose(struct blob *blobs, int num_blobs,
 	cv::Mat dummyD = cv::Mat::zeros(4, 1, CV_64FC1);
 	cv::Mat rvec = cv::Mat::zeros(3, 1, CV_64FC1);
 	cv::Mat tvec = cv::Mat(3, 1, CV_64FC1, (double *)trans);
-	cv::Mat R = cv::Mat(3, 3, CV_64FC1, (double *)rot);
+	cv::Mat R = cv::Mat::zeros(3, 3, CV_64FC1);
+
+	dquat_to_3x3 (R, rot);
 	cv::Rodrigues(R, rvec);
+
+	//cout << "R = " << R << ", rvec = " << rvec << endl;
 
 	/* count identified leds */
 	for (i = 0; i < num_blobs; i++) {
