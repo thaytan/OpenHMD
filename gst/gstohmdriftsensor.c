@@ -242,6 +242,26 @@ gst_ohmd_rift_sensor_set_info (GstVideoFilter *vf,
 }
 
 static void
+draw_rgb_marker (guint8 *pixels, gint stride,
+    gint x_pos, gint y_pos, gint width, gint height, guint32 colour)
+{
+  gint x, y;
+  /* Horizontal line */
+  guint8 *dest = pixels + stride * y_pos + 3 * (x_pos - width/2);
+  for (x = 0; x < width; x++) {
+     GST_WRITE_UINT24_BE (dest, colour);
+     dest += 3;
+  }
+
+  /* Vertical line */
+  dest = pixels + stride * (y_pos - height/2) + 3 * x_pos;
+  for (y = 0; y < height; y++) {
+     GST_WRITE_UINT24_BE (dest, colour);
+     dest += stride;
+  }
+}
+
+static void
 draw_rgb_rect (guint8 *pixels, gint stride,
     gint start_x, gint start_y, gint width, gint height, guint32 colour)
 {
@@ -346,6 +366,7 @@ gst_ohmd_rift_sensor_transform_frame (GstVideoFilter *base,
     }
   }
 
+  // draw_rgb_marker (out_frame->data[0], out_stride, b->x, b->y, 8, 8, 0xFF0000);
   return GST_FLOW_OK;
 }
 
