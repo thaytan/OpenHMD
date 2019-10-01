@@ -603,9 +603,10 @@ rift_leds_dump (rift_leds *leds, const char *desc)
 	printf ("LED model: %s\n", desc);
 	for (i = 0; i < leds->num_points; i++) {
 		rift_led *p = leds->points + i;
-		printf ("%f;%f;%f;%f;%f;%f;255;255;0;1.0\n",
+		printf ("{ .pos = {%f,%f,%f}, .dir={%f,%f,%f}, .pattern=0x%x },\n",
 		    p->pos.x, p->pos.y, p->pos.z,
-		    p->dir.x, p->dir.y, p->dir.z);
+		    p->dir.x, p->dir.y, p->dir.z,
+		    p->pattern);
 	}
 }
 
