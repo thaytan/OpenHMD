@@ -225,7 +225,6 @@ static void new_frame_cb(struct rift_sensor_uvc_stream *stream)
 	}
 
 	LOGV ("Sensor %d Handling frame phase %d\n", sensor_ctx->id, led_pattern_phase);
-
 	blobwatch_process(sensor_ctx->bw, stream->frame, width, height,
 		led_pattern_phase, sensor_ctx->tracker->leds->points,
 		sensor_ctx->tracker->leds->num_points, &sensor_ctx->bwobs);
@@ -279,8 +278,13 @@ static void new_frame_cb(struct rift_sensor_uvc_stream *stream)
 			}
 #endif
 	}
-	if (sensor_ctx->debug_vid)
+	if (sensor_ctx->debug_vid) {
+		/* Write 'OHMD' and the flicker pattern phase into the frame for debug / storing */
+		stream->frame[0] = 'O'; stream->frame[1] = 'H'; stream->frame[2] = 'M'; stream->frame[3] = 'D';
+		stream->frame[4] = led_pattern_phase;
+
 		ohmd_pw_video_stream_push (sensor_ctx->debug_vid, sensor_ctx->frame_sof_ts, stream->frame);
+	}
 	if (sensor_ctx->debug_metadata)
 		ohmd_pw_debug_stream_push (sensor_ctx->debug_metadata, sensor_ctx->frame_sof_ts, "{ debug: \"debug!\" }");
 }
