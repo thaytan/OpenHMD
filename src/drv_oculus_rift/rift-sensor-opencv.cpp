@@ -131,3 +131,39 @@ extern "C" bool estimate_initial_pose(struct blob *blobs, int num_blobs,
 	     trans->x, trans->y, trans->z);
 	return true;
 }
+
+void rift_project_points(rift_led *leds, int num_led_pos,
+    dmat3 *camera_matrix, double dist_coeffs[4],
+    quatf *rot, vec3f *trans, vec3f *out_points)
+{
+	cv::Mat fishK = cv::Mat(3, 3, CV_64FC1, camera_matrix->m);
+	cv::Mat fishDistCoeffs = cv::Mat(4, 1, CV_64FC1, dist_coeffs);
+
+	cv::Mat tvec = cv::Mat::zeros(3, 1, CV_64FC1);
+	cv::Mat rvec = cv::Mat::zeros(3, 1, CV_64FC1);
+	cv::Mat R = cv::Mat::zeros(3, 3, CV_64FC1);
+  int i;
+
+	for (i = 0; i < 3; i++)
+		tvec.at<double>(i) = trans->arr[i];
+
+	quatf_to_3x3 (R, rot);
+	cv::Rodrigues(R, rvec);
+
+	std::vector<cv::Point3f> led_points3d(num_led_pos);
+	std::vector<cv::Point2f> projected_points2d(num_led_pos);
+
+	for (int i = 0; i < num_led_pos; i++) {
+		led_points3d[i].x = leds[i].pos.x;
+		led_points3d[i].y = leds[i].pos.y;
+		led_points3d[i].z = leds[i].pos.z;
+	}
+
+	cv::fisheye::projectPoints (led_points3d, projected_points2d, rvec, tvec, fishK, fishDistCoeffs);
+
+	for (int i = 0; i < num_led_pos; i++) {
+		out_points[i].x = projected_points2d[i].x;
+		out_points[i].y = projected_points2d[i].y;
+		out_points[i].z = 0;
+	}
+}

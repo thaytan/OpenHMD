@@ -15,6 +15,11 @@ bool estimate_initial_pose(struct blob *blobs, int num_blobs,
 			   dmat3 *camera_matrix, double dist_coeffs[4],
 			   quatf *rot, vec3f *trans, int *num_leds_out,
 			   bool use_extrinsic_guess);
+
+void rift_project_points(rift_led *leds, int num_led_pos,
+  dmat3 *camera_matrix, double dist_coeffs[4],
+  quatf *rot, vec3f *trans,
+  vec3f *out_points);
 #else
 static inline
 bool estimate_initial_pose(struct blob *blobs, int num_blobs,
@@ -35,6 +40,7 @@ bool estimate_initial_pose(struct blob *blobs, int num_blobs,
 	(void)use_extrinsic_guess;
   return false;
 }
+#define rift_project_points(leds,num_led_pos,camera_matrix,dist_coeffs,rot,trans,out_points)
 #endif /* HAVE_OPENCV */
 
 #endif /* __OPENCV_H__ */
