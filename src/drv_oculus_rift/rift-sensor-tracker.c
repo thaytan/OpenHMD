@@ -280,9 +280,9 @@ static void new_frame_cb(struct rift_sensor_uvc_stream *stream)
 #endif
 	}
 	if (sensor_ctx->debug_vid)
-		ohmd_pw_video_stream_push (sensor_ctx->debug_vid, -1, stream->frame);
+		ohmd_pw_video_stream_push (sensor_ctx->debug_vid, sensor_ctx->frame_sof_ts, stream->frame);
 	if (sensor_ctx->debug_metadata)
-		ohmd_pw_debug_stream_push (sensor_ctx->debug_metadata, -1, "{ debug: \"debug!\" }");
+		ohmd_pw_debug_stream_push (sensor_ctx->debug_metadata, sensor_ctx->frame_sof_ts, "{ debug: \"debug!\" }");
 }
 
 
