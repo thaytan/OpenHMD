@@ -314,6 +314,9 @@ rift_sensor_free (rift_sensor_ctx *sensor_ctx)
 	if (sensor_ctx == NULL)
 		return;
 
+	if (sensor_ctx->bw)
+  		blobwatch_free (sensor_ctx->bw);
+		
 	if (sensor_ctx->stream_started)
 		rift_sensor_uvc_stream_stop(&sensor_ctx->stream);
 	rift_sensor_uvc_stream_clear(&sensor_ctx->stream);

@@ -47,6 +47,7 @@ struct blobservation {
 struct blobwatch;
 
 struct blobwatch *blobwatch_new(int width, int height);
+void blobwatch_free (struct blobwatch *bw);
 void blobwatch_process(struct blobwatch *bw, uint8_t *frame,
 		       int width, int height, uint8_t led_pattern_phase,
 		       rift_led *leds, uint8_t num_leds,

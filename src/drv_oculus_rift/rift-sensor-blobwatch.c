@@ -84,6 +84,12 @@ struct blobwatch *blobwatch_new(int width, int height)
 	return bw;
 }
 
+void blobwatch_free (struct blobwatch *bw)
+{
+	free (bw->el);
+	free (bw);
+}
+
 /*
  * Stores blob information collected in the last extent e into the blob
  * array b at index e->index.
