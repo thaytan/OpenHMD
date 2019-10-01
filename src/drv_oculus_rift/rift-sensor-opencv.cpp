@@ -16,7 +16,7 @@ extern "C" {
 }
 
 static void
-dquat_to_3x3 (cv::Mat &mat, dquat *me) {
+quatf_to_3x3 (cv::Mat &mat, quatf *me) {
         mat.at<double>(0,0) = 1 - 2 * me->y * me->y - 2 * me->z * me->z;
         mat.at<double>(0,1) =     2 * me->x * me->y - 2 * me->w * me->z;
         mat.at<double>(0,2) =     2 * me->x * me->z + 2 * me->w * me->y;
@@ -33,7 +33,7 @@ dquat_to_3x3 (cv::Mat &mat, dquat *me) {
 extern "C" bool estimate_initial_pose(struct blob *blobs, int num_blobs,
     rift_led *leds, int num_led_pos,
     dmat3 *camera_matrix, double dist_coeffs[4],
-    dquat *rot, dvec3 *trans, int *num_leds_out, bool use_extrinsic_guess)
+    quatf *rot, vec3f *trans, int *num_leds_out, bool use_extrinsic_guess)
 {
 	int i, j;
 	int num_leds = 0;
@@ -48,10 +48,13 @@ extern "C" bool estimate_initial_pose(struct blob *blobs, int num_blobs,
 	cv::Mat dummyK = cv::Mat::eye(3, 3, CV_64FC1);
 	cv::Mat dummyD = cv::Mat::zeros(4, 1, CV_64FC1);
 	cv::Mat rvec = cv::Mat::zeros(3, 1, CV_64FC1);
-	cv::Mat tvec = cv::Mat(3, 1, CV_64FC1, (double *)trans);
+	cv::Mat tvec = cv::Mat::zeros(3, 1, CV_64FC1);
 	cv::Mat R = cv::Mat::zeros(3, 3, CV_64FC1);
 
-	dquat_to_3x3 (R, rot);
+	for (i = 0; i < 3; i++)
+		tvec.at<double>(i) = trans->arr[i];
+
+	quatf_to_3x3 (R, rot);
 	cv::Rodrigues(R, rvec);
 
 	//cout << "R = " << R << ", rvec = " << rvec << endl;
@@ -111,14 +114,17 @@ extern "C" bool estimate_initial_pose(struct blob *blobs, int num_blobs,
 			   use_extrinsic_guess, iterationsCount, reprojectionError,
 			   confidence, inliers, flags);
 
-	dvec3 v;
+	vec3f v;
 	double angle = sqrt(rvec.dot(rvec));
 	double inorm = 1.0f / angle;
 
 	v.x = rvec.at<double>(0) * inorm;
 	v.y = rvec.at<double>(1) * inorm;
 	v.z = rvec.at<double>(2) * inorm;
-	dquat_from_axis_angle(rot, &v, angle);
+	oquatf_init_axis (rot, &v, angle);
+
+	for (i = 0; i < 3; i++)
+		trans->arr[i] = tvec.at<double>(i);
 
 	LOGV ("Got PnP pose quat %f %f %f %f  pos %f %f %f\n",
 	     rot->x, rot->y, rot->z, rot->w,

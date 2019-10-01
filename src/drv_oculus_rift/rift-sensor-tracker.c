@@ -45,7 +45,7 @@ struct rift_sensor_ctx_s
 	struct blobservation* bwobs;
 
   dmat3 camera_matrix;
-  double dist_coeffs[5];
+  double dist_coeffs[4];
 
   kalman_pose *pose_filter;
   vec3f pose_pos;
@@ -75,11 +75,12 @@ void tracker_process_blobs(rift_sensor_ctx *ctx)
 {
 	struct blobservation* bwobs = ctx->bwobs;
 
-  dmat3 *camera_matrix = &ctx->camera_matrix;
- 	double dist_coeffs[5] = { 0, };
-  dquat rot = { ctx->pose_orient.x, ctx->pose_orient.y, ctx->pose_orient.z, ctx->pose_orient.w };
-	dvec3 trans = { ctx->pose_pos.x, ctx->pose_pos.y, ctx->pose_pos.z };
-  int num_leds = 0;
+	dmat3 *camera_matrix = &ctx->camera_matrix;
+	double dist_coeffs[4] = { 0, };
+	quatf rot = ctx->pose_orient;
+	vec3f trans = ctx->pose_pos;
+
+	int num_leds = 0;
 
   /*
    * Estimate initial pose without previously known [rot|trans].
@@ -87,10 +88,7 @@ void tracker_process_blobs(rift_sensor_ctx *ctx)
   if (estimate_initial_pose(bwobs->blobs, bwobs->num_blobs, ctx->tracker->leds->points,
             ctx->tracker->leds->num_points, camera_matrix, dist_coeffs, &rot, &trans,
             &num_leds, true)) {
-    vec3f transf = {{ trans.x, trans.y, trans.z }};
-    quatf rotf = {{ rot.x, rot.y, rot.z, rot.w }};
-
-    kalman_pose_update (ctx->pose_filter, ctx->frame_sof_ts, &transf, &rotf);
+    kalman_pose_update (ctx->pose_filter, ctx->frame_sof_ts, &trans, &rot);
     kalman_pose_get_estimated (ctx->pose_filter, &ctx->pose_pos, &ctx->pose_orient);
 
     printf ("sensor %u Got PnP pose quat %f %f %f %f  pos %f %f %f from %d LEDs\n", ctx->id,
