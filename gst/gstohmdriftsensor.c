@@ -43,6 +43,8 @@
 
 #include "gstohmdriftsensor.h"
 
+const guint32 OHMD_MARKER = ('O' << 24 | 'H' << 16 | 'M' << 8 | 'D');
+
 GST_DEBUG_CATEGORY_STATIC (gst_ohmd_rift_sensor_debug);
 #define GST_CAT_DEFAULT gst_ohmd_rift_sensor_debug
 
@@ -245,21 +247,25 @@ gst_ohmd_rift_sensor_transform_frame (GstVideoFilter *base,
 {
   GstOhmdRiftSensor *filter = GST_OHMDRIFTSENSOR (base);
   gint x, y;
-  guint8 *src, *dest;
+  guint8 *src = in_frame->data[0];
+  guint8 *dest = out_frame->data[0];
   gint width = in_frame->info.width;
   gint height = in_frame->info.height;
   gint in_stride = in_frame->info.stride[0];
   gint out_stride = out_frame->info.stride[0];
   guint8 led_pattern_phase = filter->led_pattern_phase;
 
+  /* If there's an OHMD marker in the frame, we can read the pattern phase directly */
+  if (GST_READ_UINT32_BE (src) == OHMD_MARKER) {
+    led_pattern_phase = src[4];
+    GST_LOG_OBJECT (filter, "Have LED pattern phase %u in frame", led_pattern_phase);
+  }
+
   filter->led_pattern_phase = (led_pattern_phase + 1) % 10;
 
   if (GST_CLOCK_TIME_IS_VALID (GST_BUFFER_TIMESTAMP (in_frame->buffer)))
     gst_object_sync_values (GST_OBJECT (filter), GST_BUFFER_TIMESTAMP (in_frame->buffer));
 
-  src = in_frame->data[0];
-  dest = out_frame->data[0];
-  
   blobwatch_process(filter->bw, src, width, height,
       led_pattern_phase, filter->leds.points,
       filter->leds.num_points, &filter->bwobs);
