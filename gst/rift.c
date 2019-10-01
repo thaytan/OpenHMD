@@ -78,3 +78,11 @@ rift_leds_clear (rift_leds *leds)
         leds->points = NULL;
 }
 
+/* Dummy OpenHMD functions */
+void* ohmd_allocfn(ohmd_context* ctx, const char* e_msg, size_t size)
+{
+    (void)(ctx);
+    (void)(e_msg);
+
+    return malloc (size);
+}

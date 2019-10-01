@@ -1,4 +1,4 @@
-project('gst-openhmd-plugin', 'c', version : '1.0.0', license : 'LGPL')
+project('gst-openhmd-plugin', 'c', 'cpp', version : '1.0.0', license : 'LGPL')
 
 plugins_install_dir = join_paths(get_option('libdir'), 'gstreamer-1.0')
 
@@ -20,6 +20,7 @@ cdata.set_quoted('GST_PACKAGE_ORIGIN', 'https://www.openhmd.net')
 configure_file(output : 'config.h', configuration : cdata)
 
 dep_libm = meson.get_compiler('c').find_library('m', required: false)
+dep_opencv = dependency('opencv')
 
 gst_dep = dependency('gstreamer-1.0',
     fallback : ['gstreamer', 'gst_dep'])
@@ -32,14 +33,19 @@ plugin_sources = [
   '../src/omath.c',
   '../src/drv_oculus_rift/rift-sensor-blobwatch.c',
   '../src/drv_oculus_rift/rift-sensor-flicker.c',
+  '../src/drv_oculus_rift/rift-sensor-maths.c',
+  '../src/drv_oculus_rift/rift-sensor-opencv.cpp',
+  '../src/drv_oculus_rift/kalman.cpp',
   'rift.c'
   ]
 
+c_args = [ plugin_c_args, '-DHAVE_OPENCV=1' ]
+
 gstohmdplugin = library('gstohmdplugin',
   plugin_sources,
-  c_args: [ plugin_c_args ],
+  c_args: c_args, cpp_args: c_args,
   include_directories: [ include_directories ('../include'), '../src/drv_oculus_rift' ],
-  dependencies : [dep_libm, gst_dep, gstvideo_dep],
+  dependencies : [dep_libm, gst_dep, gstvideo_dep, dep_opencv ],
   install : true,
   install_dir : plugins_install_dir,
 )
