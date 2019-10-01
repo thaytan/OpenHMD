@@ -71,7 +71,7 @@ struct rift_tracker_ctx_s
 
 static uint8_t rift_sensor_tracker_get_led_pattern_phase (rift_tracker_ctx *ctx, uint64_t *ts);
 
-void tracker_process_blobs(rift_sensor_ctx *ctx)
+static void tracker_process_blobs(rift_sensor_ctx *ctx)
 {
 	struct blobservation* bwobs = ctx->bwobs;
 
