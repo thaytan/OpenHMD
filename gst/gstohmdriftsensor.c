@@ -241,6 +241,32 @@ gst_ohmd_rift_sensor_set_info (GstVideoFilter *vf,
   return TRUE;
 }
 
+static void
+draw_rgb_rect (guint8 *pixels, gint stride,
+    gint start_x, gint start_y, gint width, gint height, guint32 colour)
+{
+  gint x, y;
+  guint8 *dest = pixels + stride * start_y + 3 * start_x;
+  for (x = 0; x < width; x++) {
+     GST_WRITE_UINT24_BE (dest, colour);
+     dest += 3;
+  }
+
+  for (y = 1; y < height-1; y++) {
+     dest = pixels + stride * (start_y+y) + 3 * start_x;
+
+     GST_WRITE_UINT24_BE (dest, colour);
+     dest += 3 * (width-1);
+     GST_WRITE_UINT24_BE (dest, colour);
+  }
+
+  dest = pixels + stride * (start_y+height-1) + 3 * start_x;
+  for (x = 0; x < width; x++) {
+     GST_WRITE_UINT24_BE (dest, colour);
+     dest += 3;
+  }
+}
+
 static GstFlowReturn
 gst_ohmd_rift_sensor_transform_frame (GstVideoFilter *base,
     GstVideoFrame * in_frame, GstVideoFrame * out_frame)
@@ -284,7 +310,7 @@ gst_ohmd_rift_sensor_transform_frame (GstVideoFilter *base,
 
   if (filter->bwobs && filter->bwobs->num_blobs > 0) {
      //tracker_process_blobs (filter);
-     printf("Sensor %d phase %d Blobs: %d\n", filter->id, led_pattern_phase, filter->bwobs->num_blobs);
+     GST_INFO_OBJECT (filter, "Sensor %d phase %d Blobs: %d\n", filter->id, led_pattern_phase, filter->bwobs->num_blobs);
 
      for (int index = 0; index < filter->bwobs->num_blobs; index++)
      {
@@ -306,28 +332,17 @@ gst_ohmd_rift_sensor_transform_frame (GstVideoFilter *base,
       src = in_frame->data[0] + start_x + in_stride * start_y;
       dest = out_frame->data[0] + 3 * start_x + out_stride * start_y;
     
-      /* Draw a purple box around blobs by clearing green and setting b+r */
-      guint8 *p = dest;
-      for (x = 0; x < b->width; x++) {
-        *p++ = 128; *p++ = 0; *p++ = 128;
-      }
-
       for (y = 0; y < b->height; y++) {
-        guint8 *p = dest;
-        *p++ = 128; *p++ = 0; *p++ = 128;
-        p = dest + 3*b->width;
-        *p++ = 128; *p++ = 0; *p++ = 128;
-       
         for (x = 0; x < b->width; x++) {
-          /* fill the blue channel for spotted blobs */
+          /* fill the blue channel for observed blobs */
           dest[3*x+2] = src[x];
         }
         dest += out_stride;
         src += in_stride;
       }
-      dest -= out_stride;
-      for (x = 0; x < b->width; x++)
-        dest[3*x+1] = 0;
+
+      /* Draw a purple box around unknown blobs. Green around recognised ones */
+      draw_rgb_rect (out_frame->data[0], out_stride, start_x, start_y, b->width, b->height, b->led_id == -1 ? 0xFF00FF : 0x00FF00);
     }
   }
 
