@@ -76,7 +76,7 @@ void tracker_process_blobs(rift_sensor_ctx *ctx)
 	struct blobservation* bwobs = ctx->bwobs;
 
 	dmat3 *camera_matrix = &ctx->camera_matrix;
-	double dist_coeffs[4] = { 0, };
+	double *dist_coeffs = ctx->dist_coeffs;
 	quatf rot = ctx->pose_orient;
 	vec3f trans = ctx->pose_pos;
 
@@ -138,7 +138,7 @@ rift_sensor_get_calibration(rift_sensor_ctx *ctx)
         /*
          * k = [ k₁ k₂, k₃, k4 ]
          */
-        k[0] = k1; k[1] = k2; k[3] = k3; k[4] = k4;
+        k[0] = k1; k[1] = k2; k[2] = k3; k[3] = k4;
 
         return 0;
 }
