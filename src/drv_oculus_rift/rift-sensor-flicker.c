@@ -144,12 +144,16 @@ void rift_sensor_flicker_process(struct blob *blobs, int num_blobs,
 		else
 			b->pattern_age = 0;
 
-		b->pattern = pattern;
-		if (pattern == 0)
-				b->led_id = -1;
-		else {
-				success += pattern_find_id(leds, num_leds, pattern,
-					   &b->led_id);
+		/* If the blob already has an LED id, require at least 3 repetitions of a new pattern
+		 * before changing the ID */
+		if (b->led_id == -1 || b->pattern_age > 30) {
+		  b->pattern = pattern;
+		  if (pattern == 0)
+				  b->led_id = -1;
+		  else {
+				  success += pattern_find_id(leds, num_leds, pattern,
+					     &b->led_id);
+		  }
 		}
 	}
 }
