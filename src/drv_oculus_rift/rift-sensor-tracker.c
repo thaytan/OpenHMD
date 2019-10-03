@@ -28,6 +28,8 @@
 
 #define MAX_SENSORS 4
 
+#define MAX_OBJECT_LEDS 64
+
 typedef struct rift_sensor_ctx_s rift_sensor_ctx;
 
 struct rift_sensor_ctx_s
@@ -50,6 +52,9 @@ struct rift_sensor_ctx_s
   kalman_pose *pose_filter;
   vec3f pose_pos;
   quatf pose_orient;
+
+	vec3f led_out_points[MAX_OBJECT_LEDS];
+
 };
 
 struct rift_tracker_ctx_s
@@ -71,9 +76,10 @@ struct rift_tracker_ctx_s
 
 static uint8_t rift_sensor_tracker_get_led_pattern_phase (rift_tracker_ctx *ctx, uint64_t *ts);
 
-static void tracker_process_blobs(rift_sensor_ctx *ctx)
+static int tracker_process_blobs(rift_sensor_ctx *ctx)
 {
 	struct blobservation* bwobs = ctx->bwobs;
+	int ret = 0;
 
 	dmat3 *camera_matrix = &ctx->camera_matrix;
 	double *dist_coeffs = ctx->dist_coeffs;
@@ -83,7 +89,7 @@ static void tracker_process_blobs(rift_sensor_ctx *ctx)
 	int num_leds = 0;
 
   /*
-   * Estimate initial pose without previously known [rot|trans].
+   * Estimate initial pose using previously known [rot|trans].
    */
   if (estimate_initial_pose(bwobs->blobs, bwobs->num_blobs, ctx->tracker->leds->points,
             ctx->tracker->leds->num_points, camera_matrix, dist_coeffs, &rot, &trans,
@@ -95,7 +101,10 @@ static void tracker_process_blobs(rift_sensor_ctx *ctx)
 				ctx->pose_orient.x, ctx->pose_orient.y, ctx->pose_orient.z, ctx->pose_orient.w,
 				ctx->pose_pos.x, ctx->pose_pos.y, ctx->pose_pos.z,
 				num_leds);
+		ret = 1;
   }
+
+	return ret;
 }
 
 static int
@@ -217,11 +226,38 @@ static void new_frame_cb(struct rift_sensor_uvc_stream *stream)
 		led_pattern_phase, sensor_ctx->tracker->leds->points,
 		sensor_ctx->tracker->leds->num_points, &sensor_ctx->bwobs);
 
-	if (sensor_ctx->bwobs)
-	{
-		if (sensor_ctx->bwobs->num_blobs > 0)
-		{
-			tracker_process_blobs (sensor_ctx);
+	if (sensor_ctx->bwobs && sensor_ctx->bwobs->num_blobs > 0) {
+		rift_leds *leds = sensor_ctx->tracker->leds;
+
+    if (tracker_process_blobs (sensor_ctx)) {
+      int i;
+
+      /* Project HMD LEDs into the image */
+      rift_project_points(leds->points, leds->num_points,
+          &sensor_ctx->camera_matrix, sensor_ctx->dist_coeffs,
+          &sensor_ctx->pose_orient, &sensor_ctx->pose_pos,
+          sensor_ctx->led_out_points);
+
+      for (i = 0; i < leds->num_points; i++) {
+        vec3f *p = sensor_ctx->led_out_points + i;
+        vec3f facing;
+        int x = round(p->x);
+        int y = round(p->y);
+
+        oquatf_get_rotated(&sensor_ctx->pose_orient, &leds->points[i].dir, &facing);
+
+        if (facing.z < 0) {
+          /* Camera facing */
+          /* Back project LED ids into blobs if we find them */
+          struct blob *b = blobwatch_find_blob_at(sensor_ctx->bw, x, y);
+          if (b != NULL && b->led_id != i) {
+            /* Found a blob! */
+            LOGD ("Marking LED %d at %d,%d (was %d)\n", i, x, y, b->led_id);
+            b->led_id = i;
+          }
+				}
+			}
+		}
 #if 0
 			printf("Sensor %d phase %d Blobs: %d\n", sensor_ctx->id, led_pattern_phase, sensor_ctx->bwobs->num_blobs);
 
@@ -238,7 +274,6 @@ static void new_frame_cb(struct rift_sensor_uvc_stream *stream)
 					sensor_ctx->bwobs->blobs[index].pattern_age);
 			}
 #endif
-		}
 	}
 }
 
