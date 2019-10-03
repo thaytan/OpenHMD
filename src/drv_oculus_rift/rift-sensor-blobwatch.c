@@ -303,8 +303,8 @@ void blobwatch_process(struct blobwatch *bw, uint8_t *frame,
 		struct blob *b2 = &ob->blobs[i];
 
 		/* Filter out tall and wide (<= 1:2, >= 2:1) blobs */
-		if (2 * b2->width <= b2->height ||
-		    b2->width >= 2 * b2->height)
+		if ((b2->width > 2 && 2 * b2->width <= b2->height) ||
+		    (b2->height > 2 && b2->width >= 2 * b2->height))
 			continue;
 
 		for (j = 0; j < last_ob->num_blobs; j++) {
