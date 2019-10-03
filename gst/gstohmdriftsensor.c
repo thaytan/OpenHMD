@@ -43,6 +43,9 @@
 
 #include "gstohmdriftsensor.h"
 
+#define DUMP_BLOBS 1
+#define KALMAN_FILTER 1
+
 const guint32 OHMD_MARKER = ('O' << 24 | 'H' << 16 | 'M' << 8 | 'D');
 
 GST_DEBUG_CATEGORY_STATIC (gst_ohmd_rift_sensor_debug);
@@ -340,10 +343,16 @@ static gboolean tracker_process_blobs(GstOhmdRiftSensor *filter, GstClockTime ts
             filter->leds.num_points, camera_matrix, dist_coeffs, &rot, &trans,
             &num_leds, true)) {
 
+#if KALMAN_FILTER
     kalman_pose_update (filter->pose_filter, ts, &trans, &rot);
     kalman_pose_get_estimated (filter->pose_filter, &filter->pose_pos, &filter->pose_orient);
+#else
+    filter->pose_pos = trans;
+    filter->pose_orient = rot;
+#endif
 
 #if 0
+    /* Test code that just spins the HMD around 1 axis for visualisation testing */
     quatf pose_orient;
 		pose_orient.x = cos(filter->angle);
 		pose_orient.y = 0;
@@ -353,14 +362,30 @@ static gboolean tracker_process_blobs(GstOhmdRiftSensor *filter, GstClockTime ts
     filter->pose_orient = pose_orient;
 #endif
 
-    printf ("sensor %u Got PnP pose quat %f %f %f %f  pos %f %f %f from %d LEDs\n", 0,
+    g_print ("sensor %u Got PnP pose quat %f %f %f %f  pos %f %f %f from %d LEDs %d blobs\n", 0,
             filter->pose_orient.x, filter->pose_orient.y, filter->pose_orient.z, filter->pose_orient.w,
-            filter->pose_pos.x, filter->pose_pos.y, filter->pose_pos.z, num_leds);
+            filter->pose_pos.x, filter->pose_pos.y, filter->pose_pos.z, num_leds, bwobs->num_blobs);
     ret = TRUE;
   }
 
   return ret;
 }
+
+#if DUMP_BLOBS
+int compare_blobs (const void *elem1, const void *elem2)
+{
+  const struct blob *b1 = elem1;
+  const struct blob *b2 = elem2;
+
+  if (b1->y > b2->y) return  1;
+  if (b1->y < b2->y) return -1;
+
+  if (b1->x > b2->x) return  1;
+  if (b1->x < b2->x) return -1;
+
+  return 0;
+}
+#endif
 
 static GstFlowReturn
 gst_ohmd_rift_sensor_transform_frame (GstVideoFilter *base,
@@ -404,23 +429,32 @@ gst_ohmd_rift_sensor_transform_frame (GstVideoFilter *base,
   }
 
   if (filter->bwobs && filter->bwobs->num_blobs > 0) {
-     GST_INFO_OBJECT (filter, "Sensor %d phase %d Blobs: %d\n", filter->id, led_pattern_phase, filter->bwobs->num_blobs);
+     struct blob *sorted_blobs[MAX_BLOBS_PER_FRAME];
+
+     GST_INFO_OBJECT (filter, "Sensor %d phase %d Blobs: %d", filter->id, led_pattern_phase, filter->bwobs->num_blobs);
+#if DUMP_BLOBS
+     g_print ("Sensor %d phase %d Blobs: %d\n", filter->id, led_pattern_phase, filter->bwobs->num_blobs);
+#endif
+
+     /* Copy pointers into the sorted blobs array */
+     for (int index = 0; index < filter->bwobs->num_blobs; index++)
+       sorted_blobs[index] = filter->bwobs->blobs + index;
+
+#if DUMP_BLOBS
+       qsort (sorted_blobs, filter->bwobs->num_blobs, sizeof(struct blob *), compare_blobs);
+#endif
 
      for (int index = 0; index < filter->bwobs->num_blobs; index++)
      {
-       struct blob *b = filter->bwobs->blobs + index;
+       struct blob *b = sorted_blobs[index];
        gint start_x, start_y;
-#if 0
-       printf("Sensor %d Blob[%d]: %d,%d %dx%d id %d pattern %x age %u\n", filter->id,
-               index,
-               filter->bwobs->blobs[index].x,
-               filter->bwobs->blobs[index].y,
-               filter->bwobs->blobs[index].width,
-               filter->bwobs->blobs[index].height,
-               filter->bwobs->blobs[index].led_id,
-               filter->bwobs->blobs[index].pattern,
-               filter->bwobs->blobs[index].pattern_age);
+
+#if DUMP_BLOBS
+       g_print ("Sensor %d Blob[%d]: %d,%d %dx%d (age %d) id %d pattern %x (unchanged %u)\n", filter->id,
+         index, b->x, b->y, b->width, b->height,
+         b->age, b->led_id, b->pattern, b->pattern_age);
 #endif
+
       start_x = b->x - b->width/2;
       start_y = b->y - b->height/2;
       src = in_frame->data[0] + start_x + in_stride * start_y;
@@ -438,6 +472,9 @@ gst_ohmd_rift_sensor_transform_frame (GstVideoFilter *base,
       /* Draw a purple box around unknown blobs. Green around recognised ones */
       draw_rgb_rect (out_frame->data[0], width, out_stride, height, start_x, start_y, b->width, b->height, b->led_id == -1 ? 0xFF00FF : 0x00FF00);
     }
+#if DUMP_BLOBS
+     g_print ("\n");
+#endif
 
     if (tracker_process_blobs (filter, GST_BUFFER_PTS (in_frame->buffer))) {
       int i;
