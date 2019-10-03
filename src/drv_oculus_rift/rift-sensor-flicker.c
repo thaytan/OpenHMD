@@ -14,6 +14,9 @@
 
 #include <stdio.h>
 
+#define HAMMING_DISTANCE 0
+
+#if HAMMING_DISTANCE
 static int hamming_distance(uint16_t a, uint16_t b)
 {
 	uint16_t tmp = a ^ b;
@@ -26,6 +29,7 @@ static int hamming_distance(uint16_t a, uint16_t b)
 
 	return distance;
 }
+#endif
 
 static int pattern_find_id(rift_led *leds, int num_patterns,
 			   uint16_t pattern, int8_t *id)
@@ -37,10 +41,13 @@ static int pattern_find_id(rift_led *leds, int num_patterns,
 			*id = i;
 			return 2;
 		}
+
+#if HAMMING_DISTANCE
 		if (hamming_distance(pattern, leds[i].pattern) < 2) {
 			*id = i;
 			return 1;
 		}
+#endif
 	}
 
 	return -2;
