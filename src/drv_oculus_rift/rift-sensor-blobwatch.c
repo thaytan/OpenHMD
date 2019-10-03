@@ -382,3 +382,27 @@ void blobwatch_process(struct blobwatch *bw, uint8_t *frame,
 
 	bw->last_observation = current;
 }
+
+struct blob *blobwatch_find_blob_at(struct blobwatch *bw, int x, int y)
+{
+	int last = bw->last_observation;
+	struct blobservation *ob = &bw->history[last];
+  int i;
+
+	if (bw->last_observation == -1) {
+      return NULL;
+  }
+	for (i = 0; i < ob->num_blobs; i++) {
+		struct blob *b = &ob->blobs[i];
+		int dx = abs(x - b->x);
+		int dy = abs(y - b->y);
+
+    /* Check if the target is outside the bounding box */
+		if (2 * dx > b->width ||
+		    2 * dy > b->height)
+			continue;
+    return b;
+  }
+
+  return NULL;
+}
