@@ -488,13 +488,26 @@ gst_ohmd_rift_sensor_transform_frame (GstVideoFilter *base,
       for (i = 0; i < filter->leds.num_points; i++) {
         vec3f *p = filter->led_out_points + i;
         vec3f facing;
+        int x = round(p->x);
+        int y = round(p->y);
 
         oquatf_get_rotated(&filter->pose_orient, &filter->leds.points[i].dir, &facing);
 
-        if (facing.z < 0)
-          draw_rgb_marker (out_frame->data[0], width, out_stride, height, p->x, p->y, 8, 8, 0xFF0000);
-        else
-          draw_rgb_marker (out_frame->data[0], width, out_stride, height, p->x, p->y, 8, 8, 0x202000);
+        if (facing.z < 0) {
+          /* Camera facing */
+          /* Back project LED ids into blobs if we find them */
+          struct blob *b = blobwatch_find_blob_at(filter->bw, p->x, p->y);
+          if (b != NULL && b->led_id != i) {
+            /* Found a blob! */
+            g_print ("Marking LED %d at %d,%d\n", i, x, y);
+            b->led_id = i;
+          }
+          draw_rgb_marker (out_frame->data[0], width, out_stride, height, x, y, 8, 8, 0xFF0000);
+        } else {
+          draw_rgb_marker (out_frame->data[0], width, out_stride, height, x, y, 8, 8, 0x202000);
+        }
+
+
       }
     }
   }
