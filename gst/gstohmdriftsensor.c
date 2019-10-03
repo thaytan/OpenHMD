@@ -43,7 +43,7 @@
 
 #include "gstohmdriftsensor.h"
 
-#define DUMP_BLOBS 1
+#define DUMP_BLOBS 0
 #define KALMAN_FILTER 1
 
 const guint32 OHMD_MARKER = ('O' << 24 | 'H' << 16 | 'M' << 8 | 'D');
