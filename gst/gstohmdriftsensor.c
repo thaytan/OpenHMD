@@ -495,9 +495,10 @@ gst_ohmd_rift_sensor_transform_frame (GstVideoFilter *base,
 
         if (facing.z < 0) {
           /* Camera facing */
-          /* Back project LED ids into blobs if we find them */
+          /* Back project LED ids into blobs if we find them and the dot product
+           * shows them pointing strongly to the camera */
           struct blob *b = blobwatch_find_blob_at(filter->bw, p->x, p->y);
-          if (b != NULL && b->led_id != i) {
+          if (b != NULL && facing.z < -0.5 && b->led_id != i) {
             /* Found a blob! */
             g_print ("Marking LED %d at %d,%d\n", i, x, y);
             b->led_id = i;
