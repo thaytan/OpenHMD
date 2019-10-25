@@ -49,11 +49,13 @@ typedef struct _GstOhmdRiftSensorClass GstOhmdRiftSensorClass;
 
 struct _GstOhmdRiftSensor {
   GstVideoFilter element;
+  gint fps_n, fps_d;
 
   int id;
   rift_leds leds;
   vec3f *led_out_points;
 
+  GstClockTime last_pattern_time;
   uint8_t led_pattern_phase;
   struct blobwatch* bw;
   struct blobservation* bwobs;

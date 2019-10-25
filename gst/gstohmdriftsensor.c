@@ -91,9 +91,10 @@ static void gst_ohmd_rift_sensor_set_property (GObject * object, guint prop_id,
 static void gst_ohmd_rift_sensor_get_property (GObject * object, guint prop_id,
     GValue * value, GParamSpec * pspec);
 
-static gboolean gst_ohmd_rift_sensor_set_info (GstVideoFilter * filter,                                                                                                                  
+static gboolean gst_ohmd_rift_sensor_set_info (GstVideoFilter * filter,
   GstCaps * incaps, GstVideoInfo * in_info, GstCaps * outcaps,
   GstVideoInfo * out_info);
+
 static GstFlowReturn gst_ohmd_rift_sensor_transform_frame (GstVideoFilter * filter,
     GstVideoFrame * in_frame, GstVideoFrame * out_frame);
 
@@ -207,6 +208,7 @@ gst_ohmd_rift_sensor_init (GstOhmdRiftSensor *filter)
 {
   rift_leds_init (&filter->leds, 0);
 
+  filter->last_pattern_time = GST_CLOCK_TIME_NONE;
   filter->led_out_points = g_new0 (vec3f, filter->leds.num_points);
 
   filter->pose_filter = kalman_pose_new (NULL);
@@ -260,6 +262,13 @@ gst_ohmd_rift_sensor_set_info (GstVideoFilter *vf,
     GstVideoInfo * out_info)
 {
   GstOhmdRiftSensor *filter = GST_OHMDRIFTSENSOR (vf);
+
+  filter->fps_n = in_info->fps_n;
+  filter->fps_d = in_info->fps_d;
+  if (filter->fps_n == 0 || filter->fps_d == 0) {
+    filter->fps_n = 625;
+    filter->fps_n = 12;
+  }
 
   if (filter->bw)
     blobwatch_free (filter->bw);
@@ -400,17 +409,33 @@ gst_ohmd_rift_sensor_transform_frame (GstVideoFilter *base,
   gint in_stride = in_frame->info.stride[0];
   gint out_stride = out_frame->info.stride[0];
   guint8 led_pattern_phase = filter->led_pattern_phase;
+  GstClockTime in_ts = GST_BUFFER_PTS (in_frame->buffer);
 
   /* If there's an OHMD marker in the frame, we can read the pattern phase directly */
   if (GST_READ_UINT32_BE (src) == OHMD_MARKER) {
     led_pattern_phase = src[4];
     GST_LOG_OBJECT (filter, "Have LED pattern phase %u in frame", led_pattern_phase);
   }
+  else {
+    gint n_frames = 1;
 
-  filter->led_pattern_phase = (led_pattern_phase + 1) % 10;
+    /* Guess based on how much time passed */
+    if (GST_CLOCK_TIME_IS_VALID (in_ts)) {
+      if (GST_CLOCK_TIME_IS_VALID (filter->last_pattern_time)) {
+        GstClockTimeDiff ts_diff = in_ts - filter->last_pattern_time;
+        /* Calc frames elapsed, rounded to the nearest */
+        n_frames = gst_util_uint64_scale_round (ts_diff, filter->fps_n, filter->fps_d * GST_SECOND);
+        GST_LOG_OBJECT (filter, "TS diff %" G_GUINT64_FORMAT " frames = %d", ts_diff, n_frames);
+      }
+      filter->last_pattern_time = in_ts;
+    }
+    led_pattern_phase = (led_pattern_phase + n_frames) % 10;
+  }
 
-  if (GST_CLOCK_TIME_IS_VALID (GST_BUFFER_TIMESTAMP (in_frame->buffer)))
-    gst_object_sync_values (GST_OBJECT (filter), GST_BUFFER_TIMESTAMP (in_frame->buffer));
+  filter->led_pattern_phase = led_pattern_phase;
+
+  if (GST_CLOCK_TIME_IS_VALID (in_ts))
+    gst_object_sync_values (GST_OBJECT (filter), in_ts);
 
   blobwatch_process(filter->bw, src, width, height,
       led_pattern_phase, filter->leds.points,
@@ -476,7 +501,7 @@ gst_ohmd_rift_sensor_transform_frame (GstVideoFilter *base,
      g_print ("\n");
 #endif
 
-    if (tracker_process_blobs (filter, GST_BUFFER_PTS (in_frame->buffer))) {
+    if (tracker_process_blobs (filter, in_ts)) {
       int i;
 
       /* Project HMD LEDs into the image */
@@ -484,6 +509,36 @@ gst_ohmd_rift_sensor_transform_frame (GstVideoFilter *base,
           &filter->camera_matrix, filter->dist_coeffs,
           &filter->pose_orient, &filter->pose_pos,
           filter->led_out_points);
+
+      /* Check how many LEDs have matching blobs in this pose,
+       * if there's enough we have a good match */
+      gint matched_visible_blobs = 0;
+      gint visible_leds = 0;
+      for (i = 0; i < filter->leds.num_points; i++) {
+        vec3f *p = filter->led_out_points + i;
+        vec3f facing;
+        int x = round(p->x);
+        int y = round(p->y);
+
+        oquatf_get_rotated(&filter->pose_orient, &filter->leds.points[i].dir, &facing);
+
+        if (facing.z < -0.5) {
+          /* Strongly Camera facing */
+          struct blob *b = blobwatch_find_blob_at(filter->bw, x, y);
+          visible_leds++;
+          if (b != NULL) {
+            matched_visible_blobs++;
+          }
+        }
+      }
+      gboolean good_pose_match = FALSE;
+      if (visible_leds > 4 && matched_visible_blobs > 0) {
+        if (visible_leds < 2 * matched_visible_blobs) {
+          good_pose_match = TRUE;
+          g_print ("Found good pose match - %u LEDs matched %u visible ones\n",
+              matched_visible_blobs, visible_leds);
+        }
+      }
 
       for (i = 0; i < filter->leds.num_points; i++) {
         vec3f *p = filter->led_out_points + i;
@@ -495,20 +550,20 @@ gst_ohmd_rift_sensor_transform_frame (GstVideoFilter *base,
 
         if (facing.z < 0) {
           /* Camera facing */
-          /* Back project LED ids into blobs if we find them and the dot product
-           * shows them pointing strongly to the camera */
-          struct blob *b = blobwatch_find_blob_at(filter->bw, p->x, p->y);
-          if (b != NULL && facing.z < -0.5 && b->led_id != i) {
-            /* Found a blob! */
-            g_print ("Marking LED %d at %d,%d\n", i, x, y);
-            b->led_id = i;
+          if (good_pose_match) {
+            /* Back project LED ids into blobs if we find them and the dot product
+             * shows them pointing strongly to the camera */
+            struct blob *b = blobwatch_find_blob_at(filter->bw, x, y);
+            if (b != NULL && facing.z < -0.5 && b->led_id != i) {
+              /* Found a blob! */
+              g_print ("Marking LED %d at %d,%d\n", i, x, y);
+              b->led_id = i;
+            }
           }
           draw_rgb_marker (out_frame->data[0], width, out_stride, height, x, y, 8, 8, 0xFF0000);
         } else {
           draw_rgb_marker (out_frame->data[0], width, out_stride, height, x, y, 8, 8, 0x202000);
         }
-
-
       }
     }
   }
