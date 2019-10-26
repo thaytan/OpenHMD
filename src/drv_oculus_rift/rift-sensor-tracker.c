@@ -59,6 +59,7 @@ struct rift_sensor_ctx_s
 
   ohmd_pw_video_stream *debug_vid;
   ohmd_pw_debug_stream *debug_metadata;
+  vec3f last_good_pos;
 };
 
 struct rift_tracker_ctx_s
@@ -101,14 +102,31 @@ static int tracker_process_blobs(rift_sensor_ctx *ctx)
     kalman_pose_update (ctx->pose_filter, ctx->frame_sof_ts, &trans, &rot);
     kalman_pose_get_estimated (ctx->pose_filter, &ctx->pose_pos, &ctx->pose_orient);
 
+#if 0
     printf ("sensor %u Got PnP pose quat %f %f %f %f  pos %f %f %f from %d LEDs\n", ctx->id,
 				ctx->pose_orient.x, ctx->pose_orient.y, ctx->pose_orient.z, ctx->pose_orient.w,
 				ctx->pose_pos.x, ctx->pose_pos.y, ctx->pose_pos.z,
 				num_leds);
+#endif
 		ret = 1;
   }
 
 	return ret;
+}
+
+void
+rift_sensor_tracker_get_last_pos (rift_tracker_ctx *tracker_ctx, float *pos)
+{
+	int i;
+	for (i = 0; i < tracker_ctx->n_sensors; i++) {
+		rift_sensor_ctx *sensor_ctx = tracker_ctx->sensors[i];
+		vec3f cur = sensor_ctx->last_good_pos;
+		if (cur.x != 0.0 || cur.y != 0 || cur.z != 0) {
+  			pos[0] = cur.x;
+  			pos[1] = cur.y;
+  			pos[2] = cur.z;
+		}
+	}
 }
 
 static int
@@ -241,6 +259,39 @@ static void new_frame_cb(struct rift_sensor_uvc_stream *stream)
           &sensor_ctx->pose_orient, &sensor_ctx->pose_pos,
           sensor_ctx->led_out_points);
 
+      /* Check how many LEDs have matching blobs in this pose,
+       * if there's enough we have a good match */
+      int matched_visible_blobs = 0;
+      int visible_leds = 0;
+      for (i = 0; i < leds->num_points; i++) {
+        vec3f *p = sensor_ctx->led_out_points + i;
+        vec3f facing;
+        int x = round(p->x);
+        int y = round(p->y);
+
+        oquatf_get_rotated(&sensor_ctx->pose_orient, &leds->points[i].dir, &facing);
+
+        if (facing.z < -0.5) {
+          /* Strongly Camera facing */
+          struct blob *b = blobwatch_find_blob_at(sensor_ctx->bw, x, y);
+          visible_leds++;
+          if (b != NULL) {
+            matched_visible_blobs++;
+          }
+        }
+      }
+
+      bool good_pose_match = false;
+      if (visible_leds > 4 && matched_visible_blobs > 0) {
+        if (visible_leds < 2 * matched_visible_blobs) {
+          good_pose_match = true;
+          printf ("Found good pose match - %u LEDs matched %u visible ones\n",
+              matched_visible_blobs, visible_leds);
+	  sensor_ctx->last_good_pos = sensor_ctx->pose_pos;
+        }
+      }
+
+      if (good_pose_match) {
       for (i = 0; i < leds->num_points; i++) {
         vec3f *p = sensor_ctx->led_out_points + i;
         vec3f facing;
@@ -277,6 +328,7 @@ static void new_frame_cb(struct rift_sensor_uvc_stream *stream)
 					sensor_ctx->bwobs->blobs[index].pattern_age);
 			}
 #endif
+	}
 	}
 	if (sensor_ctx->debug_vid) {
 		/* Write 'OHMD' and the flicker pattern phase into the frame for debug / storing */

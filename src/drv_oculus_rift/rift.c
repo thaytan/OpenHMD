@@ -507,6 +507,7 @@ static int getf_hmd(rift_hmd_t *hmd, ohmd_float_value type, float* out)
 
 	case OHMD_POSITION_VECTOR:
 		out[0] = out[1] = out[2] = 0;
+		rift_sensor_tracker_get_last_pos (hmd->tracker_ctx, out);
 		break;
 
 	case OHMD_CONTROLS_STATE:
