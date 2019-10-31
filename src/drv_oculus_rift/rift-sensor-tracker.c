@@ -28,10 +28,17 @@
 #define min(a,b) ((a) < (b) ? (a) : (b))
 
 #define MAX_SENSORS 4
+#define MAX_DEVICES 3
 
 #define MAX_OBJECT_LEDS 64
 
 typedef struct rift_sensor_ctx_s rift_sensor_ctx;
+typedef struct rift_tracked_device_s rift_tracked_device;
+
+struct rift_tracked_device_s
+{
+	fusion *fusion;
+};
 
 struct rift_sensor_ctx_s
 {
@@ -59,7 +66,6 @@ struct rift_sensor_ctx_s
 
   ohmd_pw_video_stream *debug_vid;
   ohmd_pw_debug_stream *debug_metadata;
-  vec3f last_good_pos;
 };
 
 struct rift_tracker_ctx_s
@@ -77,6 +83,8 @@ struct rift_tracker_ctx_s
 
   rift_sensor_ctx *sensors[MAX_SENSORS];
   uint8_t n_sensors;
+
+  rift_tracked_device devices[MAX_DEVICES];
 };
 
 static uint8_t rift_sensor_tracker_get_led_pattern_phase (rift_tracker_ctx *ctx, uint64_t *ts);
@@ -88,8 +96,16 @@ static int tracker_process_blobs(rift_sensor_ctx *ctx)
 
 	dmat3 *camera_matrix = &ctx->camera_matrix;
 	double *dist_coeffs = ctx->dist_coeffs;
+
 	quatf rot = ctx->pose_orient;
 	vec3f trans = ctx->pose_pos;
+
+	if (ctx->tracker->devices[0].fusion) {
+    rot = ctx->tracker->devices[0].fusion->orient;
+    trans = ctx->tracker->devices[0].fusion->world_position;
+    // Metres to micrometres
+    ovec3f_multiply_scalar (&trans, 1000000.0, &trans);
+  }
 
 	int num_leds = 0;
 
@@ -115,18 +131,11 @@ static int tracker_process_blobs(rift_sensor_ctx *ctx)
 }
 
 void
-rift_sensor_tracker_get_last_pos (rift_tracker_ctx *tracker_ctx, float *pos)
+rift_sensor_tracker_add_device (rift_tracker_ctx *ctx, int device_id, fusion *f)
 {
-	int i;
-	for (i = 0; i < tracker_ctx->n_sensors; i++) {
-		rift_sensor_ctx *sensor_ctx = tracker_ctx->sensors[i];
-		vec3f cur = sensor_ctx->last_good_pos;
-		if (cur.x != 0.0 || cur.y != 0 || cur.z != 0) {
-  			pos[0] = cur.x;
-  			pos[1] = cur.y;
-  			pos[2] = cur.z;
-		}
-	}
+		/* TODO: Pass LED models too */
+		assert (device_id < MAX_DEVICES);
+		ctx->devices[device_id].fusion = f;
 }
 
 static int
@@ -287,7 +296,17 @@ static void new_frame_cb(struct rift_sensor_uvc_stream *stream)
           good_pose_match = true;
           printf ("Found good pose match - %u LEDs matched %u visible ones\n",
               matched_visible_blobs, visible_leds);
-	  sensor_ctx->last_good_pos = sensor_ctx->pose_pos;
+					/* FIXME: Our camera-local pose/position need translating based
+					 * on room calibration */
+					if (sensor_ctx->tracker->devices[0].fusion) {
+						vec3f world_pos_metre;
+						// micrometres to metres
+						ovec3f_multiply_scalar (&sensor_ctx->pose_pos, 1.0 / 1000000.0, &world_pos_metre);
+
+						ofusion_tracker_update (sensor_ctx->tracker->devices[0].fusion,
+								sensor_ctx->frame_sof_ts, &world_pos_metre,
+								&sensor_ctx->pose_orient);
+					}
         }
       }
 
