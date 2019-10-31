@@ -49,5 +49,7 @@ typedef struct {
 
 void ofusion_init(fusion* me);
 void ofusion_update(fusion* me, float dt, const vec3f* ang_vel, const vec3f* accel, const vec3f* mag_field);
+void ofusion_update_at (fusion* me, float time, const vec3f* ang_vel, const vec3f* accel, const vec3f* mag_field);
+void ofusion_tracker_update(fusion* me, float time, const vec3f* pos, const quatf *orient);
 
 #endif

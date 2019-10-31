@@ -36,23 +36,23 @@ void ofusion_init(fusion* me)
 	me->last_output_time = 0.0;
 }
 
-void ofusion_update(fusion* me, float dt, const vec3f* ang_vel, const vec3f* accel, const vec3f* mag)
+static void ofusion_update_dt(fusion* me, float dt, const vec3f* ang_vel, const vec3f* accel, const vec3f* mag)
 {
-	me->ang_vel = *ang_vel;
-	me->accel = *accel;
-	me->raw_mag = *mag;
-
-	me->mag = *mag;
-
 	vec3f world_accel;
 	oquatf_get_rotated(&me->orient, accel, &world_accel);
-
 	me->iterations += 1;
-	me->time += dt;
 
-	ofq_add(&me->mag_fq, mag);
-	ofq_add(&me->accel_fq, &world_accel);
+	me->ang_vel = *ang_vel;
 	ofq_add(&me->ang_vel_fq, ang_vel);
+
+	me->accel = *accel;
+	ofq_add(&me->accel_fq, &world_accel);
+
+	if (mag) {
+		me->raw_mag = *mag;
+		me->mag = *mag;
+		ofq_add(&me->mag_fq, mag);
+	}
 
 	// Accumulate our rolling average of gravity
 	int iters = OHMD_MIN (10000, me->iterations);
@@ -179,3 +179,26 @@ void ofusion_update(fusion* me, float dt, const vec3f* ang_vel, const vec3f* acc
 				ovec3f_multiply_scalar (&me->world_vel, -1.0, &me->world_vel);
 	}
 }
+
+void ofusion_update(fusion* me, float dt, const vec3f* ang_vel, const vec3f* accel, const vec3f* mag)
+{
+	me->time += dt;
+	ofusion_update_dt (me, dt, ang_vel, accel, mag);
+}
+
+void ofusion_update_at (fusion* me, float time, const vec3f* ang_vel, const vec3f* accel, const vec3f* mag)
+{
+	float dt = time - me->time;
+	ofusion_update_dt (me, dt, ang_vel, accel, mag);
+}
+
+void ofusion_tracker_update(fusion* me, float time, const vec3f* pos, const quatf *orient)
+{
+	// TODO: Use Kalman filtering
+	// For now, directly update the time pose and position for now, and calculate
+	// some max velocity based on error from the current position
+	me->world_position = *pos;
+	me->orient = *orient;
+	ovec3f_set(&me->world_vel, 0, 0, 0);
+}
+
