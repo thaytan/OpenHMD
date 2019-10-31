@@ -11,6 +11,10 @@
 #include <string.h>
 #include "openhmdi.h"
 
+//#define GRAVITY_CONSTANT (9.82f)
+#define GRAVITY_CONSTANT (9.366f) // Hack for rift for now
+#define GRAVITY_TOLERANCE (0.1f) // Hack for rift for now
+
 void ofusion_init(fusion* me)
 {
 	memset(me, 0, sizeof(fusion));
@@ -20,8 +24,16 @@ void ofusion_init(fusion* me)
 	ofq_init(&me->accel_fq, 20);
 	ofq_init(&me->ang_vel_fq, 20);
 
+	me->time = 0.0;
 	me->flags = FF_USE_GRAVITY;
 	me->grav_gain = 0.05f;
+	me->accel_mean = GRAVITY_CONSTANT;
+
+	/* Assume we start at rest at world 0,0,0 */
+	ovec3f_set(&me->world_position, 0, 0, 0);
+	ovec3f_set(&me->world_vel, 0, 0, 0);
+
+	me->last_output_time = 0.0;
 }
 
 void ofusion_update(fusion* me, float dt, const vec3f* ang_vel, const vec3f* accel, const vec3f* mag)
@@ -42,8 +54,11 @@ void ofusion_update(fusion* me, float dt, const vec3f* ang_vel, const vec3f* acc
 	ofq_add(&me->accel_fq, &world_accel);
 	ofq_add(&me->ang_vel_fq, ang_vel);
 
-	float ang_vel_length = ovec3f_get_length(ang_vel);
+	// Accumulate our rolling average of gravity
+	int iters = OHMD_MIN (10000, me->iterations);
+	me->accel_mean = (iters*me->accel_mean + ovec3f_get_length(accel)) / (iters+1);
 
+	float ang_vel_length = ovec3f_get_length(ang_vel);
 	if(ang_vel_length > 0.0001f){
 		vec3f rot_axis =
 			{{ ang_vel->x / ang_vel_length, ang_vel->y / ang_vel_length, ang_vel->z / ang_vel_length }};
@@ -58,14 +73,14 @@ void ofusion_update(fusion* me, float dt, const vec3f* ang_vel, const vec3f* acc
 
 	// gravity correction
 	if(me->flags & FF_USE_GRAVITY){
-		const float gravity_tolerance = .4f, ang_vel_tolerance = .1f;
+		const float gravity_tolerance = GRAVITY_TOLERANCE, ang_vel_tolerance = .1f;
 		const float min_tilt_error = 0.05f, max_tilt_error = 0.01f;
 
 		// if the device is within tolerance levels, count this as the device is level and add to the counter
 		// otherwise reset the counter and start over
 
 		me->device_level_count =
-			fabsf(ovec3f_get_length(accel) - 9.82f) < gravity_tolerance * 2.0f && ang_vel_length < ang_vel_tolerance
+			fabsf(ovec3f_get_length(accel) - GRAVITY_CONSTANT) < gravity_tolerance * 2.0f && ang_vel_length < ang_vel_tolerance
 			? me->device_level_count + 1 : 0;
 
 		// device has been level for long enough, grab mean from the accelerometer filter queue (last n values)
@@ -76,7 +91,7 @@ void ofusion_update(fusion* me, float dt, const vec3f* ang_vel, const vec3f* acc
 
 			vec3f accel_mean;
 			ofq_get_mean(&me->accel_fq, &accel_mean);
-			if (ovec3f_get_length(&accel_mean) - 9.82f < gravity_tolerance)
+			if (ovec3f_get_length(&accel_mean) - GRAVITY_CONSTANT < gravity_tolerance)
 			{
 				// Calculate a cross product between what the device
 				// thinks is up and what gravity indicates is down.
@@ -95,6 +110,7 @@ void ofusion_update(fusion* me, float dt, const vec3f* ang_vel, const vec3f* acc
 					me->grav_error_axis = tilt;
 				}
 			}
+			me->have_gravity_vector = true;
 		}
 
 		// perform gravity tilt correction
@@ -124,4 +140,42 @@ void ofusion_update(fusion* me, float dt, const vec3f* ang_vel, const vec3f* acc
 	// mitigate drift due to floating point
 	// inprecision with quat multiplication.
 	oquatf_normalize_me(&me->orient);
+
+	/* Skip position interpolation at first until we've had
+	 * time to measure gravity */
+	if (me->have_gravity_vector) {
+		// Take the new corrected orientation and re-convert the accel to world accel
+		// then subtract expected gravity acceleration, and double integrate to get
+		// new position / velocity
+		vec3f gravity_vec = {{0, me->accel_mean, 0}};
+		vec3f delta_vel, delta_position, tmp;
+		oquatf_get_rotated(&me->orient, accel, &world_accel);
+
+#if 0
+		printf ("dt %f accel %f,%f,%f (mag %f) world %f,%f,%f (mag %f)\n", dt,
+				accel->x, accel->y, accel->z, ovec3f_get_length(accel),
+				world_accel.x, world_accel.y, world_accel.z, ovec3f_get_length(&world_accel));
+#endif
+
+		/* Subtract gravity vector to get local acceleration */
+		vec3f local_accel;
+		ovec3f_subtract (&world_accel, &gravity_vec, &local_accel);
+
+		// new position = old_velocity*dt + 0.5 * accel*dt*dt
+		ovec3f_multiply_scalar (&me->world_vel, dt, &delta_position);
+		ovec3f_multiply_scalar (&local_accel, 0.5*dt*dt, &tmp);
+		ovec3f_add (&delta_position, &tmp, &delta_position);
+		ovec3f_add (&me->world_position, &delta_position, &me->world_position);
+
+		// new velocity = old_velocity + accel*dt
+		ovec3f_multiply_scalar (&local_accel, dt, &delta_vel);
+		ovec3f_add (&me->world_vel, &delta_vel, &me->world_vel);
+		// clamp to 20m/s (9.8 for Y)
+		me->world_vel.x = OHMD_CLAMP (me->world_vel.x, -20.0, 20.0);
+		me->world_vel.y = OHMD_CLAMP (me->world_vel.y, -GRAVITY_CONSTANT, 20);
+		me->world_vel.z = OHMD_CLAMP (me->world_vel.z, -20, 20);
+
+		if (ovec3f_get_length (&me->world_position) > 50.0)
+				ovec3f_multiply_scalar (&me->world_vel, -1.0, &me->world_vel);
+	}
 }

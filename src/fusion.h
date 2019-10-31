@@ -37,6 +37,14 @@ typedef struct {
 	float grav_error_angle;
 	vec3f grav_error_axis;
 	float grav_gain; // amount of correction
+
+	// world coordinates velocity and position tracking
+	vec3f world_vel;
+	vec3f world_position;
+	float accel_mean;
+
+	float last_output_time;
+	bool have_gravity_vector;
 } fusion;
 
 void ofusion_init(fusion* me);
