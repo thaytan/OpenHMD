@@ -229,6 +229,7 @@ static void new_frame_cb(struct rift_sensor_uvc_stream *stream)
 	uint8_t led_pattern_phase = sensor_ctx->led_pattern_phase;
 	uint64_t cur_phase_ts;
 	uint8_t cur_led_pattern_phase = rift_sensor_tracker_get_led_pattern_phase (sensor_ctx->tracker, &cur_phase_ts);
+	bool good_pose_match = false;
 
 	if (cur_led_pattern_phase != led_pattern_phase) {
 		/* The LED phase changed mid-frame. Choose which one to keep */
@@ -290,7 +291,6 @@ static void new_frame_cb(struct rift_sensor_uvc_stream *stream)
         }
       }
 
-      bool good_pose_match = false;
       if (visible_leds > 4 && matched_visible_blobs > 0) {
         if (visible_leds < 2 * matched_visible_blobs) {
           good_pose_match = true;
@@ -353,6 +353,16 @@ static void new_frame_cb(struct rift_sensor_uvc_stream *stream)
 		/* Write 'OHMD' and the flicker pattern phase into the frame for debug / storing */
 		stream->frame[0] = 'O'; stream->frame[1] = 'H'; stream->frame[2] = 'M'; stream->frame[3] = 'D';
 		stream->frame[4] = led_pattern_phase;
+		// If we got a good pose match, draw something in the top right
+		if (good_pose_match) {
+				int x, y;
+				for (y = 0; y < 16; y++) {
+						uint8_t *cur = stream->frame + (y * stream->width) - 16;
+						for (x = 0; x < 16; x++) {
+								*cur++ = 0xFF;
+						}
+				}
+		}
 
 		ohmd_pw_video_stream_push (sensor_ctx->debug_vid, sensor_ctx->frame_sof_ts, stream->frame);
 	}
