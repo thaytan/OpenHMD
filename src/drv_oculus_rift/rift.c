@@ -41,6 +41,7 @@ struct rift_hmd_s {
 	hid_device* handle;
 	hid_device* radio_handle;
 	pkt_sensor_range sensor_range;
+	pkt_imu_calibration imu_calibration;
 	pkt_sensor_display_info display_info;
 	rift_coordinate_frame coordinate_frame, hw_coordinate_frame;
 	pkt_sensor_config sensor_config;
@@ -227,10 +228,44 @@ static void handle_tracker_sensor_msg(rift_hmd_t* priv, unsigned char* buffer, i
 	}
 
 	for(int i = 0; i < s->num_samples; i++){
-		vec3f_from_rift_vec(s->samples[i].accel, &priv->raw_accel);
-		vec3f_from_rift_vec(s->samples[i].gyro, &priv->raw_gyro);
+		vec3f gyro;
+		vec3f accel;
 
-		ofusion_update(&priv->sensor_fusion, dt, &priv->raw_gyro, &priv->raw_accel, &priv->raw_mag);
+		vec3f_from_rift_vec(s->samples[i].accel, &accel);
+		vec3f_from_rift_vec(s->samples[i].gyro, &gyro);
+
+		/* If the rift isn't applying calibration, we should */
+		if (!(priv->sensor_config.flags & RIFT_SCF_USE_CALIBRATION)) {
+				const float (*acc_calibration)[3] = priv->imu_calibration.accel_matrix;
+				const float (*gyro_calibration)[3] = priv->imu_calibration.gyro_matrix;
+
+				/* Apply correction offsets first */
+				ovec3f_subtract (&gyro, &priv->imu_calibration.gyro_offset, &gyro);
+				ovec3f_subtract (&accel, &priv->imu_calibration.accel_offset, &accel);
+
+				/* Then the 3x3 rotation matrix in row-major order */
+				accel.x = acc_calibration[0][0] * accel.x +
+						  acc_calibration[0][1] * accel.y +
+						  acc_calibration[0][2] * accel.z;
+				accel.y = acc_calibration[1][0] * accel.x +
+						  acc_calibration[1][1] * accel.y +
+						  acc_calibration[1][2] * accel.z;
+				accel.z = acc_calibration[2][0] * accel.x +
+						  acc_calibration[2][1] * accel.y +
+						  acc_calibration[2][2] * accel.z;
+
+				gyro.x = gyro_calibration[0][0] * gyro.x +
+						  gyro_calibration[0][1] * gyro.y +
+						  gyro_calibration[0][2] * gyro.z;
+				gyro.y = gyro_calibration[1][0] * gyro.x +
+						  gyro_calibration[1][1] * gyro.y +
+						  gyro_calibration[1][2] * gyro.z;
+				gyro.z = gyro_calibration[2][0] * gyro.x +
+						  gyro_calibration[2][1] * gyro.y +
+						  gyro_calibration[2][2] * gyro.z;
+		}
+
+		ofusion_update(&priv->sensor_fusion, dt, &gyro, &accel, &priv->raw_mag);
 		dt = TICK_LEN; // TODO: query the Rift for the sample rate
 	}
 
@@ -853,6 +888,10 @@ static rift_hmd_t *open_hmd(ohmd_driver* driver, ohmd_device_desc* desc)
 	decode_sensor_range(&priv->sensor_range, buf, size);
 	dump_packet_sensor_range(&priv->sensor_range);
 
+	size = get_feature_report(priv, RIFT_CMD_IMU_CALIBRATION, buf);
+	decode_imu_calibration(&priv->imu_calibration, buf, size);
+	dump_packet_imu_calibration(&priv->imu_calibration);
+
 	// Read and decode display information
 	size = get_feature_report(priv, RIFT_CMD_DISPLAY_INFO, buf);
 	decode_sensor_display_info(&priv->display_info, buf, size);
@@ -866,7 +905,8 @@ static rift_hmd_t *open_hmd(ohmd_driver* driver, ohmd_device_desc* desc)
 	// if the sensor has display info data, use HMD coordinate frame
 	priv->coordinate_frame = priv->display_info.distortion_type != RIFT_DT_NONE ? RIFT_CF_HMD : RIFT_CF_SENSOR;
 
-	// enable calibration
+	// enable calibration, but these don't seem to stick. We check later if
+	// we need to do it manually
 	SETFLAG(priv->sensor_config.flags, RIFT_SCF_USE_CALIBRATION, 1);
 	SETFLAG(priv->sensor_config.flags, RIFT_SCF_AUTO_CALIBRATION, 1);
 

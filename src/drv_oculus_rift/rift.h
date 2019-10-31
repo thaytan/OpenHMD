@@ -18,7 +18,7 @@
 
 typedef enum {
 	RIFT_CMD_SENSOR_CONFIG = 2,
-	RIFT_CMD_IMU_CALIBRATION = 3, /* Not used. The HMD does calibration handling */
+	RIFT_CMD_IMU_CALIBRATION = 3,
 	RIFT_CMD_RANGE = 4,
 	RIFT_CMD_DK1_KEEP_ALIVE = 8,
 	RIFT_CMD_DISPLAY_INFO = 9,
@@ -81,6 +81,14 @@ typedef enum {
 #define RIFT_TRACKING_PERIOD_US_CV1             19200
 #define RIFT_TRACKING_VSYNC_OFFSET              0
 #define RIFT_TRACKING_DUTY_CYCLE                0x7f
+
+typedef struct {
+	vec3f accel_offset;
+  vec3f gyro_offset;
+  float accel_matrix[3][3];
+  float gyro_matrix[3][3];
+	float temperature;
+} pkt_imu_calibration;
 
 typedef struct {
 	uint16_t command_id;
@@ -319,6 +327,7 @@ typedef struct {
 } pkt_rift_radio_report;
 
 bool decode_sensor_range(pkt_sensor_range* range, const unsigned char* buffer, int size);
+bool decode_imu_calibration (pkt_imu_calibration* imu_calib, const unsigned char* buffer, int size);
 bool decode_sensor_display_info(pkt_sensor_display_info* info, const unsigned char* buffer, int size);
 bool decode_sensor_config(pkt_sensor_config* config, const unsigned char* buffer, int size);
 bool decode_tracker_sensor_msg_dk1(pkt_tracker_sensor* msg, const unsigned char* buffer, int size);
@@ -339,6 +348,7 @@ int encode_radio_control_cmd(unsigned char* buffer, uint8_t a, uint8_t b, uint8_
 int encode_radio_data_read_cmd (unsigned char *buffer, uint16_t offset, uint16_t length);
 
 void dump_packet_sensor_range(const pkt_sensor_range* range);
+void dump_packet_imu_calibration (const pkt_imu_calibration* imu_calib);
 void dump_packet_sensor_config(const pkt_sensor_config* config);
 void dump_packet_sensor_display_info(const pkt_sensor_display_info* info);
 void dump_packet_tracker_sensor(const pkt_tracker_sensor* sensor);

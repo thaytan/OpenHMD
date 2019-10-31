@@ -28,6 +28,22 @@
 #define WRITE16(_val) WRITE8((_val) & 0xff); WRITE8(((_val) >> 8) & 0xff);
 #define WRITE32(_val) WRITE16((_val) & 0xffff) *buffer; WRITE16(((_val) >> 16) & 0xffff);
 
+/*
+ * Unpacks three signed 21-bit values packed into a big-endian 64-bit value
+ * and stores them in a floating point vector after multiplying by scale.
+ */
+static inline void unpack_3x21bit(float scale, const unsigned char* buffer, vec3f *v)
+{
+	int x = (buffer[0] << 24)          | (buffer[1] << 16) | ((buffer[2] & 0xF8) << 8);
+	int y = ((buffer[2] & 0x07) << 29) | (buffer[3] << 21) | (buffer[4] << 13) | ((buffer[5] & 0xC0) << 5);
+	int z = ((buffer[5] & 0x3F) << 26) | (buffer[6] << 18) | (buffer[7] << 10);
+
+	v->x = scale * (x >> 11);
+	v->y = scale * (y >> 11);
+	v->z = scale * (z >> 11);
+}
+
+
 bool decode_position_info(pkt_position_info* p, const unsigned char* buffer, int size)
 {
 	if(size != 30) {
@@ -83,6 +99,45 @@ bool decode_sensor_range(pkt_sensor_range* range, const unsigned char* buffer, i
 	range->accel_scale = READ8;
 	range->gyro_scale = READ16;
 	range->mag_scale = READ16;
+
+	return true;
+}
+
+bool decode_imu_calibration(pkt_imu_calibration *imu_calib, const unsigned char* buffer, int size)
+{
+	const int expected_size=69;
+	int i;
+	uint16_t temperature;
+
+	if(size != expected_size) {
+		LOGE("invalid packet size (expected %d but got %d)", expected_size, size);
+		return false;
+	}
+
+	SKIP_CMD;
+	SKIP16;
+
+	/* 10⁻⁴ m/s² */
+	unpack_3x21bit(1e-4f, buffer, &imu_calib->accel_offset);
+	buffer += 8;
+	/* 10⁻⁴ rad/s */
+	unpack_3x21bit(1e-4f, buffer, &imu_calib->gyro_offset);
+	buffer += 8;
+
+	for (i = 0; i < 3; i++) {
+		const float scale = 1.0f / ((1 << 20) - 1);
+
+		unpack_3x21bit(scale, buffer, (vec3f *)&imu_calib->accel_matrix[i]);
+		buffer += 8;
+		imu_calib->accel_matrix[i][i] += 1.0f;
+
+		unpack_3x21bit(scale, buffer, (vec3f *)&imu_calib->gyro_matrix[i]);
+		buffer += 8;
+		imu_calib->gyro_matrix[i][i] += 1.0f;
+	}
+
+	temperature = READ16;
+	imu_calib->temperature = 0.01f * temperature;
 
 	return true;
 }
@@ -480,4 +535,26 @@ void dump_packet_tracker_sensor(const pkt_tracker_sensor* sensor)
 		sensor->frame_count, sensor->frame_timestamp,
 		sensor->led_pattern_phase, sensor->exposure_count,
 		sensor->exposure_timestamp);
+}
+
+void dump_packet_imu_calibration(const pkt_imu_calibration *imu_calib)
+{
+	int i;
+
+	(void)imu_calib;
+	LOGI ("HMD IMU calibration  gyro_offset [ %f, %f, %f ]  accel_offset [ %f, %f, %f ]",
+		imu_calib->gyro_offset.x, imu_calib->gyro_offset.y, imu_calib->gyro_offset.z,
+		imu_calib->accel_offset.x, imu_calib->accel_offset.y, imu_calib->accel_offset.z);
+
+	  LOGI("  gyro_calib = ");
+		for (i = 0; i < 3; i++) {
+		  LOGI("  [ %8.3f, %8.3f, %8.3f ]", imu_calib->gyro_matrix[i][0],
+				imu_calib->gyro_matrix[i][1], imu_calib->gyro_matrix[i][2]);
+		}
+
+		LOGI("  accel_calib = ");
+		for (i = 0; i < 3; i++) {
+		  LOGI("  [ %8.3f, %8.3f, %8.3f ]", imu_calib->accel_matrix[i][0],
+				imu_calib->accel_matrix[i][1], imu_calib->accel_matrix[i][2]);
+		}
 }
