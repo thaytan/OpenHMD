@@ -66,7 +66,8 @@ void rift_sensor_flicker_process(struct blob *blobs, int num_blobs,
 	int thresh = 0;
 
 	for (b = blobs; b < blobs + num_blobs; b++) {
-		uint16_t pattern;
+		uint16_t pattern = 0;
+		uint16_t min_bit, max_bit;
 
 		/* Update pattern only if blob was observed previously */
 		if (b->age < 1 || b->pattern_prev_phase == -1) {
@@ -82,45 +83,12 @@ void rift_sensor_flicker_process(struct blob *blobs, int num_blobs,
 			continue;
 		}
 
-		/*
-		 * Interpret brightness change of more than 10% as rising
-		 * or falling edge and set/clear the appropriate pattern bit
-		 * and increment / decrement the accumulator. This provides
-		 * some hysteresis against spurious changes in LED id from
-		 * the headset moving, while still providing for reasonably
-		 * quick reacquisition if the ID changes due to mis-tracking.
-		 */
-		pattern = b->pattern;
-		if (b->area * 10 > b->last_area * 11) {
-			if (b->pattern_bits[phase] < 3)
-				b->pattern_bits[phase]++;
-		} else if (b->area * 11 < b->last_area * 10) {
-			if (b->pattern_bits[phase] > -3)
-				b->pattern_bits[phase]--;
-		}
-		else {
-			/* No change. Bias back toward zero */
-			if (b->pattern_bits[phase] > 0)
-			  b->pattern_bits[phase]--;
-			else if (b->pattern_bits[phase] > 0)
-			  b->pattern_bits[phase]++;
-		}
 
-		/* If we've seen this blob for a while, get more serious about
-		 * the flicker tracking and require a threshold of at least +/- 1 */
-		if (b->age > 9)
-			thresh = 1;
+		
+		b->pattern_bits[phase] = b->area;
+		
 
-		if (b->pattern_bits[phase] > thresh) {
-			pattern |= (1 << phase);
-		} else if (b->pattern_bits[phase] < -thresh) {
-			pattern &= ~(1 << phase);
-		}
-		else {
-			uint16_t prev_bit = (pattern >> b->pattern_prev_phase) & 0x1;
-			pattern &= ~(1 << phase);
-			pattern |= (prev_bit << phase);
-		}
+		
 
 		b->pattern_prev_phase = phase;
 
@@ -129,6 +97,23 @@ void rift_sensor_flicker_process(struct blob *blobs, int num_blobs,
 		 * consensus about the blinking phase is established
 		 */
 		if (b->age < 10)
+			continue;
+		
+		min_bit = 65535;
+		max_bit = 0;
+		for (int i = 0; i < 10; i++) {
+			if (b->pattern_bits[i] > max_bit)
+				max_bit = b->pattern_bits[i];
+			if (b->pattern_bits[i] < min_bit)
+				min_bit = b->pattern_bits[i];
+		}
+		thresh = min_bit + (max_bit - min_bit)/2;
+		for (int i = 0; i < 10; i++) {
+			if (b->pattern_bits[i] > thresh)
+				pattern |= (1 << i);
+		}
+
+		if (min_bit < 5)
 			continue;
 
 #if 0
@@ -147,12 +132,16 @@ void rift_sensor_flicker_process(struct blob *blobs, int num_blobs,
 		/* If the blob already has an LED id, require at least 3 repetitions of a new pattern
 		 * before changing the ID */
 		if (b->led_id == -1 || b->pattern_age > 30) {
+		  int led_id = b->led_id;
 		  b->pattern = pattern;
 		  if (pattern == 0)
 				  b->led_id = -1;
 		  else {
 				  success += pattern_find_id(leds, num_leds, pattern,
 					     &b->led_id);
+		  }
+		  if (b->led_id != led_id) {
+		  	printf("Changing led %d from %d to %d pattern 0x%x at age %d\n", b->track_index, led_id, b->led_id, pattern, b->age);
 		  }
 		}
 	}
