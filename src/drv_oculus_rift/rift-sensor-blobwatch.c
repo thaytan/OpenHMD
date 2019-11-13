@@ -51,7 +51,6 @@ struct blobwatch {
 	int height;
 	int last_observation;
 	struct blobservation history[NUM_FRAMES_HISTORY];
-	struct extent_line *el;
 	bool debug;
 	bool flicker_enable;
 };
@@ -79,14 +78,12 @@ struct blobwatch *blobwatch_new(int width, int height)
 	bw->last_observation = -1;
 	bw->debug = true;
 	bw->flicker_enable = true;
-	bw->el = calloc(height, sizeof(*bw->el));
 
 	return bw;
 }
 
 void blobwatch_free (struct blobwatch *bw)
 {
-	free (bw->el);
 	free (bw);
 }
 
@@ -227,24 +224,23 @@ static int process_scanline(uint8_t *line, int width, int height, int y,
 }
 
 /*
- * Collects extents from all scanlines in a frame and stores them in
- * the extent_line array el.
+ * Processes extents from all scanlines in a frame and stores the
+ * resulting blobs in ob->blobs.
  */
-static void process_frame(uint8_t *lines, int width, int height,
-			  struct extent_line *el, struct blobservation *ob)
+static void process_frame(uint8_t *lines, int width, int height, struct blobservation *ob)
 {
-	struct extent_line *last_el;
+	struct extent_line el1;
+	struct extent_line el2;
 	int index = 0;
 	int y;
 
 	ob->num_blobs = 0;
 
-	index = process_scanline(lines, width, height, 0, el, NULL, 0, ob);
+	index = process_scanline(lines, width, height, 0, &el1, NULL, 0, ob);
 
 	for (y = 1; y < height; y++) {
-		last_el = el++;
 		lines += width;
-		index = process_scanline(lines, width, height, y, el, last_el,
+		index = process_scanline(lines, width, height, y, y&1? &el2 : &el1, y&1? &el1 : &el2,
 					 index, ob);
 	}
 
@@ -282,7 +278,7 @@ void blobwatch_process(struct blobwatch *bw, uint8_t *frame,
 	struct extent_line *el = bw->el;
 	int i, j;
 
-	process_frame(frame, width, height, el, ob);
+	process_frame(frame, width, height, ob);
 
 	/* If there is no previous observation, our work is done here */
 	if (bw->last_observation == -1) {
