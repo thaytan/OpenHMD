@@ -307,10 +307,27 @@ draw_rgb_marker (guint8 *pixels, gint width, gint stride, gint height,
   }
 }
 
+static void clamp(gint *val, gint max) {
+  if (*val < 0)
+    *val = 0;
+  if (*val >= max)
+    *val = max-1;
+}
+
+static void clamp_rect(gint *x, gint *y, gint *rw, gint *rh, gint width, gint height) {
+  clamp(x, width);
+  clamp(y, height);
+  clamp(rw, width - *x);
+  clamp(rh, height - *y);
+}
+
+
 static void
 draw_rgb_rect (guint8 *pixels, gint width, gint stride, gint height,
     gint start_x, gint start_y, gint box_width, gint box_height, guint32 colour)
 {
+  clamp_rect(&start_x, &start_y, &box_width, &box_height, width, height);
+
   gint x, y;
   guint8 *dest = pixels + stride * start_y + 3 * start_x;
   for (x = 0; x < box_width; x++) {
@@ -472,7 +489,7 @@ gst_ohmd_rift_sensor_transform_frame (GstVideoFilter *base,
      for (int index = 0; index < filter->bwobs->num_blobs; index++)
      {
        struct blob *b = sorted_blobs[index];
-       gint start_x, start_y;
+       gint start_x, start_y, w, h;
 
 #if DUMP_BLOBS
        g_print ("Sensor %d Blob[%d]: %d,%d %dx%d (age %d) id %d pattern %x (unchanged %u)\n", filter->id,
@@ -482,11 +499,14 @@ gst_ohmd_rift_sensor_transform_frame (GstVideoFilter *base,
 
       start_x = b->x - b->width/2;
       start_y = b->y - b->height/2;
+      w = b->width;
+      h = b->height;
+      clamp_rect(&start_x, &start_y, &w, &h, width, height);
       src = in_frame->data[0] + start_x + in_stride * start_y;
       dest = out_frame->data[0] + 3 * start_x + out_stride * start_y;
     
-      for (y = 0; y < b->height; y++) {
-        for (x = 0; x < b->width; x++) {
+      for (y = 0; y < h; y++) {
+        for (x = 0; x < w; x++) {
           /* fill the blue channel for observed blobs */
           dest[3*x+2] = src[x];
         }
