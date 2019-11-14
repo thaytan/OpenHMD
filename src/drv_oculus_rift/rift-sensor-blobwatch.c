@@ -262,6 +262,17 @@ static int find_free_track(uint8_t *tracked)
 	return -1;
 }
 
+void copy_matching_blob(struct blob *to, struct blob* from) {
+	to->vx = to->x - from->x;
+	to->vy = to->y - from->y;
+	memcpy (to->pattern_bits, from->pattern_bits, sizeof (from->pattern_bits));
+	to->pattern = from->pattern;
+	to->pattern_age = from->pattern_age;
+	to->pattern_prev_phase = from->pattern_prev_phase;
+	to->led_id = from->led_id;
+	to->age = from->age + 1;
+}
+
 /*
  * Detects blobs in the current frame and compares them with the observation
  * history.
@@ -275,7 +286,9 @@ void blobwatch_process(struct blobwatch *bw, uint8_t *frame,
 	int current = (last + 1) % NUM_FRAMES_HISTORY;
 	struct blobservation *ob = &bw->history[current];
 	struct blobservation *last_ob = &bw->history[last];
-	struct extent_line *el = bw->el;
+	int closest_ob[MAX_BLOBS_PER_FRAME]; // index of last_ob that is closest to each ob
+	int closest_last_ob[MAX_BLOBS_PER_FRAME]; // index of ob that is closest to each last_ob
+	int closest_last_ob_distsq[MAX_BLOBS_PER_FRAME]; // distsq of ob that is closest to each last_ob
 	int i, j;
 
 	process_frame(frame, width, height, ob);
@@ -288,24 +301,30 @@ void blobwatch_process(struct blobwatch *bw, uint8_t *frame,
 		return;
 	}
 
-	/* Otherwise track blobs over time */
-	memset(ob->tracked, 0, sizeof(uint8_t) * MAX_BLOBS_PER_FRAME);
+	/* Clear closest_* */
+	for (i = 0; i < MAX_BLOBS_PER_FRAME; i++) {
+		closest_ob[i] = -1;
+		closest_last_ob[i] = -1;
+		closest_last_ob_distsq[i] = 1000000;
+	}
 
-	/*
-	 * Associate blobs found at a previous blobs' estimated next
-	 * positions with their predecessors.
-	 */
+	int scan_again = 1;
+	int scan_times = 0;
+	while (scan_again) {
+		scan_again = 0;
+
+		/* Try to match each blob with the closest blob from the previous frame. */
 	for (i = 0; i < ob->num_blobs; i++) {
+			if (closest_ob[i] != -1)
+				continue; // already has a match
+			
 		struct blob *b2 = &ob->blobs[i];
-
-		/* Filter out tall and wide (<= 1:2, >= 2:1) blobs */
-		if ((b2->width > 2 && 2 * b2->width <= b2->height) ||
-		    (b2->height > 2 && b2->width >= 2 * b2->height))
-			continue;
+			int closest_j = -1;
+			int closest_distsq = -1;
 
 		for (j = 0; j < last_ob->num_blobs; j++) {
 			struct blob *b1 = &last_ob->blobs[j];
-			int x, y, dx, dy;
+				int x, y, dx, dy, distsq;
 
 			/* Estimate b1's next position */
 			x = b1->x + b1->vx;
@@ -314,32 +333,65 @@ void blobwatch_process(struct blobwatch *bw, uint8_t *frame,
 			/* Absolute distance */
 			dx = abs(x - b2->x);
 			dy = abs(y - b2->y);
+				distsq = dx * dx + dy * dy;
 
-			/*
-			 * Check if b1's estimated next position falls
-			 * into b2's bounding box.
-			 */
-			if (2 * dx > b2->width ||
-			    2 * dy > b2->height)
+				if (closest_distsq < 0 || distsq < closest_distsq) {
+					if (closest_last_ob[j] != -1 && closest_last_ob_distsq[j] <= distsq) {
+						// some blob already claimed this one as closest
+						// don't usurp if previous one is closer
+						continue;
+					}
+					closest_j = j;
+					closest_distsq = distsq;
+				}
+			}
+
+			closest_ob[i] = closest_j;
+
+			// didn't find any matching blobs
+			if (closest_j < 0)
 				continue;
 
-			b2->age = b1->age + 1;
+			if (closest_last_ob[closest_j] != -1) {
+				// we are usurping some other blob because we are closer
+				closest_ob[closest_last_ob[closest_j]] = -1;
+				scan_again++;
+			}
+
+			closest_last_ob[closest_j] = i;
+			closest_last_ob_distsq[closest_j] = closest_distsq;
+		}
+
+		if (scan_times++ > 100)
+			printf("scan_times: %d\n", scan_times);
+
+	}
+
+	/* Copy blobs that found a closest match */
+	for (i = 0; i < ob->num_blobs; i++) {
+		if (closest_ob[i] < 0)
+			continue; // no match
+		
+		struct blob *b2 = &ob->blobs[i];
+		struct blob *b1 = &last_ob->blobs[closest_ob[i]];
+
 			if (b1->track_index >= 0 &&
 			    ob->tracked[b1->track_index] == 0) {
 				/* Only overwrite tracks that are not already set */
 				b2->track_index = b1->track_index;
 				ob->tracked[b2->track_index] = i + 1;
-				memcpy (b2->pattern_bits, b1->pattern_bits, sizeof (b1->pattern_bits));
-				b2->pattern = b1->pattern;
-				b2->pattern_age = b1->pattern_age;
-				b2->pattern_prev_phase = b1->pattern_prev_phase;
-				b2->led_id = b1->led_id;
 			}
-			b2->vx = b2->x - b1->x;
-			b2->vy = b2->y - b1->y;
-			b2->last_area = b1->area;
-			break;
+		copy_matching_blob(b2, b1);
 		}
+	// printf("done matching\n");
+
+	/*
+	 * Clear the tracking array where blobs have gone missing.
+	 */
+	for (i = 0; i < MAX_BLOBS_PER_FRAME; i++) {
+		int t = ob->tracked[i];
+		if (t > 0 && ob->blobs[t-1].track_index != i)
+			ob->tracked[i] = 0;
 	}
 
 	/*
