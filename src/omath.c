@@ -47,6 +47,12 @@ void ovec3f_add(const vec3f* a, const vec3f* b, vec3f* out)
 		out->arr[i] = a->arr[i] + b->arr[i];
 }
 
+void ovec3f_inverse(vec3f *me)
+{
+	for(int i = 0; i < 3; i++)
+		me->arr[i] = -me->arr[i];
+}
+
 float ovec3f_get_dot(const vec3f* me, const vec3f* vec)
 {
 	return me->x * vec->x + me->y * vec->y + me->z * vec->z;
@@ -226,6 +232,86 @@ void oquatf_get_mat4x4(const quatf* me, const vec3f* point, float mat[4][4])
 	mat[3][3] = 1;
 }
 
+
+void oposef_init(posef* p, const vec3f *pos, const quatf *orient)
+{
+	p->pos = *pos;
+	p->orient = *orient;
+}
+
+/* Invert a pose - which changes it
+ * to the pose of the origin point as
+ * seen from the passed in pose.
+ *
+ * This is equivalent to oposef_apply_inverse()
+ * with this pose as the transform, and
+ * pos=(0,0,0) and orient=(0,0,0,1) as the
+ * src pose to apply it to.
+ */
+void oposef_inverse(posef *me)
+{
+	vec3f tmp;
+
+	/* Invert the orientation rotation to get the
+	 * rotation back to the original coordinate system */
+	oquatf_inverse(&me->orient);
+
+	/* The original origin point is the inverse of the
+	 * pose position, rotated by the inverse pose orientation
+	 * to make it relative to this new coordinate system */
+	tmp = me->pos;
+	ovec3f_inverse(&tmp);
+	oquatf_get_rotated(&me->orient, &tmp, &me->pos);
+}
+
+/* Apply a transformation pose to the pose 'me'. This
+ * has the effect of usine xform as a reference frame, and
+ * 'me' as a pose relative to that reference, and calculating
+ * the overall pose in the global frame.
+ */
+void oposef_apply(const posef *me, const posef *xform, posef *dest)
+{
+	/* Use a temporary, in case dest == me */
+	vec3f tmp;
+	quatf tmp_orient = xform->orient;
+
+	/* rotate into the global frame, then offset */
+	oquatf_get_rotated(&tmp_orient, &me->pos, &tmp);
+	ovec3f_add(&tmp, &xform->pos, &dest->pos);
+
+	oquatf_mult(&me->orient, &xform->orient, &dest->orient);
+}
+
+/* Apply the inverse of 'xform' to the pose 'me'.
+ * This has the effect of calculating the pose that is
+ * relative to the 'xform' reference frame - moving from global
+ * frame to local frame.
+ */
+void oposef_apply_inverse(const posef *me, const posef *xform, posef *dest)
+{
+	vec3f tmp;
+	quatf tmp_orient = xform->orient;
+
+	oquatf_inverse(&tmp_orient);
+
+	/* Get the target position relative to the
+	 * new reference pose and rotate it into this
+	 * pose */
+	ovec3f_subtract(&me->pos, &xform->pos, &tmp);
+	oquatf_get_rotated(&tmp_orient, &tmp, &dest->pos);
+
+	/* Get the rotation of the new pose relative to the
+	 * reference frame by rotating it backward */
+	oquatf_mult(&me->orient, &tmp_orient, &dest->orient);
+}
+
+/*
+ * Generate the full 4x4 transformation matrix
+ * equivalent to the pose */
+void oposef_get_mat4x4(const posef* me, float mat[4][4])
+{
+  oquatf_get_mat4x4(&me->orient, &me->pos, mat);
+}
 
 // matrix
 

@@ -20,12 +20,15 @@
 
 bool float_eq(float a, float b, float t);
 bool vec3f_eq(vec3f v1, vec3f v2, float t);
+bool quatf_eq(quatf q1, quatf q2, float t);
+bool mat4x4f_eq(const mat4x4f m1, const mat4x4f m2, float t);
 
 // vec3f tests
 void test_ovec3f_normalize_me();
 void test_ovec3f_get_length();
 void test_ovec3f_get_angle();
 void test_ovec3f_get_dot();
+void test_ovec3f_inverse();
 
 // quatf tests
 void test_oquatf_init_axis();
@@ -39,6 +42,11 @@ void test_oquatf_inverse();
 void test_oquatf_diff();
 
 void test_oquatf_get_mat4x4();
+
+// Pose tests
+void test_oposef_init();
+void test_oposef_inverse();
+void test_oposef_apply();
 
 // high-level tests
 void test_highlevel_open_close_device();

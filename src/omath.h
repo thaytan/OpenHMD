@@ -38,6 +38,7 @@ float ovec3f_get_angle(const vec3f* me, const vec3f* vec);
 float ovec3f_get_dot(const vec3f* me, const vec3f* vec);
 void ovec3f_subtract(const vec3f* a, const vec3f* b, vec3f* out);
 void ovec3f_add(const vec3f* a, const vec3f* b, vec3f* out);
+void ovec3f_inverse(vec3f *me);
 void ovec3f_multiply_scalar (const vec3f* a, const float s, vec3f* out);
 
 
@@ -62,6 +63,18 @@ float oquatf_get_dot(const quatf* me, const quatf* q);
 void oquatf_inverse(quatf* me);
 
 void oquatf_get_mat4x4(const quatf* me, const vec3f* point, float mat[4][4]);
+
+// Pose = position + orientation
+typedef struct {
+	vec3f pos;
+	quatf orient;
+} posef;
+
+void oposef_init(posef* p, const vec3f *pos, const quatf *orient);
+void oposef_inverse(posef *me);
+void oposef_apply(const posef *me, const posef *xform, posef *dest);
+void oposef_apply_inverse(const posef *me, const posef *xform, posef *dest);
+void oposef_get_mat4x4(const posef* me, float mat[4][4]);
 
 // matrix
 

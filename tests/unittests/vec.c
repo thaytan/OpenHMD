@@ -104,4 +104,15 @@ void test_ovec3f_get_dot()
 	}
 }
 
+void test_ovec3f_inverse()
+{
+	const float t = 0.001;
+	vec3f v1 = {{ 5.0, 10.0, -23.0}};
+	vec3f v2;
+
+	v2 = v1;
+	ovec3f_inverse (&v2);
+	ovec3f_inverse (&v2);
+	TAssert(vec3f_eq(v1, v2, t));
+}
 

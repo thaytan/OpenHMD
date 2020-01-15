@@ -24,6 +24,7 @@ int main()
 	Test(test_ovec3f_get_length);
 	Test(test_ovec3f_get_angle);
 	Test(test_ovec3f_get_dot);
+	Test(test_ovec3f_inverse);
 	printf("\n");
 	
 	printf("quatf tests\n");
@@ -33,6 +34,11 @@ int main()
 	Test(test_oquatf_inverse);
 	Test(test_oquatf_diff);
 	printf("\n");
+
+	printf("pose tests\n");
+	Test(test_oposef_init);
+	Test(test_oposef_inverse);
+	Test(test_oposef_apply);
 
 	printf("high level tests\n");
 	Test(test_highlevel_open_close_device);

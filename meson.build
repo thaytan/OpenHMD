@@ -274,9 +274,11 @@ if get_option('tests')
 		'src/omath.c',
 		'tests/unittests/highlevel.c',
 		'tests/unittests/main.c',
+		'tests/unittests/mat4x4.c',
 		'tests/unittests/quat.c',
 		'tests/unittests/tests.h',
-		'tests/unittests/vec.c'
+		'tests/unittests/vec.c',
+		'tests/unittests/pose.c'
 	]
 
 	unittests = executable(
