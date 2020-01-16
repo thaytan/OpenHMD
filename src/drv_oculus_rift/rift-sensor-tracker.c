@@ -116,6 +116,10 @@ static int tracker_process_blobs(rift_sensor_ctx *ctx)
   if (estimate_initial_pose(bwobs->blobs, bwobs->num_blobs, ctx->tracker->leds->points,
             ctx->tracker->leds->num_points, camera_matrix, dist_coeffs, &rot, &trans,
             &num_leds, true)) {
+    // Reverse the Z direction of the translation we detected so motion toward the camera is
+    // forward motion
+    ovec3f_inverse (&trans);
+
     kalman_pose_update (ctx->pose_filter, ctx->frame_sof_ts, &trans, &rot);
     kalman_pose_get_estimated (ctx->pose_filter, &ctx->pose_pos, &ctx->pose_orient);
 
@@ -263,11 +267,15 @@ static void new_frame_cb(struct rift_sensor_uvc_stream *stream)
 
     if (tracker_process_blobs (sensor_ctx)) {
       int i;
+      quatf *rot = &sensor_ctx->pose_orient;
+      vec3f trans = sensor_ctx->pose_pos;
+
+      ovec3f_inverse (&trans);
 
       /* Project HMD LEDs into the image */
       rift_project_points(leds->points, leds->num_points,
           &sensor_ctx->camera_matrix, sensor_ctx->dist_coeffs,
-          &sensor_ctx->pose_orient, &sensor_ctx->pose_pos,
+          &sensor_ctx->pose_orient, &trans,
           sensor_ctx->led_out_points);
 
       /* Check how many LEDs have matching blobs in this pose,
@@ -276,13 +284,17 @@ static void new_frame_cb(struct rift_sensor_uvc_stream *stream)
       int visible_leds = 0;
       for (i = 0; i < leds->num_points; i++) {
         vec3f *p = sensor_ctx->led_out_points + i;
-        vec3f facing;
         int x = round(p->x);
         int y = round(p->y);
 
-        oquatf_get_rotated(&sensor_ctx->pose_orient, &leds->points[i].dir, &facing);
+        vec3f normal, position;
+        double facing_dot;
+        oquatf_get_rotated(rot, &leds->points[i].pos, &position);
+        ovec3f_add (&trans, &position, &position);
+        oquatf_get_rotated(rot, &leds->points[i].dir, &normal);
+        facing_dot = ovec3f_get_dot (&position, &normal);
 
-        if (facing.z < -0.5) {
+        if (facing_dot < -0.25) {
           /* Strongly Camera facing */
           struct blob *b = blobwatch_find_blob_at(sensor_ctx->bw, x, y);
           visible_leds++;
@@ -292,11 +304,16 @@ static void new_frame_cb(struct rift_sensor_uvc_stream *stream)
         }
       }
 
-      if (visible_leds > 4 && matched_visible_blobs > 0) {
+      if (visible_leds > 4 && matched_visible_blobs > 4) {
         if (visible_leds < 2 * matched_visible_blobs) {
           good_pose_match = true;
           printf ("Found good pose match - %u LEDs matched %u visible ones\n",
               matched_visible_blobs, visible_leds);
+			    printf ("pose quat %f %f %f %f  pos %f %f %f\n",
+							sensor_ctx->pose_orient.x, sensor_ctx->pose_orient.y,
+							sensor_ctx->pose_orient.z, sensor_ctx->pose_orient.w,
+							sensor_ctx->pose_pos.x, sensor_ctx->pose_pos.y, sensor_ctx->pose_pos.z);
+
 					/* FIXME: Our camera-local pose/position need translating based
 					 * on room calibration */
 					if (sensor_ctx->tracker->devices[0].fusion) {
@@ -309,18 +326,26 @@ static void new_frame_cb(struct rift_sensor_uvc_stream *stream)
 								&sensor_ctx->pose_orient);
 					}
         }
+        else {
+          printf ("Failed pose match - only %u LEDs matched %u visible ones\n",
+              matched_visible_blobs, visible_leds);
+        }
       }
 
       if (good_pose_match) {
       for (i = 0; i < leds->num_points; i++) {
         vec3f *p = sensor_ctx->led_out_points + i;
-        vec3f facing;
         int x = round(p->x);
         int y = round(p->y);
 
-        oquatf_get_rotated(&sensor_ctx->pose_orient, &leds->points[i].dir, &facing);
+					vec3f normal, position;
+					double facing_dot;
+					oquatf_get_rotated(rot, &leds->points[i].pos, &position);
+					ovec3f_add (&trans, &position, &position);
+					oquatf_get_rotated(rot, &leds->points[i].dir, &normal);
+					facing_dot = ovec3f_get_dot (&position, &normal);
 
-        if (facing.z < 0) {
+					if (facing_dot < -0.25) {
           /* Camera facing */
           /* Back project LED ids into blobs if we find them */
           struct blob *b = blobwatch_find_blob_at(sensor_ctx->bw, x, y);
