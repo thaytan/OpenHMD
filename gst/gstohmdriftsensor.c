@@ -536,13 +536,17 @@ gst_ohmd_rift_sensor_transform_frame (GstVideoFilter *base,
       gint visible_leds = 0;
       for (i = 0; i < filter->leds.num_points; i++) {
         vec3f *p = filter->led_out_points + i;
-        vec3f facing;
         int x = round(p->x);
         int y = round(p->y);
 
-        oquatf_get_rotated(&filter->pose_orient, &filter->leds.points[i].dir, &facing);
+        vec3f normal, position;
+        double facing_dot;
+        oquatf_get_rotated(&filter->pose_orient, &filter->leds.points[i].pos, &position);
+        ovec3f_add (&filter->pose_pos, &position, &position);
+        oquatf_get_rotated(&filter->pose_orient, &filter->leds.points[i].dir, &normal);
+        facing_dot = ovec3f_get_dot (&position, &normal);
 
-        if (facing.z < -0.5) {
+        if (facing_dot < -0.25) {
           /* Strongly Camera facing */
           struct blob *b = blobwatch_find_blob_at(filter->bw, x, y);
           visible_leds++;
