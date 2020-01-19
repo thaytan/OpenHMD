@@ -5,6 +5,8 @@
  * SPDX-License-Identifier: BSL-1.0
  */
 
+ #define _GNU_SOURCE
+
 #include <libusb.h>
 #include <stdio.h>
 #include <string.h>
@@ -392,8 +394,18 @@ static void new_frame_cb(struct rift_sensor_uvc_stream *stream)
 
 		ohmd_pw_video_stream_push (sensor_ctx->debug_vid, sensor_ctx->frame_sof_ts, stream->frame);
 	}
-	if (sensor_ctx->debug_metadata)
-		ohmd_pw_debug_stream_push (sensor_ctx->debug_metadata, sensor_ctx->frame_sof_ts, "{ debug: \"debug!\" }");
+	if (sensor_ctx->debug_metadata) {
+		char *debug_str;
+
+		asprintf (&debug_str, "{ ts: %llu, exposure_phase: %d, position: { %f, %f, %f }, orientation: { %f, %f, %f, %f } }",
+		  (unsigned long long) sensor_ctx->frame_sof_ts, led_pattern_phase,
+		  sensor_ctx->pose_pos.x, sensor_ctx->pose_pos.y, sensor_ctx->pose_pos.z,
+		  sensor_ctx->pose_orient.x, sensor_ctx->pose_orient.y,
+		  sensor_ctx->pose_orient.z, sensor_ctx->pose_orient.w);
+
+		ohmd_pw_debug_stream_push (sensor_ctx->debug_metadata, sensor_ctx->frame_sof_ts, debug_str);
+		free(debug_str);
+  }
 }
 
 
