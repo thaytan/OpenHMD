@@ -15,6 +15,7 @@
 
 #include "rift-sensor-blobwatch.h"
 #include "rift-sensor-ar0134.h"
+#include "rift-sensor-mt9v034.h"
 #include "rift-sensor-esp770u.h"
 #include "rift-sensor-uvc.h"
 
@@ -381,6 +382,12 @@ rift_sensor_new (ohmd_context* ohmd_ctx, int id, const char *serial_no, libusb_d
   char stream_id[64];
   int ret;
 
+  libusb_device *dev = libusb_get_device(usb_devh);
+  struct libusb_device_descriptor desc;
+  ret = libusb_get_device_descriptor(dev, &desc);
+  if (ret < 0)
+	  return ret;
+
   sensor_ctx = ohmd_alloc(ohmd_ctx, sizeof (rift_sensor_ctx));
 
   sensor_ctx->id = id;
@@ -415,23 +422,37 @@ rift_sensor_new (ohmd_context* ohmd_ctx, int id, const char *serial_no, libusb_d
   ASSERT_MSG(ret >= 0, fail, "could not start streaming\n");
   sensor_ctx->stream_started = 1;
 
-  LOGV("Sensor %d enabling exposure sync\n", id);
-  ret = rift_sensor_ar0134_init(sensor_ctx->usb_devh);
-  if (ret < 0)
-    goto fail;
+  switch (desc.idProduct) {
+	case CV1_PID: 
+	{
+	  LOGV("Sensor %d enabling exposure sync\n", id);
+	  ret = rift_sensor_ar0134_init(sensor_ctx->usb_devh);
+	  if (ret < 0)
+	    goto fail;
 
-  LOGV("Sensor %d - setting up radio\n", id);
-  ret = rift_sensor_esp770u_setup_radio(sensor_ctx->usb_devh, radio_id);
-  if (ret < 0)
-    goto fail;
+	  LOGV("Sensor %d - setting up radio\n", id);
+	  ret = rift_sensor_esp770u_setup_radio(sensor_ctx->usb_devh, radio_id);
+	  if (ret < 0)
+	    goto fail;
 
-  LOGV("Sensor %d - reading Calibration\n", id);
-  ret = rift_sensor_get_calibration(sensor_ctx);
-  if (ret < 0) {
-	LOGE("Failed to read Rift sensor calibration data");
-	goto fail;
+	  LOGV("Sensor %d - reading Calibration\n", id);
+	  ret = rift_sensor_get_calibration(sensor_ctx);
+	  if (ret < 0) {
+		LOGE("Failed to read Rift sensor calibration data");
+		goto fail;
+	  }
+	}
+	case DK2_PID:
+	{
+    	ret = mt9v034_setup(usb_devh);
+		if (ret < 0)
+		    return ret;
+
+		ret = mt9v034_set_sync(usb_devh, true);
+		if (ret < 0)
+		    return ret;
+	}
   }
-
   LOGI("Sensor %d ready\n", id);
 
   return sensor_ctx;
@@ -510,8 +531,9 @@ rift_sensor_tracker_new (ohmd_context* ohmd_ctx,
 		ret = libusb_get_device_descriptor(devs[i], &desc);
 		if (ret < 0)
 			continue; /* Can't access this device */
-		if (desc.idVendor != 0x2833 || desc.idProduct != CV1_PID)
+		if (desc.idVendor != 0x2833 || (desc.idProduct != CV1_PID && desc.idProduct != DK2_PID))
 			continue;
+
 		ret = libusb_open(devs[i], &usb_devh);
 		if (ret) {
 			fprintf (stderr, "Failed to open Rift Sensor device. Check permissions\n");

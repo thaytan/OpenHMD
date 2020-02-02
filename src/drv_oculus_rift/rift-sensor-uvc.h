@@ -4,6 +4,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#define DK2_PID		0x0201
 #define CV1_PID		0x0211
 
 struct rift_sensor_uvc_stream {

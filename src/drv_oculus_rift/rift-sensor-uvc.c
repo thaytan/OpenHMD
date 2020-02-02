@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "rift-sensor-esp570.h"
 #include "rift-sensor-uvc.h"
 
 #define SET_CUR 0x01
@@ -269,6 +270,21 @@ int rift_sensor_uvc_stream_setup (libusb_context *ctx, libusb_device_handle *dev
 		return ret;
 
 	switch (desc.idProduct) {
+	case DK2_PID:
+		control.dwFrameInterval = __cpu_to_le32(166666);
+		control.dwMaxVideoFrameSize = __cpu_to_le32(752 * 480);
+		control.dwMaxPayloadTransferSize = __cpu_to_le16(3000);
+
+		stream->stride = 752;
+		stream->width = 752;
+		stream->height = 480;
+
+		num_packets = 32;
+		packet_size = 3060;
+		alt_setting = 7;
+
+		esp570_setup_unknown_3(devh);
+		break;
 	case CV1_PID:
 		control.bFrameIndex = 4;
 		control.dwFrameInterval = __cpu_to_le32(192000);
@@ -309,7 +325,10 @@ int rift_sensor_uvc_stream_setup (libusb_context *ctx, libusb_device_handle *dev
 	control.dwClockFrequency = __le32_to_cpu(control.dwClockFrequency);
 
 	control.dwMaxPayloadTransferSize = __le32_to_cpu(control.dwMaxPayloadTransferSize);
-	packet_size = 16384;
+
+	switch (desc.idProduct) {
+		case CV1_PID: packet_size = 16384;
+	}
 
 	ret = libusb_set_interface_alt_setting(devh, 1, alt_setting);
 	if (ret) {
