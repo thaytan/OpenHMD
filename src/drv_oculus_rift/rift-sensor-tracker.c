@@ -425,7 +425,7 @@ rift_sensor_new (ohmd_context* ohmd_ctx, int id, const char *serial_no, libusb_d
   switch (desc.idProduct) {
 	case CV1_PID: 
 	{
-	  LOGV("Sensor %d enabling exposure sync\n", id);
+	  LOGV("Sensor %d - enabling exposure sync\n", id);
 	  ret = rift_sensor_ar0134_init(sensor_ctx->usb_devh);
 	  if (ret < 0)
 	    goto fail;
@@ -444,13 +444,16 @@ rift_sensor_new (ohmd_context* ohmd_ctx, int id, const char *serial_no, libusb_d
 	}
 	case DK2_PID:
 	{
+
+		LOGV("Sensor %d - setting up\n", id);
     	ret = mt9v034_setup(usb_devh);
 		if (ret < 0)
-		    return ret;
+			goto fail;
 
+		LOGV("Sensor %d - enabling exposure sync\n", id);
 		ret = mt9v034_set_sync(usb_devh, true);
 		if (ret < 0)
-		    return ret;
+			goto fail;
 	}
   }
   LOGI("Sensor %d ready\n", id);
