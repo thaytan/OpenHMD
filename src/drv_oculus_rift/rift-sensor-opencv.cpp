@@ -4,6 +4,9 @@
  * SPDX-License-Identifier:	LGPL-2.0+ or BSL-1.0
  */
 #include <opencv2/calib3d/calib3d.hpp>
+#if CV_MAJOR_VERSION >= 4
+#include <opencv2/calib3d/calib3d_c.h>
+#endif
 #include <iostream>
 
 using namespace std;

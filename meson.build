@@ -33,7 +33,10 @@ if not dep_hidapi.found()
 endif
 dep_threads = dependency('threads')
 dep_libusb = dependency('libusb-1.0')
-dep_opencv = dependency('opencv')
+dep_opencv = dependency('opencv4', required: false)
+if not dep_opencv.found()
+	dep_opencv = dependency('opencv')
+endif
 
 deps = [
 	dep_libm,
