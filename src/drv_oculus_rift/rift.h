@@ -25,7 +25,7 @@ typedef enum {
 	RIFT_CMD_TRACKING_CONFIG = 0xc,
 	RIFT_CMD_POSITION_INFO = 0xf,
 	RIFT_CMD_PATTERN_INFO = 0x10,
-	RIFT_CMD_CV1_KEEP_ALIVE = 0x11,
+	RIFT_CMD_DK2_KEEP_ALIVE = 0x11,
 	RIFT_CMD_RADIO_CONTROL = 0x1a,
 	RIFT_CMD_RADIO_READ_DATA = 0x1b,
 	RIFT_CMD_ENABLE_COMPONENTS = 0x1d,
@@ -152,6 +152,8 @@ typedef struct {
 	uint16_t command_id;
 	uint16_t keep_alive_interval;
 } pkt_keep_alive;
+
+#define RIFT_DK2_KEEP_ALIVE_TYPE	0x0b
 
 typedef struct {
 	uint8_t flags;
@@ -343,6 +345,7 @@ void vec3f_from_rift_vec(const int32_t* smp, vec3f* out_vec);
 int encode_tracking_config(unsigned char* buffer, const pkt_tracking_config* tracking);
 int encode_sensor_config(unsigned char* buffer, const pkt_sensor_config* config);
 int encode_dk1_keep_alive(unsigned char* buffer, const pkt_keep_alive* keep_alive);
+int encode_dk2_keep_alive(unsigned char* buffer, const pkt_keep_alive* keep_alive);
 int encode_enable_components(unsigned char* buffer, bool display, bool audio, bool leds);
 int encode_radio_control_cmd(unsigned char* buffer, uint8_t a, uint8_t b, uint8_t c);
 int encode_radio_data_read_cmd (unsigned char *buffer, uint16_t offset, uint16_t length);

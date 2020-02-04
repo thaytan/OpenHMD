@@ -34,8 +34,17 @@
 #define KEEP_ALIVE_VALUE (10 * 1000)
 #define SETFLAG(_s, _flag, _val) (_s) = ((_s) & ~(_flag)) | ((_val) ? (_flag) : 0)
 
+typedef enum {
+	REV_DK1,
+	REV_DK2,
+	REV_CV1,
+
+	REV_GEARVR_GEN1
+} rift_revision;
+
 struct rift_hmd_s {
 	ohmd_context* ctx;
+	rift_revision revision;
 	int use_count;
 
 	hid_device* handle;
@@ -74,14 +83,6 @@ struct device_list_s {
 
 	device_list_t* next;
 };
-
-typedef enum {
-	REV_DK1,
-	REV_DK2,
-	REV_CV1,
-
-	REV_GEARVR_GEN1
-} rift_revision;
 
 typedef struct {
 	const char* name;
@@ -461,7 +462,11 @@ static void update_hmd(rift_hmd_t *priv)
 	if(t - priv->last_keep_alive >= (double)priv->sensor_config.keep_alive_interval / 1000.0 - .2){
 		// send keep alive message
 		pkt_keep_alive keep_alive = { 0, priv->sensor_config.keep_alive_interval };
-		int ka_size = encode_dk1_keep_alive(buffer, &keep_alive);
+		int ka_size;
+		if (priv->revision == REV_DK1)
+			ka_size = encode_dk1_keep_alive(buffer, &keep_alive);
+		else
+			ka_size = encode_dk2_keep_alive(buffer, &keep_alive);
 		if (send_feature_report(priv, buffer, ka_size) == -1)
 			LOGE("error sending keepalive");
 
@@ -845,6 +850,7 @@ static rift_hmd_t *open_hmd(ohmd_driver* driver, ohmd_device_desc* desc)
 
 	hmd_dev = &priv->hmd_dev;
 
+	priv->revision = desc->revision;
 	priv->use_count = 1;
 	priv->ctx = driver->ctx;
 

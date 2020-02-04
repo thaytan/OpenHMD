@@ -426,6 +426,15 @@ int encode_dk1_keep_alive(unsigned char* buffer, const pkt_keep_alive* keep_aliv
 	return 5; // keep alive packet size
 }
 
+int encode_dk2_keep_alive(unsigned char* buffer, const pkt_keep_alive* keep_alive)
+{
+	WRITE8(RIFT_CMD_DK2_KEEP_ALIVE);
+	WRITE16(keep_alive->command_id);
+	WRITE8(RIFT_DK2_KEEP_ALIVE_TYPE);
+	WRITE16(keep_alive->keep_alive_interval);
+	return 6; // keep alive packet size
+}
+
 int encode_enable_components(unsigned char* buffer, bool display, bool audio, bool leds)
 {
 	uint8_t flags = 0;
