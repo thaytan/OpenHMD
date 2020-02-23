@@ -77,7 +77,7 @@ struct blobwatch *blobwatch_new(int width, int height)
 	bw->height = height;
 	bw->last_observation = -1;
 	bw->debug = true;
-	bw->flicker_enable = true;
+	bw->flicker_enable = false;
 
 	return bw;
 }

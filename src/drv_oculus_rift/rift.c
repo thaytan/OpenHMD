@@ -299,6 +299,7 @@ static void handle_touch_controller_message(rift_hmd_t *hmd,
 		if (rift_touch_get_calibration (hmd->radio_handle, touch->device_num,
 				&touch->calibration) < 0)
 			return;
+		rift_sensor_tracker_add_device (hmd->tracker_ctx, touch->base.id, &touch->imu_fusion, &touch->calibration.leds);
 		touch->have_calibration = true;
 	}
 
@@ -926,7 +927,7 @@ static rift_hmd_t *open_hmd(ohmd_driver* driver, ohmd_device_desc* desc)
 		if (send_feature_report(priv, buf, size) == -1)
 			LOGE("error turning the screens on");
 
-		rift_send_tracking_config (priv, true, RIFT_TRACKING_EXPOSURE_US_CV1,
+		rift_send_tracking_config (priv, false, RIFT_TRACKING_EXPOSURE_US_CV1,
 				RIFT_TRACKING_PERIOD_US_CV1);
 
 		/* Read the radio ID for CV1 to enable camera sensor sync */
@@ -934,7 +935,7 @@ static rift_hmd_t *open_hmd(ohmd_driver* driver, ohmd_device_desc* desc)
 	}
 	else if (desc->revision == REV_DK2)
 	{
-		rift_send_tracking_config (priv, true, RIFT_TRACKING_EXPOSURE_US_DK2,
+		rift_send_tracking_config (priv, false, RIFT_TRACKING_EXPOSURE_US_DK2,
 				RIFT_TRACKING_PERIOD_US_DK2);
 	}
 
@@ -1049,12 +1050,12 @@ static rift_hmd_t *open_hmd(ohmd_driver* driver, ohmd_device_desc* desc)
 	hmd_dev->hmd = priv;
 
 	// Find and attach Rift sensors if available
-	priv->tracker_ctx = rift_sensor_tracker_new (driver->ctx, priv->radio_address, &priv->leds);
+	priv->tracker_ctx = rift_sensor_tracker_new (driver->ctx, priv->radio_address);
 
 	// initialize sensor fusion
 	ofusion_init(&priv->sensor_fusion);
 
-	rift_sensor_tracker_add_device (priv->tracker_ctx, 0, &priv->sensor_fusion);
+	rift_sensor_tracker_add_device (priv->tracker_ctx, 0, &priv->sensor_fusion, &priv->leds);
 
 	return priv;
 
@@ -1220,7 +1221,7 @@ static void get_device_list(ohmd_driver* driver, ohmd_device_list* list)
 					strcpy(desc->path, cur_dev->path);
 
 					desc->device_flags =
-						//OHMD_DEVICE_FLAGS_POSITIONAL_TRACKING |
+						OHMD_DEVICE_FLAGS_POSITIONAL_TRACKING |
 						OHMD_DEVICE_FLAGS_ROTATIONAL_TRACKING |
 						OHMD_DEVICE_FLAGS_RIGHT_CONTROLLER;
 
@@ -1239,7 +1240,7 @@ static void get_device_list(ohmd_driver* driver, ohmd_device_list* list)
 					strcpy(desc->path, cur_dev->path);
 
 					desc->device_flags =
-						//OHMD_DEVICE_FLAGS_POSITIONAL_TRACKING |
+						OHMD_DEVICE_FLAGS_POSITIONAL_TRACKING |
 						OHMD_DEVICE_FLAGS_ROTATIONAL_TRACKING |
 						OHMD_DEVICE_FLAGS_LEFT_CONTROLLER;
 
