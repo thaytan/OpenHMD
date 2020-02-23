@@ -20,6 +20,14 @@ void rift_project_points(rift_led *leds, int num_led_pos,
   dmat3 *camera_matrix, double dist_coeffs[4],
   quatf *rot, vec3f *trans,
   vec3f *out_points);
+
+void undistort_points (struct blob *blobs, int num_blobs,
+        vec3f *out_points,
+        double camera_matrix[9], double dist_coeffs[4]);
+
+void refine_pose(double **image_points,
+    rift_led **leds, int num_matches,
+    quatf *rot, vec3f *trans, double *reprojection_error);
 #else
 static inline
 bool estimate_initial_pose(struct blob *blobs, int num_blobs,
@@ -41,6 +49,11 @@ bool estimate_initial_pose(struct blob *blobs, int num_blobs,
   return false;
 }
 #define rift_project_points(leds,num_led_pos,camera_matrix,dist_coeffs,rot,trans,out_points)
+
+#define undistort_points (blobs,num_blobs,out_points,camera_matrix,dist_coeffs)
+
+#define refine_pose(image_points,leds,num_matches,rot,trans,reprojection_error)
+
 #endif /* HAVE_OPENCV */
 
 #endif /* __OPENCV_H__ */
