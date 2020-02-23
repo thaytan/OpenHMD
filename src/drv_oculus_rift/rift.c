@@ -807,6 +807,7 @@ static void init_touch_device(rift_touch_controller_t *touch, int id, int device
 {
 	ohmd_device *ohmd_dev = &touch->base.base;
 
+	touch->base.id = id;
 	touch->device_num = device_num;
 	ofusion_init(&touch->imu_fusion);
 	touch->time_valid = false;
@@ -815,7 +816,7 @@ static void init_touch_device(rift_touch_controller_t *touch, int id, int device
 
 	ohmd_dev->properties.control_count = 8;
 
-	if (id == 0) {
+	if (id == 1) {
 		ohmd_dev->properties.controls_hints[0] = OHMD_BUTTON_A;
 		ohmd_dev->properties.controls_hints[1] = OHMD_BUTTON_B;
 		ohmd_dev->properties.controls_hints[2] = OHMD_HOME; // Oculus button
@@ -995,8 +996,8 @@ static rift_hmd_t *open_hmd(ohmd_driver* driver, ohmd_device_desc* desc)
 		hmd_dev->base.properties.controls_types[8] = OHMD_DIGITAL;
 
 		/* And initialise state trackers for the 2 touch controllers */
-		init_touch_device (&priv->touch_dev[0], 0, RIFT_TOUCH_CONTROLLER_RIGHT);
-		init_touch_device (&priv->touch_dev[1], 1, RIFT_TOUCH_CONTROLLER_LEFT);
+		init_touch_device (&priv->touch_dev[0], 1, RIFT_TOUCH_CONTROLLER_RIGHT);
+		init_touch_device (&priv->touch_dev[1], 2, RIFT_TOUCH_CONTROLLER_LEFT);
 	}
 
 	//setup generic distortion coeffs, from hand-calibration
