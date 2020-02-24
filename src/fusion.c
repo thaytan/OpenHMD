@@ -11,8 +11,7 @@
 #include <string.h>
 #include "openhmdi.h"
 
-//#define GRAVITY_CONSTANT (9.82f)
-#define GRAVITY_CONSTANT (9.366f) // Hack for rift for now
+#define GRAVITY_CONSTANT (9.82f)
 #define GRAVITY_TOLERANCE (0.1f) // Hack for rift for now
 
 void ofusion_init(fusion* me)
@@ -55,7 +54,7 @@ static void ofusion_update_dt(fusion* me, float dt, const vec3f* ang_vel, const 
 	}
 
 	// Accumulate our rolling average of gravity
-	int iters = OHMD_MIN (10000, me->iterations);
+	int iters = OHMD_CLAMP (me->iterations, 1000, 10000);
 	me->accel_mean = (iters*me->accel_mean + ovec3f_get_length(accel)) / (iters+1);
 
 	float ang_vel_length = ovec3f_get_length(ang_vel);
@@ -80,7 +79,7 @@ static void ofusion_update_dt(fusion* me, float dt, const vec3f* ang_vel, const 
 		// otherwise reset the counter and start over
 
 		me->device_level_count =
-			fabsf(ovec3f_get_length(accel) - GRAVITY_CONSTANT) < gravity_tolerance * 2.0f && ang_vel_length < ang_vel_tolerance
+			fabsf(ovec3f_get_length(accel) - me->accel_mean) < gravity_tolerance * 2.0f && ang_vel_length < ang_vel_tolerance
 			? me->device_level_count + 1 : 0;
 
 		// device has been level for long enough, grab mean from the accelerometer filter queue (last n values)
