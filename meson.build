@@ -72,8 +72,8 @@ if debugging_mode
 endif
 
 if have_pipewire
-	add_global_arguments('-DHAVE_PIPEWIRE=1', language : 'c')
-	add_global_arguments('-DHAVE_DEBUG_STREAM=1', language : 'c')
+	c_args += '-DHAVE_PIPEWIRE=1'
+	c_args += '-DHAVE_DEBUG_STREAM=1'
 	deps += [ pw_dep, spa_dep ]
 	sources += [ 'src/drv_oculus_rift/ohmd-pipewire.c' ]
 endif
