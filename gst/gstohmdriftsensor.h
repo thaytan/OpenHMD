@@ -29,6 +29,8 @@
 #include "rift-sensor-blobwatch.h"
 #include "rift-sensor-maths.h"
 #include "rift-sensor-opencv.h"
+#include "correspondence_search.h"
+#include "led_search.h"
 #include "kalman.h"
 
 G_BEGIN_DECLS
@@ -68,6 +70,9 @@ struct _GstOhmdRiftSensor {
   kalman_pose *pose_filter;
   vec3f pose_pos;
   quatf pose_orient;
+
+  led_search_model_t *led_models[3];
+  correspondence_search_t *cs;
 };
 
 struct _GstOhmdRiftSensorClass {

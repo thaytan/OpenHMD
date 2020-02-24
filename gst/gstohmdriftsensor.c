@@ -228,6 +228,10 @@ gst_ohmd_rift_sensor_init (GstOhmdRiftSensor *filter)
 
    k[0] = 0.069530; k[1] = -0.019189;
    k[2] = 0.001986; k[3] = 0.000214;
+
+  filter->cs = correspondence_search_new (&filter->camera_matrix, filter->dist_coeffs);
+  filter->led_models[0] = led_search_model_new (&filter->leds);
+  correspondence_search_set_model (filter->cs, 0, filter->led_models[0]);
 }
 
 static void
@@ -354,7 +358,12 @@ static gboolean tracker_process_blobs(GstOhmdRiftSensor *filter, GstClockTime ts
 {
 	struct blobservation* bwobs = filter->bwobs;
 	gboolean ret = FALSE;
+#if 1
+  correspondence_search_set_blobs (filter->cs, bwobs->blobs, bwobs->num_blobs);
+  if (correspondence_search_find_pose (filter->cs) > 0)
+    ret = TRUE;
 
+#else
 	dmat3 *camera_matrix = &filter->camera_matrix;
 	double *dist_coeffs = filter->dist_coeffs;
 	//double dist_coeffs[4] = { 0, };
@@ -393,6 +402,7 @@ static gboolean tracker_process_blobs(GstOhmdRiftSensor *filter, GstClockTime ts
             filter->pose_pos.x, filter->pose_pos.y, filter->pose_pos.z, num_leds, bwobs->num_blobs);
     ret = TRUE;
   }
+#endif
 
   return ret;
 }
@@ -522,71 +532,78 @@ gst_ohmd_rift_sensor_transform_frame (GstVideoFilter *base,
 #endif
 
     if (tracker_process_blobs (filter, in_ts)) {
-      int i;
+      int d;
 
-      /* Project HMD LEDs into the image */
-      rift_project_points(filter->leds.points, filter->leds.num_points,
-          &filter->camera_matrix, filter->dist_coeffs,
-          &filter->pose_orient, &filter->pose_pos,
-          filter->led_out_points);
+			for (d = 0; d < 1; d++) {
+        int i;
 
-      /* Check how many LEDs have matching blobs in this pose,
-       * if there's enough we have a good match */
-      gint matched_visible_blobs = 0;
-      gint visible_leds = 0;
-      for (i = 0; i < filter->leds.num_points; i++) {
-        vec3f *p = filter->led_out_points + i;
-        int x = round(p->x);
-        int y = round(p->y);
+				if (!correspondence_search_have_pose (filter->cs, d, &filter->pose_orient, &filter->pose_pos))
+            continue;
 
-        vec3f normal, position;
-        double facing_dot;
-        oquatf_get_rotated(&filter->pose_orient, &filter->leds.points[i].pos, &position);
-        ovec3f_add (&filter->pose_pos, &position, &position);
-        oquatf_get_rotated(&filter->pose_orient, &filter->leds.points[i].dir, &normal);
-        facing_dot = ovec3f_get_dot (&position, &normal);
+        /* Project HMD LEDs into the image */
+        rift_project_points(filter->leds.points, filter->leds.num_points,
+            &filter->camera_matrix, filter->dist_coeffs,
+            &filter->pose_orient, &filter->pose_pos,
+            filter->led_out_points);
 
-        if (facing_dot < -0.25) {
-          /* Strongly Camera facing */
-          struct blob *b = blobwatch_find_blob_at(filter->bw, x, y);
-          visible_leds++;
-          if (b != NULL) {
-            matched_visible_blobs++;
-          }
-        }
-      }
-      gboolean good_pose_match = FALSE;
-      if (visible_leds > 4 && matched_visible_blobs > 0) {
-        if (visible_leds < 2 * matched_visible_blobs) {
-          good_pose_match = TRUE;
-          g_print ("Found good pose match - %u LEDs matched %u visible ones\n",
-              matched_visible_blobs, visible_leds);
-        }
-      }
+        /* Check how many LEDs have matching blobs in this pose,
+         * if there's enough we have a good match */
+        gint matched_visible_blobs = 0;
+        gint visible_leds = 0;
+        for (i = 0; i < filter->leds.num_points; i++) {
+          vec3f *p = filter->led_out_points + i;
+          int x = round(p->x);
+          int y = round(p->y);
 
-      for (i = 0; i < filter->leds.num_points; i++) {
-        vec3f *p = filter->led_out_points + i;
-        vec3f facing;
-        int x = round(p->x);
-        int y = round(p->y);
+          vec3f normal, position;
+          double facing_dot;
+          oquatf_get_rotated(&filter->pose_orient, &filter->leds.points[i].pos, &position);
+          ovec3f_add (&filter->pose_pos, &position, &position);
+          oquatf_get_rotated(&filter->pose_orient, &filter->leds.points[i].dir, &normal);
+          facing_dot = ovec3f_get_dot (&position, &normal);
 
-        oquatf_get_rotated(&filter->pose_orient, &filter->leds.points[i].dir, &facing);
-
-        if (facing.z < 0) {
-          /* Camera facing */
-          if (good_pose_match) {
-            /* Back project LED ids into blobs if we find them and the dot product
-             * shows them pointing strongly to the camera */
+          if (facing_dot < -0.25) {
+            /* Strongly Camera facing */
             struct blob *b = blobwatch_find_blob_at(filter->bw, x, y);
-            if (b != NULL && facing.z < -0.5 && b->led_id != i) {
-              /* Found a blob! */
-              g_print ("Marking LED %d at %d,%d\n", i, x, y);
-              b->led_id = i;
+            visible_leds++;
+            if (b != NULL) {
+              matched_visible_blobs++;
             }
           }
-          draw_rgb_marker (out_frame->data[0], width, out_stride, height, x, y, 8, 8, 0xFF0000);
-        } else {
-          draw_rgb_marker (out_frame->data[0], width, out_stride, height, x, y, 8, 8, 0x202000);
+        }
+        gboolean good_pose_match = FALSE;
+        if (visible_leds > 4 && matched_visible_blobs > 0) {
+          if (visible_leds < 2 * matched_visible_blobs) {
+            good_pose_match = TRUE;
+            g_print ("Found good pose match - %u LEDs matched %u visible ones\n",
+                matched_visible_blobs, visible_leds);
+          }
+        }
+
+        for (i = 0; i < filter->leds.num_points; i++) {
+          vec3f *p = filter->led_out_points + i;
+          vec3f facing;
+          int x = round(p->x);
+          int y = round(p->y);
+
+          oquatf_get_rotated(&filter->pose_orient, &filter->leds.points[i].dir, &facing);
+
+          if (facing.z < 0) {
+            /* Camera facing */
+            if (good_pose_match) {
+              /* Back project LED ids into blobs if we find them and the dot product
+               * shows them pointing strongly to the camera */
+              struct blob *b = blobwatch_find_blob_at(filter->bw, x, y);
+              if (b != NULL && facing.z < -0.5 && b->led_id != i) {
+                /* Found a blob! */
+                g_print ("Marking LED %d at %d,%d\n", i, x, y);
+                b->led_id = i;
+              }
+            }
+            draw_rgb_marker (out_frame->data[0], width, out_stride, height, x, y, 8, 8, 0xFF0000);
+          } else {
+            draw_rgb_marker (out_frame->data[0], width, out_stride, height, x, y, 8, 8, 0x202000);
+          }
         }
       }
     }
