@@ -697,6 +697,7 @@ static int rift_get_led_info(rift_hmd_t *priv)
 			led->dir.y = (float)pos.dir_y;
 			led->dir.z = (float)pos.dir_z;
 			led->pattern = 0xff;
+			ovec3f_multiply_scalar(&led->pos, 1.0/1000000.0, &led->pos); /* convert to metres */
 			ovec3f_normalize_me(&led->dir);
 			if (pos.index >= num_leds)
 				num_leds = pos.index + 1;

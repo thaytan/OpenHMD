@@ -120,8 +120,6 @@ static int tracker_process_blobs(rift_sensor_ctx *ctx)
 	if (ctx->tracker->devices[0].fusion) {
     rot = ctx->tracker->devices[0].fusion->orient;
     trans = ctx->tracker->devices[0].fusion->world_position;
-    // Metres to micrometres
-    ovec3f_multiply_scalar (&trans, 1000000.0, &trans);
   }
 
 	int num_leds = 0;
@@ -298,11 +296,7 @@ update_device_pose (rift_sensor_ctx *sensor_ctx, int device_id, rift_tracked_dev
  			/* FIXME: Our camera-local pose/position need translating based
  			 * on room calibration */
  			if (dev->fusion) {
- 				vec3f world_pos_metre;
- 				// micrometres to metres
- 				ovec3f_multiply_scalar (&trans, 1.0 / 1000000.0, &world_pos_metre);
- 				ofusion_tracker_update (dev->fusion, sensor_ctx->frame_sof_ts, &world_pos_metre,
- 						rot);
+				ofusion_tracker_update (dev->fusion, sensor_ctx->frame_sof_ts, &trans, rot);
  			}
      }
    }
