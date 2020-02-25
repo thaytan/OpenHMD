@@ -206,32 +206,56 @@ gst_ohmd_rift_sensor_class_init (GstOhmdRiftSensorClass * klass)
 static void
 gst_ohmd_rift_sensor_init (GstOhmdRiftSensor *filter)
 {
-  rift_leds_init (&filter->leds, 0);
+  int i;
+  rift_leds_init (&filter->leds[0], 0);
+  /* Convert to metres for HMD */
+  for (i = 0; i < filter->leds[0].num_points; i++) {
+      ovec3f_multiply_scalar (&filter->leds[0].points[i].pos, 1.0/1000000.0, &filter->leds[0].points[i].pos);
+  }
+  rift_leds_init (&filter->leds[1], 1);
+  rift_leds_init (&filter->leds[2], 2);
 
   filter->last_pattern_time = GST_CLOCK_TIME_NONE;
-  filter->led_out_points = g_new0 (vec3f, filter->leds.num_points);
+  filter->led_out_points = g_new0 (vec3f, 50); /* At least as big as the HMD LED array */
 
   filter->pose_filter = kalman_pose_new (NULL);
   memset (&filter->pose_pos, 0, sizeof(filter->pose_pos));
   memset (&filter->pose_orient, 0, sizeof(filter->pose_orient));
 
-  /* Camera matrix taken from one of my sensors:
-   * f = [ 715.185 715.185 ], c = [ 658.333 469.870 ]
-   * k = [  0.069530 -0.019189  0.001986  0.000214 ]
-   */
    double * const A = filter->camera_matrix.m;
    double * const k = filter->dist_coeffs;
 
+#if 0
+  /* Camera matrix taken from one of my sensors (WMTD304A501EB2):
+   * f = [ 715.185 715.185 ], c = [ 658.333 469.870 ]
+   * k = [  0.069530 -0.019189  0.001986  0.000214 ]
+   */
    A[0] = 715.185; A[2] = 658.333;
    A[4] = 715.185; A[5] = 469.870;
    A[8] = 1.0;
 
    k[0] = 0.069530; k[1] = -0.019189;
    k[2] = 0.001986; k[3] = 0.000214;
+#else
+  /* Camera matrix taken from one of my sensors (WMTD30333009TJ):
+   * f = [ 715.258 715.258 ], c = [ 636.018, 488.010 ]
+   * k = [  0.069530 -0.019189  0.001986  0.000214 ]
+   */
+   A[0] = 715.258; A[2] = 636.018;
+   A[4] = 715.258; A[5] = 488.010;
+   A[8] = 1.0;
+
+   k[0] = 0.074007; k[1] = -0.025007;
+   k[2] = 0.005786; k[3] = -0.000620;
+#endif
 
   filter->cs = correspondence_search_new (&filter->camera_matrix, filter->dist_coeffs);
-  filter->led_models[0] = led_search_model_new (&filter->leds);
+  filter->led_models[0] = led_search_model_new (&filter->leds[0]);
   correspondence_search_set_model (filter->cs, 0, filter->led_models[0]);
+  filter->led_models[1] = led_search_model_new (&filter->leds[1]);
+  correspondence_search_set_model (filter->cs, 1, filter->led_models[1]);
+  filter->led_models[2] = led_search_model_new (&filter->leds[2]);
+  correspondence_search_set_model (filter->cs, 2, filter->led_models[2]);
 }
 
 static void
@@ -277,7 +301,7 @@ gst_ohmd_rift_sensor_set_info (GstVideoFilter *vf,
   if (filter->bw)
     blobwatch_free (filter->bw);
   filter->bw = blobwatch_new(in_info->width, in_info->height);
-
+  blobwatch_set_flicker(filter->bw, false);
   return TRUE;
 }
 
@@ -354,6 +378,24 @@ draw_rgb_rect (guint8 *pixels, gint width, gint stride, gint height,
   }
 }
 
+static void
+draw_rgb_filled_rect (guint8 *pixels, gint width, gint stride, gint height,
+    gint start_x, gint start_y, gint box_width, gint box_height, guint32 colour)
+{
+  clamp_rect(&start_x, &start_y, &box_width, &box_height, width, height);
+
+  gint x, y;
+  guint8 *dest;
+  for (y = 0; y < box_height; y++) {
+    dest = pixels + stride * (start_y+y) + 3 * start_x;
+    for (x = 0; x < box_width; x++) {
+       GST_WRITE_UINT24_BE (dest, colour);
+       dest += 3;
+    }
+  }
+}
+
+
 static gboolean tracker_process_blobs(GstOhmdRiftSensor *filter, GstClockTime ts)
 {
 	struct blobservation* bwobs = filter->bwobs;
@@ -374,8 +416,8 @@ static gboolean tracker_process_blobs(GstOhmdRiftSensor *filter, GstClockTime ts
   /*
    * Estimate initial pose without previously known [rot|trans].
    */
-  if (estimate_initial_pose(bwobs->blobs, bwobs->num_blobs, filter->leds.points,
-            filter->leds.num_points, camera_matrix, dist_coeffs, &rot, &trans,
+  if (estimate_initial_pose(bwobs->blobs, bwobs->num_blobs, filter->leds[0].points,
+            filter->leds[0].num_points, camera_matrix, dist_coeffs, &rot, &trans,
             &num_leds, true)) {
 
 #if KALMAN_FILTER
@@ -465,8 +507,7 @@ gst_ohmd_rift_sensor_transform_frame (GstVideoFilter *base,
     gst_object_sync_values (GST_OBJECT (filter), in_ts);
 
   blobwatch_process(filter->bw, src, width, height,
-      led_pattern_phase, filter->leds.points,
-      filter->leds.num_points, &filter->bwobs);
+      led_pattern_phase, NULL, 0, &filter->bwobs);
 
   for (y = 0; y < height; y++) {
     for (x = 0; x < width; x++) {
@@ -534,14 +575,17 @@ gst_ohmd_rift_sensor_transform_frame (GstVideoFilter *base,
     if (tracker_process_blobs (filter, in_ts)) {
       int d;
 
-			for (d = 0; d < 1; d++) {
+			for (d = 0; d < 3; d++) {
+        const int colours[] = { 0xFF0000, 0x00FF00, 0x0000FF };
         int i;
 
 				if (!correspondence_search_have_pose (filter->cs, d, &filter->pose_orient, &filter->pose_pos))
             continue;
+        /* Draw a marker that says we think we saw this device */
+        draw_rgb_filled_rect (out_frame->data[0], width, out_stride, height, 16*d, 0, 16, 16, colours[d]);
 
         /* Project HMD LEDs into the image */
-        rift_project_points(filter->leds.points, filter->leds.num_points,
+        rift_project_points(filter->leds[d].points, filter->leds[d].num_points,
             &filter->camera_matrix, filter->dist_coeffs,
             &filter->pose_orient, &filter->pose_pos,
             filter->led_out_points);
@@ -550,16 +594,16 @@ gst_ohmd_rift_sensor_transform_frame (GstVideoFilter *base,
          * if there's enough we have a good match */
         gint matched_visible_blobs = 0;
         gint visible_leds = 0;
-        for (i = 0; i < filter->leds.num_points; i++) {
+        for (i = 0; i < filter->leds[d].num_points; i++) {
           vec3f *p = filter->led_out_points + i;
           int x = round(p->x);
           int y = round(p->y);
 
           vec3f normal, position;
           double facing_dot;
-          oquatf_get_rotated(&filter->pose_orient, &filter->leds.points[i].pos, &position);
+          oquatf_get_rotated(&filter->pose_orient, &filter->leds[d].points[i].pos, &position);
           ovec3f_add (&filter->pose_pos, &position, &position);
-          oquatf_get_rotated(&filter->pose_orient, &filter->leds.points[i].dir, &normal);
+          oquatf_get_rotated(&filter->pose_orient, &filter->leds[d].points[i].dir, &normal);
           facing_dot = ovec3f_get_dot (&position, &normal);
 
           if (facing_dot < -0.25) {
@@ -580,13 +624,13 @@ gst_ohmd_rift_sensor_transform_frame (GstVideoFilter *base,
           }
         }
 
-        for (i = 0; i < filter->leds.num_points; i++) {
+        for (i = 0; i < filter->leds[d].num_points; i++) {
           vec3f *p = filter->led_out_points + i;
           vec3f facing;
           int x = round(p->x);
           int y = round(p->y);
 
-          oquatf_get_rotated(&filter->pose_orient, &filter->leds.points[i].dir, &facing);
+          oquatf_get_rotated(&filter->pose_orient, &filter->leds[d].points[i].dir, &facing);
 
           if (facing.z < 0) {
             /* Camera facing */
@@ -600,7 +644,7 @@ gst_ohmd_rift_sensor_transform_frame (GstVideoFilter *base,
                 b->led_id = i;
               }
             }
-            draw_rgb_marker (out_frame->data[0], width, out_stride, height, x, y, 8, 8, 0xFF0000);
+            draw_rgb_marker (out_frame->data[0], width, out_stride, height, x, y, 8, 8, colours[d]);
           } else {
             draw_rgb_marker (out_frame->data[0], width, out_stride, height, x, y, 8, 8, 0x202000);
           }

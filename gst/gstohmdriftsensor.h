@@ -54,7 +54,7 @@ struct _GstOhmdRiftSensor {
   gint fps_n, fps_d;
 
   int id;
-  rift_leds leds;
+  rift_leds leds[3];
   vec3f *led_out_points;
 
   GstClockTime last_pattern_time;
