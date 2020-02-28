@@ -11,7 +11,11 @@
 
 #include "rift.h"
 
-#define MAX_BLOBS_PER_FRAME  42
+#define MAX_BLOBS_PER_FRAME  60
+#define LED_INVALID_ID -1
+#define LED_NOISE_ID -2
+#define LED_OBJECT_ID(l) (((l) < 0) ? (l) : (l) >> 8)
+#define LED_MAKE_ID(o,n) ((o) << 8 | (n))
 
 struct blob {
 	/* center of bounding box */

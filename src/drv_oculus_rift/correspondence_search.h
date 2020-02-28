@@ -4,6 +4,7 @@
 
 #include "rift.h"
 #include "rift-sensor-maths.h"
+#include "rift-sensor-blobwatch.h"
 #include "led_search.h"
 
 #define CS_MAX_MODELS 3
@@ -12,12 +13,18 @@ typedef struct correspondence_search_s correspondence_search_t;
 typedef struct cs_image_point_s cs_image_point_t;
 typedef struct cs_model_info_s cs_model_info_t;
 
+#define MAX_BLOB_SEARCH_DEPTH 5
+
 struct cs_image_point_s {
     struct blob *blob;
 
     double point_homog[3]; // Homogeneous version of the point
     double size[2];        // w/h of the blob, in homogeneous coordinates
     double max_size;       // Max of W/H
+
+    /* List of the nearest blobs, filtered for the active model */
+    int num_neighbours;
+    cs_image_point_t *neighbours[MAX_BLOB_SEARCH_DEPTH];
 };
 
 struct cs_model_info_s {
@@ -27,6 +34,7 @@ struct cs_model_info_s {
 
     quatf best_orient;
     vec3f best_trans;
+    bool good_pose_match;
     int best_matched;
     int best_visible;
     double best_sqerror;
@@ -45,6 +53,9 @@ struct correspondence_search_s
 
     dmat3 *camera_matrix;
     double *dist_coeffs;
+
+    /* List of the nearest blobs for each blob */
+    cs_image_point_t *blob_neighbours[MAX_BLOBS_PER_FRAME][MAX_BLOBS_PER_FRAME];
 };
 
 correspondence_search_t *correspondence_search_new(dmat3 *camera_matrix, double *dist_coeffs);
