@@ -36,7 +36,8 @@ quatf_to_3x3 (cv::Mat &mat, quatf *me) {
 extern "C" bool estimate_initial_pose(struct blob *blobs, int num_blobs,
     rift_led *leds, int num_led_pos,
     dmat3 *camera_matrix, double dist_coeffs[4],
-    quatf *rot, vec3f *trans, int *num_leds_out, bool use_extrinsic_guess)
+    quatf *rot, vec3f *trans, int *num_leds_out,
+    int *num_inliers, bool use_extrinsic_guess)
 {
 	int i, j;
 	int num_leds = 0;
@@ -44,7 +45,6 @@ extern "C" bool estimate_initial_pose(struct blob *blobs, int num_blobs,
 	int flags = CV_ITERATIVE;
 	cv::Mat inliers;
 	int iterationsCount = 50;
-	float reprojectionError = 1.0;
 	float confidence = 0.95;
 	cv::Mat fishK = cv::Mat(3, 3, CV_64FC1, camera_matrix->m);
 	cv::Mat fishDistCoeffs = cv::Mat(4, 1, CV_64FC1, dist_coeffs);
@@ -113,9 +113,13 @@ extern "C" bool estimate_initial_pose(struct blob *blobs, int num_blobs,
 	// and we give the solver identity camera + null distortion matrices
 	cv::fisheye::undistortPoints(list_points2d, list_points2d_undistorted, fishK, fishDistCoeffs);
 
+	float reprojectionError = 2.0 / camera_matrix->m[0];
+
 	cv::solvePnPRansac(list_points3d, list_points2d_undistorted, dummyK, dummyD, rvec, tvec,
 			   use_extrinsic_guess, iterationsCount, reprojectionError,
 			   confidence, inliers, flags);
+
+	*num_inliers = inliers.rows;
 
 	vec3f v;
 	double angle = sqrt(rvec.dot(rvec));
@@ -136,8 +140,8 @@ extern "C" bool estimate_initial_pose(struct blob *blobs, int num_blobs,
 }
 
 void rift_project_points(rift_led *leds, int num_led_pos,
-    dmat3 *camera_matrix, double dist_coeffs[4],
-    quatf *rot, vec3f *trans, vec3f *out_points)
+		dmat3 *camera_matrix, double dist_coeffs[4],
+		quatf *rot, vec3f *trans, vec3f *out_points)
 {
 	cv::Mat fishK = cv::Mat(3, 3, CV_64FC1, camera_matrix->m);
 	cv::Mat fishDistCoeffs = cv::Mat(4, 1, CV_64FC1, dist_coeffs);
@@ -172,8 +176,8 @@ void rift_project_points(rift_led *leds, int num_led_pos,
 }
 
 void undistort_points (struct blob *blobs, int num_blobs,
-        vec3f *out_points,
-        double camera_matrix[9], double dist_coeffs[4])
+		    vec3f *out_points,
+		    double camera_matrix[9], double dist_coeffs[4])
 {
 	cv::Mat fishK = cv::Mat(3, 3, CV_64FC1, camera_matrix);
 	cv::Mat fishDistCoeffs = cv::Mat(4, 1, CV_64FC1, dist_coeffs);
@@ -199,8 +203,8 @@ void undistort_points (struct blob *blobs, int num_blobs,
 }
 
 extern "C" void refine_pose(double **image_points,
-    rift_led **leds, int num_matches,
-    quatf *rot, vec3f *trans, double *reprojection_error)
+		    rift_led **leds, int num_matches,
+		    quatf *rot, vec3f *trans, double *reprojection_error)
 {
   int i;
 	cv::Mat dummyK = cv::Mat::eye(3, 3, CV_64FC1);
