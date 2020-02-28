@@ -119,6 +119,13 @@ rift_leds_init (rift_leds *leds, uint8_t id)
 {
         leds->points = all_test_leds[id].points;
         leds->num_points = all_test_leds[id].num_points;
+
+        if (id == 0) {
+            /* Convert HMD to metres */
+            for (int i = 0; i < leds->num_points; i++) {
+                ovec3f_multiply_scalar (&leds->points[i].pos, 1.0/1000000.0, &leds->points[i].pos);
+            }
+        };
 }
 
 void

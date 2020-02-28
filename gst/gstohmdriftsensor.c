@@ -67,21 +67,17 @@ enum
  *
  * FIXME:describe the real formats here.
  */
-static GstStaticPadTemplate sink_template =
-GST_STATIC_PAD_TEMPLATE (
-  "sink",
-  GST_PAD_SINK,
-  GST_PAD_ALWAYS,
-  GST_STATIC_CAPS ("video/x-raw,format=(string)GRAY8")
-);
+static GstStaticPadTemplate sink_template = GST_STATIC_PAD_TEMPLATE ("sink",
+    GST_PAD_SINK,
+    GST_PAD_ALWAYS,
+    GST_STATIC_CAPS ("video/x-raw,format=(string)GRAY8")
+    );
 
-static GstStaticPadTemplate src_template =
-GST_STATIC_PAD_TEMPLATE (
-  "src",
-  GST_PAD_SRC,
-  GST_PAD_ALWAYS,
-  GST_STATIC_CAPS ("video/x-raw,format=(string)RGB")
-);
+static GstStaticPadTemplate src_template = GST_STATIC_PAD_TEMPLATE ("src",
+    GST_PAD_SRC,
+    GST_PAD_ALWAYS,
+    GST_STATIC_CAPS ("video/x-raw,format=(string)RGB")
+    );
 
 #define gst_ohmd_rift_sensor_parent_class parent_class
 G_DEFINE_TYPE (GstOhmdRiftSensor, gst_ohmd_rift_sensor, GST_TYPE_VIDEO_FILTER);
@@ -92,11 +88,11 @@ static void gst_ohmd_rift_sensor_get_property (GObject * object, guint prop_id,
     GValue * value, GParamSpec * pspec);
 
 static gboolean gst_ohmd_rift_sensor_set_info (GstVideoFilter * filter,
-  GstCaps * incaps, GstVideoInfo * in_info, GstCaps * outcaps,
-  GstVideoInfo * out_info);
+    GstCaps * incaps, GstVideoInfo * in_info, GstCaps * outcaps,
+    GstVideoInfo * out_info);
 
-static GstFlowReturn gst_ohmd_rift_sensor_transform_frame (GstVideoFilter * filter,
-    GstVideoFrame * in_frame, GstVideoFrame * out_frame);
+static GstFlowReturn gst_ohmd_rift_sensor_transform_frame (GstVideoFilter *
+    filter, GstVideoFrame * in_frame, GstVideoFrame * out_frame);
 
 static GstCaps *
 gst_ohmd_rift_sensor_caps_remove_format_info (GstCaps * caps)
@@ -174,7 +170,8 @@ gst_ohmd_rift_sensor_class_init (GstOhmdRiftSensorClass * klass)
 {
   GObjectClass *gobject_class = (GObjectClass *) klass;
   GstElementClass *gstelement_class = (GstElementClass *) klass;
-  GstBaseTransformClass *gstbasetransform_class = (GstBaseTransformClass *) klass;
+  GstBaseTransformClass *gstbasetransform_class =
+      (GstBaseTransformClass *) klass;
   GstVideoFilterClass *gstvideofilter_class = (GstVideoFilterClass *) klass;
 
   gobject_class->finalize = gst_ohmd_rift_sensor_finalize;
@@ -182,10 +179,10 @@ gst_ohmd_rift_sensor_class_init (GstOhmdRiftSensorClass * klass)
   gobject_class->get_property = gst_ohmd_rift_sensor_get_property;
 
   gst_element_class_set_details_simple (gstelement_class,
-    "OpenHMD Rift Sensor filter",
-    "Video/Filter",
-    "OpenHMD Oculus Rift experiements filter",
-    "Jan Schmidt <jan@centricular.com>");
+      "OpenHMD Rift Sensor filter",
+      "Video/Filter",
+      "OpenHMD Oculus Rift experiements filter",
+      "Jan Schmidt <jan@centricular.com>");
 
   gst_element_class_add_pad_template (gstelement_class,
       gst_static_pad_template_get (&src_template));
@@ -200,56 +197,61 @@ gst_ohmd_rift_sensor_class_init (GstOhmdRiftSensorClass * klass)
   gstvideofilter_class->transform_frame =
       GST_DEBUG_FUNCPTR (gst_ohmd_rift_sensor_transform_frame);
 
-  GST_DEBUG_CATEGORY_INIT (gst_ohmd_rift_sensor_debug, "ohmdriftsensor", 0, "OpenHMD Rift Sensor Filter");
+  GST_DEBUG_CATEGORY_INIT (gst_ohmd_rift_sensor_debug, "ohmdriftsensor", 0,
+      "OpenHMD Rift Sensor Filter");
 }
 
 static void
-gst_ohmd_rift_sensor_init (GstOhmdRiftSensor *filter)
+gst_ohmd_rift_sensor_init (GstOhmdRiftSensor * filter)
 {
-  int i;
   rift_leds_init (&filter->leds[0], 0);
-  /* Convert to metres for HMD */
-  for (i = 0; i < filter->leds[0].num_points; i++) {
-      ovec3f_multiply_scalar (&filter->leds[0].points[i].pos, 1.0/1000000.0, &filter->leds[0].points[i].pos);
-  }
   rift_leds_init (&filter->leds[1], 1);
   rift_leds_init (&filter->leds[2], 2);
 
   filter->last_pattern_time = GST_CLOCK_TIME_NONE;
-  filter->led_out_points = g_new0 (vec3f, 50); /* At least as big as the HMD LED array */
+  filter->led_out_points = g_new0 (vec3f, 50);  /* At least as big as the HMD LED array */
 
   filter->pose_filter = kalman_pose_new (NULL);
-  memset (&filter->pose_pos, 0, sizeof(filter->pose_pos));
-  memset (&filter->pose_orient, 0, sizeof(filter->pose_orient));
+  memset (&filter->pose_pos, 0, sizeof (filter->pose_pos));
+  memset (&filter->pose_orient, 0, sizeof (filter->pose_orient));
 
-   double * const A = filter->camera_matrix.m;
-   double * const k = filter->dist_coeffs;
+  double *const A = filter->camera_matrix.m;
+  double *const k = filter->dist_coeffs;
 
 #if 0
   /* Camera matrix taken from one of my sensors (WMTD304A501EB2):
    * f = [ 715.185 715.185 ], c = [ 658.333 469.870 ]
    * k = [  0.069530 -0.019189  0.001986  0.000214 ]
    */
-   A[0] = 715.185; A[2] = 658.333;
-   A[4] = 715.185; A[5] = 469.870;
-   A[8] = 1.0;
+  A[0] = 715.185;
+  A[2] = 658.333;
+  A[4] = 715.185;
+  A[5] = 469.870;
+  A[8] = 1.0;
 
-   k[0] = 0.069530; k[1] = -0.019189;
-   k[2] = 0.001986; k[3] = 0.000214;
+  k[0] = 0.069530;
+  k[1] = -0.019189;
+  k[2] = 0.001986;
+  k[3] = 0.000214;
 #else
   /* Camera matrix taken from one of my sensors (WMTD30333009TJ):
    * f = [ 715.258 715.258 ], c = [ 636.018, 488.010 ]
    * k = [  0.069530 -0.019189  0.001986  0.000214 ]
    */
-   A[0] = 715.258; A[2] = 636.018;
-   A[4] = 715.258; A[5] = 488.010;
-   A[8] = 1.0;
+  A[0] = 715.258;
+  A[2] = 636.018;
+  A[4] = 715.258;
+  A[5] = 488.010;
+  A[8] = 1.0;
 
-   k[0] = 0.074007; k[1] = -0.025007;
-   k[2] = 0.005786; k[3] = -0.000620;
+  k[0] = 0.074007;
+  k[1] = -0.025007;
+  k[2] = 0.005786;
+  k[3] = -0.000620;
 #endif
 
-  filter->cs = correspondence_search_new (&filter->camera_matrix, filter->dist_coeffs);
+  filter->cs =
+      correspondence_search_new (&filter->camera_matrix, filter->dist_coeffs);
   filter->led_models[0] = led_search_model_new (&filter->leds[0]);
   correspondence_search_set_model (filter->cs, 0, filter->led_models[0]);
   filter->led_models[1] = led_search_model_new (&filter->leds[1]);
@@ -285,7 +287,7 @@ gst_ohmd_rift_sensor_get_property (GObject * object, guint prop_id,
 }
 
 static gboolean
-gst_ohmd_rift_sensor_set_info (GstVideoFilter *vf,
+gst_ohmd_rift_sensor_set_info (GstVideoFilter * vf,
     GstCaps * incaps, GstVideoInfo * in_info, GstCaps * outcaps,
     GstVideoInfo * out_info)
 {
@@ -300,20 +302,20 @@ gst_ohmd_rift_sensor_set_info (GstVideoFilter *vf,
 
   if (filter->bw)
     blobwatch_free (filter->bw);
-  filter->bw = blobwatch_new(in_info->width, in_info->height);
-  blobwatch_set_flicker(filter->bw, false);
+  filter->bw = blobwatch_new (in_info->width, in_info->height);
+  blobwatch_set_flicker (filter->bw, false);
   return TRUE;
 }
 
 static void
-draw_rgb_marker (guint8 *pixels, gint width, gint stride, gint height,
+draw_rgb_marker (guint8 * pixels, gint width, gint stride, gint height,
     gint x_pos, gint y_pos, gint mark_width, gint mark_height, guint32 colour)
 {
   gint x, y;
-  gint min_x = MAX (0, x_pos - mark_width/2);
-  gint max_x = MIN (width, x_pos + mark_width/2);
-  gint min_y = MAX (0, y_pos - mark_height/2);
-  gint max_y = MIN (height, y_pos + mark_height/2);
+  gint min_x = MAX (0, x_pos - mark_width / 2);
+  gint max_x = MIN (width, x_pos + mark_width / 2);
+  gint min_y = MAX (0, y_pos - mark_height / 2);
+  gint max_y = MIN (height, y_pos + mark_height / 2);
 
   if (y_pos < 0 || y_pos >= height)
     return;
@@ -323,106 +325,112 @@ draw_rgb_marker (guint8 *pixels, gint width, gint stride, gint height,
   /* Horizontal line */
   guint8 *dest = pixels + stride * y_pos + 3 * min_x;
   for (x = 0; x < max_x - min_x; x++) {
-     GST_WRITE_UINT24_BE (dest, colour);
-     dest += 3;
+    GST_WRITE_UINT24_BE (dest, colour);
+    dest += 3;
   }
 
   /* Vertical line */
   dest = pixels + stride * min_y + 3 * x_pos;
-  for (y = 0; y < max_y-min_y; y++) {
-     GST_WRITE_UINT24_BE (dest, colour);
-     dest += stride;
+  for (y = 0; y < max_y - min_y; y++) {
+    GST_WRITE_UINT24_BE (dest, colour);
+    dest += stride;
   }
 }
 
-static void clamp(gint *val, gint max) {
+static void
+clamp (gint * val, gint max)
+{
   if (*val < 0)
     *val = 0;
   if (*val >= max)
-    *val = max-1;
+    *val = max - 1;
 }
 
-static void clamp_rect(gint *x, gint *y, gint *rw, gint *rh, gint width, gint height) {
-  clamp(x, width);
-  clamp(y, height);
-  clamp(rw, width - *x);
-  clamp(rh, height - *y);
+static void
+clamp_rect (gint * x, gint * y, gint * rw, gint * rh, gint width, gint height)
+{
+  clamp (x, width);
+  clamp (y, height);
+  clamp (rw, width - *x);
+  clamp (rh, height - *y);
 }
 
 
 static void
-draw_rgb_rect (guint8 *pixels, gint width, gint stride, gint height,
+draw_rgb_rect (guint8 * pixels, gint width, gint stride, gint height,
     gint start_x, gint start_y, gint box_width, gint box_height, guint32 colour)
 {
-  clamp_rect(&start_x, &start_y, &box_width, &box_height, width, height);
+  clamp_rect (&start_x, &start_y, &box_width, &box_height, width, height);
 
   gint x, y;
   guint8 *dest = pixels + stride * start_y + 3 * start_x;
   for (x = 0; x < box_width; x++) {
-     GST_WRITE_UINT24_BE (dest, colour);
-     dest += 3;
+    GST_WRITE_UINT24_BE (dest, colour);
+    dest += 3;
   }
 
-  for (y = 1; y < box_height-1; y++) {
-     dest = pixels + stride * (start_y+y) + 3 * start_x;
+  for (y = 1; y < box_height - 1; y++) {
+    dest = pixels + stride * (start_y + y) + 3 * start_x;
 
-     GST_WRITE_UINT24_BE (dest, colour);
-     dest += 3 * (box_width-1);
-     GST_WRITE_UINT24_BE (dest, colour);
+    GST_WRITE_UINT24_BE (dest, colour);
+    dest += 3 * (box_width - 1);
+    GST_WRITE_UINT24_BE (dest, colour);
   }
 
-  dest = pixels + stride * (start_y+box_height-1) + 3 * start_x;
+  dest = pixels + stride * (start_y + box_height - 1) + 3 * start_x;
   for (x = 0; x < box_width; x++) {
-     GST_WRITE_UINT24_BE (dest, colour);
-     dest += 3;
+    GST_WRITE_UINT24_BE (dest, colour);
+    dest += 3;
   }
 }
 
 static void
-draw_rgb_filled_rect (guint8 *pixels, gint width, gint stride, gint height,
+draw_rgb_filled_rect (guint8 * pixels, gint width, gint stride, gint height,
     gint start_x, gint start_y, gint box_width, gint box_height, guint32 colour)
 {
-  clamp_rect(&start_x, &start_y, &box_width, &box_height, width, height);
+  clamp_rect (&start_x, &start_y, &box_width, &box_height, width, height);
 
   gint x, y;
   guint8 *dest;
   for (y = 0; y < box_height; y++) {
-    dest = pixels + stride * (start_y+y) + 3 * start_x;
+    dest = pixels + stride * (start_y + y) + 3 * start_x;
     for (x = 0; x < box_width; x++) {
-       GST_WRITE_UINT24_BE (dest, colour);
-       dest += 3;
+      GST_WRITE_UINT24_BE (dest, colour);
+      dest += 3;
     }
   }
 }
 
 
-static gboolean tracker_process_blobs(GstOhmdRiftSensor *filter, GstClockTime ts)
+static gboolean
+tracker_process_blobs (GstOhmdRiftSensor * filter, GstClockTime ts)
 {
-	struct blobservation* bwobs = filter->bwobs;
-	gboolean ret = FALSE;
+  struct blobservation *bwobs = filter->bwobs;
+  gboolean ret = FALSE;
 #if 1
   correspondence_search_set_blobs (filter->cs, bwobs->blobs, bwobs->num_blobs);
   if (correspondence_search_find_pose (filter->cs) > 0)
     ret = TRUE;
 
 #else
-	dmat3 *camera_matrix = &filter->camera_matrix;
-	double *dist_coeffs = filter->dist_coeffs;
-	//double dist_coeffs[4] = { 0, };
-	quatf rot = filter->pose_orient;
-	vec3f trans = filter->pose_pos;
-	int num_leds = 0;
+  dmat3 *camera_matrix = &filter->camera_matrix;
+  double *dist_coeffs = filter->dist_coeffs;
+  //double dist_coeffs[4] = { 0, };
+  quatf rot = filter->pose_orient;
+  vec3f trans = filter->pose_pos;
+  int num_leds = 0;
 
   /*
    * Estimate initial pose without previously known [rot|trans].
    */
-  if (estimate_initial_pose(bwobs->blobs, bwobs->num_blobs, filter->leds[0].points,
-            filter->leds[0].num_points, camera_matrix, dist_coeffs, &rot, &trans,
-            &num_leds, true)) {
+  if (estimate_initial_pose (bwobs->blobs, bwobs->num_blobs,
+          filter->leds[0].points, filter->leds[0].num_points, camera_matrix,
+          dist_coeffs, &rot, &trans, &num_leds, true)) {
 
 #if KALMAN_FILTER
     kalman_pose_update (filter->pose_filter, ts, &trans, &rot);
-    kalman_pose_get_estimated (filter->pose_filter, &filter->pose_pos, &filter->pose_orient);
+    kalman_pose_get_estimated (filter->pose_filter, &filter->pose_pos,
+        &filter->pose_orient);
 #else
     filter->pose_pos = trans;
     filter->pose_orient = rot;
@@ -431,17 +439,19 @@ static gboolean tracker_process_blobs(GstOhmdRiftSensor *filter, GstClockTime ts
 #if 0
     /* Test code that just spins the HMD around 1 axis for visualisation testing */
     quatf pose_orient;
-		pose_orient.x = cos(filter->angle);
-		pose_orient.y = 0;
-		pose_orient.z = sin(filter->angle);
-		pose_orient.w = 0;
-    filter->angle += M_PI/60;
+    pose_orient.x = cos (filter->angle);
+    pose_orient.y = 0;
+    pose_orient.z = sin (filter->angle);
+    pose_orient.w = 0;
+    filter->angle += M_PI / 60;
     filter->pose_orient = pose_orient;
 #endif
 
-    g_print ("sensor %u Got PnP pose quat %f %f %f %f  pos %f %f %f from %d LEDs %d blobs\n", 0,
-            filter->pose_orient.x, filter->pose_orient.y, filter->pose_orient.z, filter->pose_orient.w,
-            filter->pose_pos.x, filter->pose_pos.y, filter->pose_pos.z, num_leds, bwobs->num_blobs);
+    g_print
+        ("sensor %u Got PnP pose quat %f %f %f %f  pos %f %f %f from %d LEDs %d blobs\n",
+        0, filter->pose_orient.x, filter->pose_orient.y, filter->pose_orient.z,
+        filter->pose_orient.w, filter->pose_pos.x, filter->pose_pos.y,
+        filter->pose_pos.z, num_leds, bwobs->num_blobs);
     ret = TRUE;
   }
 #endif
@@ -450,23 +460,28 @@ static gboolean tracker_process_blobs(GstOhmdRiftSensor *filter, GstClockTime ts
 }
 
 #if DUMP_BLOBS
-int compare_blobs (const void *elem1, const void *elem2)
+int
+compare_blobs (const void *elem1, const void *elem2)
 {
-  const struct blob *b1 = elem1;
-  const struct blob *b2 = elem2;
+  const struct blob *b1 = *(struct blob **) elem1;
+  const struct blob *b2 = *(struct blob **) elem2;
 
-  if (b1->y > b2->y) return  1;
-  if (b1->y < b2->y) return -1;
+  if (b1->y > b2->y)
+    return 1;
+  if (b1->y < b2->y)
+    return -1;
 
-  if (b1->x > b2->x) return  1;
-  if (b1->x < b2->x) return -1;
+  if (b1->x > b2->x)
+    return 1;
+  if (b1->x < b2->x)
+    return -1;
 
   return 0;
 }
 #endif
 
 static GstFlowReturn
-gst_ohmd_rift_sensor_transform_frame (GstVideoFilter *base,
+gst_ohmd_rift_sensor_transform_frame (GstVideoFilter * base,
     GstVideoFrame * in_frame, GstVideoFrame * out_frame)
 {
   GstOhmdRiftSensor *filter = GST_OHMDRIFTSENSOR (base);
@@ -483,9 +498,9 @@ gst_ohmd_rift_sensor_transform_frame (GstVideoFilter *base,
   /* If there's an OHMD marker in the frame, we can read the pattern phase directly */
   if (GST_READ_UINT32_BE (src) == OHMD_MARKER) {
     led_pattern_phase = src[4];
-    GST_LOG_OBJECT (filter, "Have LED pattern phase %u in frame", led_pattern_phase);
-  }
-  else {
+    GST_LOG_OBJECT (filter, "Have LED pattern phase %u in frame",
+        led_pattern_phase);
+  } else {
     gint n_frames = 1;
 
     /* Guess based on how much time passed */
@@ -493,8 +508,11 @@ gst_ohmd_rift_sensor_transform_frame (GstVideoFilter *base,
       if (GST_CLOCK_TIME_IS_VALID (filter->last_pattern_time)) {
         GstClockTimeDiff ts_diff = in_ts - filter->last_pattern_time;
         /* Calc frames elapsed, rounded to the nearest */
-        n_frames = gst_util_uint64_scale_round (ts_diff, filter->fps_n, filter->fps_d * GST_SECOND);
-        GST_LOG_OBJECT (filter, "TS diff %" G_GUINT64_FORMAT " frames = %d", ts_diff, n_frames);
+        n_frames =
+            gst_util_uint64_scale_round (ts_diff, filter->fps_n,
+            filter->fps_d * GST_SECOND);
+        GST_LOG_OBJECT (filter, "TS diff %" G_GUINT64_FORMAT " frames = %d",
+            ts_diff, n_frames);
       }
       filter->last_pattern_time = in_ts;
     }
@@ -506,12 +524,12 @@ gst_ohmd_rift_sensor_transform_frame (GstVideoFilter *base,
   if (GST_CLOCK_TIME_IS_VALID (in_ts))
     gst_object_sync_values (GST_OBJECT (filter), in_ts);
 
-  blobwatch_process(filter->bw, src, width, height,
+  blobwatch_process (filter->bw, src, width, height,
       led_pattern_phase, NULL, 0, &filter->bwobs);
 
   for (y = 0; y < height; y++) {
     for (x = 0; x < width; x++) {
-      guint8 *d = dest + x*3;
+      guint8 *d = dest + x * 3;
       /* Expand GRAY8 to yellow */
       d[0] = d[1] = src[x];
       d[2] = 0;
@@ -522,73 +540,45 @@ gst_ohmd_rift_sensor_transform_frame (GstVideoFilter *base,
   }
 
   if (filter->bwobs && filter->bwobs->num_blobs > 0) {
-     struct blob *sorted_blobs[MAX_BLOBS_PER_FRAME];
+    struct blob *sorted_blobs[MAX_BLOBS_PER_FRAME];
 
-     GST_INFO_OBJECT (filter, "Sensor %d phase %d Blobs: %d", filter->id, led_pattern_phase, filter->bwobs->num_blobs);
+    GST_INFO_OBJECT (filter, "Sensor %d phase %d Blobs: %d", filter->id,
+        led_pattern_phase, filter->bwobs->num_blobs);
 #if DUMP_BLOBS
-     g_print ("Sensor %d phase %d Blobs: %d\n", filter->id, led_pattern_phase, filter->bwobs->num_blobs);
+    g_print ("Sensor %d phase %d Blobs: %d\n", filter->id, led_pattern_phase,
+        filter->bwobs->num_blobs);
 #endif
 
-     /* Copy pointers into the sorted blobs array */
-     for (int index = 0; index < filter->bwobs->num_blobs; index++)
-       sorted_blobs[index] = filter->bwobs->blobs + index;
+    /* Copy pointers into the sorted blobs array */
+    for (int index = 0; index < filter->bwobs->num_blobs; index++)
+      sorted_blobs[index] = filter->bwobs->blobs + index;
 
 #if DUMP_BLOBS
-       qsort (sorted_blobs, filter->bwobs->num_blobs, sizeof(struct blob *), compare_blobs);
+    qsort (sorted_blobs, filter->bwobs->num_blobs, sizeof (struct blob *),
+        compare_blobs);
 #endif
 
-     for (int index = 0; index < filter->bwobs->num_blobs; index++)
-     {
-       struct blob *b = sorted_blobs[index];
-       gint start_x, start_y, w, h;
+    bool found_poses = tracker_process_blobs (filter, in_ts);
 
-#if DUMP_BLOBS
-       g_print ("Sensor %d Blob[%d]: %d,%d %dx%d (age %d) id %d pattern %x (unchanged %u)\n", filter->id,
-         index, b->x, b->y, b->width, b->height,
-         b->age, b->led_id, b->pattern, b->pattern_age);
-#endif
-
-      start_x = b->x - b->width/2;
-      start_y = b->y - b->height/2;
-      w = b->width;
-      h = b->height;
-      clamp_rect(&start_x, &start_y, &w, &h, width, height);
-      src = in_frame->data[0] + start_x + in_stride * start_y;
-      dest = out_frame->data[0] + 3 * start_x + out_stride * start_y;
-    
-      for (y = 0; y < h; y++) {
-        for (x = 0; x < w; x++) {
-          /* fill the blue channel for observed blobs */
-          dest[3*x+2] = src[x];
-        }
-        dest += out_stride;
-        src += in_stride;
-      }
-
-      /* Draw a purple box around unknown blobs. Green around recognised ones */
-      draw_rgb_rect (out_frame->data[0], width, out_stride, height, start_x, start_y, b->width, b->height, b->led_id == -1 ? 0xFF00FF : 0x00FF00);
-    }
-#if DUMP_BLOBS
-     g_print ("\n");
-#endif
-
-    if (tracker_process_blobs (filter, in_ts)) {
+    if (found_poses) {
       int d;
 
-			for (d = 0; d < 3; d++) {
+      for (d = 0; d < 3; d++) {
         const int colours[] = { 0xFF0000, 0x00FF00, 0x0000FF };
         int i;
 
-				if (!correspondence_search_have_pose (filter->cs, d, &filter->pose_orient, &filter->pose_pos))
-            continue;
+        if (!correspondence_search_have_pose (filter->cs, d,
+                &filter->pose_orient, &filter->pose_pos))
+          continue;
+
         /* Draw a marker that says we think we saw this device */
-        draw_rgb_filled_rect (out_frame->data[0], width, out_stride, height, 16*d, 0, 16, 16, colours[d]);
+        draw_rgb_filled_rect (out_frame->data[0], width, out_stride, height,
+            16 * d, 0, 16, 16, colours[d]);
 
         /* Project HMD LEDs into the image */
-        rift_project_points(filter->leds[d].points, filter->leds[d].num_points,
+        rift_project_points (filter->leds[d].points, filter->leds[d].num_points,
             &filter->camera_matrix, filter->dist_coeffs,
-            &filter->pose_orient, &filter->pose_pos,
-            filter->led_out_points);
+            &filter->pose_orient, &filter->pose_pos, filter->led_out_points);
 
         /* Check how many LEDs have matching blobs in this pose,
          * if there's enough we have a good match */
@@ -596,60 +586,116 @@ gst_ohmd_rift_sensor_transform_frame (GstVideoFilter *base,
         gint visible_leds = 0;
         for (i = 0; i < filter->leds[d].num_points; i++) {
           vec3f *p = filter->led_out_points + i;
-          int x = round(p->x);
-          int y = round(p->y);
+          int x = round (p->x);
+          int y = round (p->y);
 
           vec3f normal, position;
           double facing_dot;
-          oquatf_get_rotated(&filter->pose_orient, &filter->leds[d].points[i].pos, &position);
+          oquatf_get_rotated (&filter->pose_orient,
+              &filter->leds[d].points[i].pos, &position);
           ovec3f_add (&filter->pose_pos, &position, &position);
-          oquatf_get_rotated(&filter->pose_orient, &filter->leds[d].points[i].dir, &normal);
+          oquatf_get_rotated (&filter->pose_orient,
+              &filter->leds[d].points[i].dir, &normal);
           facing_dot = ovec3f_get_dot (&position, &normal);
 
           if (facing_dot < -0.25) {
             /* Strongly Camera facing */
-            struct blob *b = blobwatch_find_blob_at(filter->bw, x, y);
+            struct blob *b = blobwatch_find_blob_at (filter->bw, x, y);
             visible_leds++;
             if (b != NULL) {
               matched_visible_blobs++;
             }
           }
         }
+
         gboolean good_pose_match = FALSE;
         if (visible_leds > 4 && matched_visible_blobs > 0) {
           if (visible_leds < 2 * matched_visible_blobs) {
             good_pose_match = TRUE;
-            g_print ("Found good pose match - %u LEDs matched %u visible ones\n",
-                matched_visible_blobs, visible_leds);
+            g_print
+                ("Found good pose match for device %u - %u LEDs matched %u visible ones\n",
+                d, matched_visible_blobs, visible_leds);
+          }
+        }
+
+        if (good_pose_match) {
+          /* Clear existing blob IDs for this device, then
+           * back project LED ids into blobs if we find them and the dot product
+           * shows them pointing strongly to the camera */
+          for (int index = 0; index < filter->bwobs->num_blobs; index++) {
+            struct blob *b = filter->bwobs->blobs + index;
+            if (LED_OBJECT_ID (b->led_id) == d) {
+              b->led_id = LED_INVALID_ID;
+            }
           }
         }
 
         for (i = 0; i < filter->leds[d].num_points; i++) {
           vec3f *p = filter->led_out_points + i;
           vec3f facing;
-          int x = round(p->x);
-          int y = round(p->y);
+          int x = round (p->x);
+          int y = round (p->y);
 
-          oquatf_get_rotated(&filter->pose_orient, &filter->leds[d].points[i].dir, &facing);
+          oquatf_get_rotated (&filter->pose_orient,
+              &filter->leds[d].points[i].dir, &facing);
 
           if (facing.z < 0) {
             /* Camera facing */
             if (good_pose_match) {
-              /* Back project LED ids into blobs if we find them and the dot product
-               * shows them pointing strongly to the camera */
-              struct blob *b = blobwatch_find_blob_at(filter->bw, x, y);
+              struct blob *b = blobwatch_find_blob_at (filter->bw, x, y);
               if (b != NULL && facing.z < -0.5 && b->led_id != i) {
                 /* Found a blob! */
-                g_print ("Marking LED %d at %d,%d\n", i, x, y);
-                b->led_id = i;
+                b->led_id = LED_MAKE_ID (d, i);
+                g_print ("Marking LED %d/%d at %d,%d now %u\n", d, i,
+                    x, y, b->led_id);
               }
             }
-            draw_rgb_marker (out_frame->data[0], width, out_stride, height, x, y, 8, 8, colours[d]);
+            draw_rgb_marker (out_frame->data[0], width, out_stride, height, x,
+                y, 8, 8, colours[d]);
           } else {
-            draw_rgb_marker (out_frame->data[0], width, out_stride, height, x, y, 8, 8, 0x202000);
+            draw_rgb_marker (out_frame->data[0], width, out_stride, height, x,
+                y, 8, 8, 0x202000);
           }
         }
       }
+
+      for (int index = 0; index < filter->bwobs->num_blobs; index++) {
+        struct blob *b = sorted_blobs[index];
+        gint start_x, start_y, w, h;
+
+#if DUMP_BLOBS
+        g_print
+            ("Sensor %d Blob)[%d]: %d,%d %dx%d (age %d) id %d pattern %x (unchanged %u)\n",
+            filter->id, index, b->x, b->y, b->width, b->height, b->age,
+            b->led_id, b->pattern, b->pattern_age);
+#endif
+
+        start_x = b->x - b->width / 2;
+        start_y = b->y - b->height / 2;
+        w = b->width;
+        h = b->height;
+        clamp_rect (&start_x, &start_y, &w, &h, width, height);
+        src = in_frame->data[0] + start_x + in_stride * start_y;
+        dest = out_frame->data[0] + 3 * start_x + out_stride * start_y;
+
+        for (y = 0; y < h; y++) {
+          for (x = 0; x < w; x++) {
+            /* fill the blue channel for observed blobs */
+            dest[3 * x + 2] = src[x];
+          }
+          dest += out_stride;
+          src += in_stride;
+        }
+
+        /* Draw a purple box around unknown blobs. Green around recognised ones */
+        draw_rgb_rect (out_frame->data[0], width, out_stride, height, start_x,
+            start_y, b->width, b->height,
+            b->led_id == LED_INVALID_ID ? 0xFF00FF : 0x00FF00);
+      }
+#if DUMP_BLOBS
+      g_print ("\n");
+#endif
+
     }
   }
 
@@ -664,14 +710,9 @@ ohmdriftsensor_init (GstPlugin * ohmdriftsensor)
       GST_TYPE_OHMDRIFTSENSOR);
 }
 
-GST_PLUGIN_DEFINE (
-    GST_VERSION_MAJOR,
+GST_PLUGIN_DEFINE (GST_VERSION_MAJOR,
     GST_VERSION_MINOR,
     ohmdplugin,
     "OpenHMD Rift Sensor filter",
     ohmdriftsensor_init,
-    PACKAGE_VERSION,
-    GST_LICENSE,
-    GST_PACKAGE_NAME,
-    GST_PACKAGE_ORIGIN
-)
+    PACKAGE_VERSION, GST_LICENSE, GST_PACKAGE_NAME, GST_PACKAGE_ORIGIN)
