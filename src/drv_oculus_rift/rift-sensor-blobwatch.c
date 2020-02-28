@@ -16,7 +16,7 @@ struct leds;
 
 #include <stdio.h>
 
-#define THRESHOLD 0x9f
+#define THRESHOLD 0x3f
 
 #define NUM_FRAMES_HISTORY	2
 #define MAX_EXTENTS_PER_LINE	11
@@ -150,7 +150,7 @@ static int process_scanline(uint8_t *line, int width, int height, int y,
 
 		end = x - 1;
 		/* Filter out single pixel and two-pixel extents */
-		if (end < start + 2)
+		if (end < start + 1)
 			continue;
 
 		center = (start + end) / 2;
@@ -232,13 +232,13 @@ static void process_frame(uint8_t *lines, int width, int height, struct blobserv
 	struct extent_line el1;
 	struct extent_line el2;
 	int index = 0;
-	int y;
+	int y = 2;
 
 	ob->num_blobs = 0;
 
-	index = process_scanline(lines, width, height, 0, &el1, NULL, 0, ob);
+	index = process_scanline(lines, width, height, y++, &el1, NULL, 0, ob);
 
-	for (y = 1; y < height; y++) {
+	for (; y < height; y++) {
 		lines += width;
 		index = process_scanline(lines, width, height, y, y&1? &el2 : &el1, y&1? &el1 : &el2,
 					 index, ob);
@@ -434,14 +434,17 @@ void blobwatch_process(struct blobwatch *bw, uint8_t *frame,
 struct blob *blobwatch_find_blob_at(struct blobwatch *bw, int x, int y)
 {
 	int last = bw->last_observation;
-	struct blobservation *ob = &bw->history[last];
+	struct blobservation *ob;
   int i;
 
-	if (bw->last_observation == -1) {
+	if (last == -1) {
+      /* No blobs to match against yet */
       return NULL;
   }
+
+	ob = &bw->history[last];
 	for (i = 0; i < ob->num_blobs; i++) {
-		struct blob *b = &ob->blobs[i];
+		struct blob *b = ob->blobs + i;
 		int dx = abs(x - b->x);
 		int dy = abs(y - b->y);
 
