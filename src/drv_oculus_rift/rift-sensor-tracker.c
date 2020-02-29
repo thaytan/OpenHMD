@@ -541,7 +541,7 @@ rift_sensor_new (ohmd_context* ohmd_ctx, int id, const char *serial_no, libusb_d
 		goto fail;
 	}
 
-  sensor_ctx->cs = correspondence_search_new (&sensor_ctx->camera_matrix, sensor_ctx->dist_coeffs);
+  sensor_ctx->cs = correspondence_search_new (&sensor_ctx->camera_matrix, sensor_ctx->dist_coeffs, sensor_ctx->dist_fisheye);
 
   LOGI("Sensor %d starting stream\n", id);
   ret = rift_sensor_uvc_stream_start (&sensor_ctx->stream);

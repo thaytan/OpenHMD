@@ -17,11 +17,12 @@
 #define abs(x) ((x) >= 0 ? (x) : -(x))
 
 correspondence_search_t *
-correspondence_search_new(dmat3 *camera_matrix, double *dist_coeffs)
+correspondence_search_new(dmat3 *camera_matrix, double *dist_coeffs, bool dist_fisheye)
 {
     correspondence_search_t *cs = calloc(1, sizeof (correspondence_search_t));
     cs->camera_matrix = camera_matrix;
     cs->dist_coeffs = dist_coeffs;
+    cs->dist_fisheye = dist_fisheye;
     return cs;
 }
 
@@ -48,7 +49,7 @@ correspondence_search_set_blobs (correspondence_search_t *cs, struct blob *blobs
     cs->num_points = num_blobs;
 
     /* Undistort points so we can project / match properly */
-    undistort_points (blobs, num_blobs, undistorted_points, cs->camera_matrix->m, cs->dist_coeffs);
+    undistort_points (blobs, num_blobs, undistorted_points, cs->camera_matrix->m, cs->dist_coeffs, cs->dist_fisheye);
 
     //printf ("Building blobs search array\n");
     for (i = 0; i < num_blobs; i++) {
@@ -659,7 +660,7 @@ correspondence_search_find_pose (correspondence_search_t *cs)
          /* FIXME: We should do this check for available correspondences and reproject before even giving these
           * blobs to the correspondence_search, and then set this model to be skipped */
          if (estimate_initial_pose(matched_blobs, already_known_blobs,
-             model->leds->points, model->leds->num_points, cs->camera_matrix, cs->dist_coeffs,
+             model->leds->points, model->leds->num_points, cs->camera_matrix, cs->dist_coeffs, cs->dist_fisheye,
              &mi->best_orient, &mi->best_trans, &num_matched_leds, &inliers, true)) {
              printf ("%u existing correspondences for model %u matched %u\n", already_known_blobs, m, inliers);
             if (correspondence_search_project_pose (cs, model, &mi->best_orient, &mi->best_trans, mi))
