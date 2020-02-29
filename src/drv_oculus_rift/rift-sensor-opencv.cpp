@@ -4,6 +4,7 @@
  * SPDX-License-Identifier:	LGPL-2.0+ or BSL-1.0
  */
 #include <opencv2/calib3d/calib3d.hpp>
+#include <opencv2/imgproc/imgproc.hpp>
 #if CV_MAJOR_VERSION >= 4
 #include <opencv2/calib3d/calib3d_c.h>
 #endif
@@ -35,7 +36,7 @@ quatf_to_3x3 (cv::Mat &mat, quatf *me) {
 
 extern "C" bool estimate_initial_pose(struct blob *blobs, int num_blobs,
     rift_led *leds, int num_led_pos,
-    dmat3 *camera_matrix, double dist_coeffs[4],
+    dmat3 *camera_matrix, double dist_coeffs[5], bool dist_fisheye,
     quatf *rot, vec3f *trans, int *num_leds_out,
     int *num_inliers, bool use_extrinsic_guess)
 {
@@ -46,8 +47,8 @@ extern "C" bool estimate_initial_pose(struct blob *blobs, int num_blobs,
 	cv::Mat inliers;
 	int iterationsCount = 50;
 	float confidence = 0.95;
-	cv::Mat fishK = cv::Mat(3, 3, CV_64FC1, camera_matrix->m);
-	cv::Mat fishDistCoeffs = cv::Mat(4, 1, CV_64FC1, dist_coeffs);
+	cv::Mat cameraK = cv::Mat(3, 3, CV_64FC1, camera_matrix->m);
+	cv::Mat distCoeffs;
 	cv::Mat dummyK = cv::Mat::eye(3, 3, CV_64FC1);
 	cv::Mat dummyD = cv::Mat::zeros(4, 1, CV_64FC1);
 	cv::Mat rvec = cv::Mat::zeros(3, 1, CV_64FC1);
@@ -108,10 +109,20 @@ extern "C" bool estimate_initial_pose(struct blob *blobs, int num_blobs,
 	list_points2d.resize(num_leds);
 	list_points2d_undistorted.resize(num_leds);
 
-	// we have distortion params for the openCV fisheye model
-	// so we undistort the image points manually before passing them to the PnpRansac solver
-	// and we give the solver identity camera + null distortion matrices
-	cv::fisheye::undistortPoints(list_points2d, list_points2d_undistorted, fishK, fishDistCoeffs);
+  /* Need to support 2 different distortion models. Fisheye for CV1, Pinhole for DK2 */
+  if (dist_fisheye) {
+    distCoeffs = cv::Mat(4, 1, CV_64FC1, dist_coeffs);
+
+		// we have distortion params for the openCV fisheye model
+		// so we undistort the image points manually before passing them to the PnpRansac solver
+		// and we give the solver identity camera + null distortion matrices
+		cv::fisheye::undistortPoints(list_points2d, list_points2d_undistorted, cameraK, distCoeffs);
+  }
+  else {
+    distCoeffs = cv::Mat(5, 1, CV_64FC1, dist_coeffs);
+		// Pinhole camera undistort
+    cv::undistortPoints(list_points2d, list_points2d_undistorted, cameraK, distCoeffs);
+  }
 
 	float reprojectionError = 2.0 / camera_matrix->m[0];
 
@@ -140,11 +151,11 @@ extern "C" bool estimate_initial_pose(struct blob *blobs, int num_blobs,
 }
 
 void rift_project_points(rift_led *leds, int num_led_pos,
-		dmat3 *camera_matrix, double dist_coeffs[4],
+		dmat3 *camera_matrix, double dist_coeffs[5], bool dist_fisheye,
 		quatf *rot, vec3f *trans, vec3f *out_points)
 {
-	cv::Mat fishK = cv::Mat(3, 3, CV_64FC1, camera_matrix->m);
-	cv::Mat fishDistCoeffs = cv::Mat(4, 1, CV_64FC1, dist_coeffs);
+	cv::Mat cameraK = cv::Mat(3, 3, CV_64FC1, camera_matrix->m);
+	cv::Mat distCoeffs;
 
 	cv::Mat tvec = cv::Mat::zeros(3, 1, CV_64FC1);
 	cv::Mat rvec = cv::Mat::zeros(3, 1, CV_64FC1);
@@ -166,7 +177,15 @@ void rift_project_points(rift_led *leds, int num_led_pos,
 		led_points3d[i].z = leds[i].pos.z;
 	}
 
-	cv::fisheye::projectPoints (led_points3d, projected_points2d, rvec, tvec, fishK, fishDistCoeffs);
+  if (dist_fisheye) {
+	  distCoeffs = cv::Mat(4, 1, CV_64FC1, dist_coeffs);
+	  cv::fisheye::projectPoints (led_points3d, projected_points2d, rvec, tvec, cameraK, distCoeffs);
+  }
+  else {
+    distCoeffs = cv::Mat(5, 1, CV_64FC1, dist_coeffs);
+		// Pinhole camera undistort
+    cv::projectPoints (led_points3d, rvec, tvec, cameraK, distCoeffs, projected_points2d);
+  }
 
 	for (int i = 0; i < num_led_pos; i++) {
 		out_points[i].x = projected_points2d[i].x;
@@ -177,10 +196,10 @@ void rift_project_points(rift_led *leds, int num_led_pos,
 
 void undistort_points (struct blob *blobs, int num_blobs,
 		    vec3f *out_points,
-		    double camera_matrix[9], double dist_coeffs[4])
+		    double camera_matrix[9], double dist_coeffs[5], bool dist_fisheye)
 {
 	cv::Mat fishK = cv::Mat(3, 3, CV_64FC1, camera_matrix);
-	cv::Mat fishDistCoeffs = cv::Mat(4, 1, CV_64FC1, dist_coeffs);
+	cv::Mat fishDistCoeffs;
 	std::vector<cv::Point2f> list_points2d(num_blobs);
 	std::vector<cv::Point2f> list_points2d_undistorted(num_blobs);
   int i;
@@ -190,10 +209,20 @@ void undistort_points (struct blob *blobs, int num_blobs,
 		list_points2d[i].y = blobs[i].y;
   }
 
-	// we have distortion params for the openCV fisheye model
-	// so we undistort the image points manually before passing them to the PnpRansac solver
-	// and we give the solver identity camera + null distortion matrices
-	cv::fisheye::undistortPoints(list_points2d, list_points2d_undistorted, fishK, fishDistCoeffs);
+  /* Need to support 2 different distortion models. Fisheye for CV1, Pinhole for DK2 */
+  if (dist_fisheye) {
+    fishDistCoeffs = cv::Mat(4, 1, CV_64FC1, dist_coeffs);
+
+		// we have distortion params for the openCV fisheye model
+		// so we undistort the image points manually before passing them to the PnpRansac solver
+		// and we give the solver identity camera + null distortion matrices
+		cv::fisheye::undistortPoints(list_points2d, list_points2d_undistorted, fishK, fishDistCoeffs);
+  }
+  else {
+    fishDistCoeffs = cv::Mat(5, 1, CV_64FC1, dist_coeffs);
+		// Pinhole camera undistort
+    cv::undistortPoints(list_points2d, list_points2d_undistorted, fishK, fishDistCoeffs);
+  }
 
 	for (i = 0; i < num_blobs; i++) {
 		out_points[i].x = list_points2d_undistorted[i].x;
