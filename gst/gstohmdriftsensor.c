@@ -251,7 +251,7 @@ gst_ohmd_rift_sensor_init (GstOhmdRiftSensor * filter)
 #endif
 
   filter->cs =
-      correspondence_search_new (&filter->camera_matrix, filter->dist_coeffs);
+      correspondence_search_new (&filter->camera_matrix, filter->dist_coeffs, true);
   filter->led_models[0] = led_search_model_new (&filter->leds[0]);
   correspondence_search_set_model (filter->cs, 0, filter->led_models[0]);
   filter->led_models[1] = led_search_model_new (&filter->leds[1]);
@@ -425,7 +425,7 @@ tracker_process_blobs (GstOhmdRiftSensor * filter, GstClockTime ts)
    */
   if (estimate_initial_pose (bwobs->blobs, bwobs->num_blobs,
           filter->leds[0].points, filter->leds[0].num_points, camera_matrix,
-          dist_coeffs, &rot, &trans, &num_leds, true)) {
+          dist_coeffs, true, &rot, &trans, &num_leds, true)) {
 
 #if KALMAN_FILTER
     kalman_pose_update (filter->pose_filter, ts, &trans, &rot);
@@ -577,7 +577,7 @@ gst_ohmd_rift_sensor_transform_frame (GstVideoFilter * base,
 
         /* Project HMD LEDs into the image */
         rift_project_points (filter->leds[d].points, filter->leds[d].num_points,
-            &filter->camera_matrix, filter->dist_coeffs,
+            &filter->camera_matrix, filter->dist_coeffs, true,
             &filter->pose_orient, &filter->pose_pos, filter->led_out_points);
 
         /* Check how many LEDs have matching blobs in this pose,
