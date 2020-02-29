@@ -202,15 +202,21 @@ gst_ohmd_rift_sensor_class_init (GstOhmdRiftSensorClass * klass)
 }
 
 static void
-gst_ohmd_rift_sensor_init (GstOhmdRiftSensor * filter)
+gst_ohmd_rift_sensor_setup (GstOhmdRiftSensor * filter)
 {
-  rift_leds_init (&filter->leds[0], 0);
-  rift_leds_init (&filter->leds[1], 1);
-  rift_leds_init (&filter->leds[2], 2);
+  GST_INFO_OBJECT (filter, "Configuring for %s processing",
+      filter->is_cv1 ? "CV1" : "DK2");
+  if (filter->is_cv1) {
+    rift_leds_init (&filter->leds[0], 0);
+    rift_leds_init (&filter->leds[1], 1);
+    rift_leds_init (&filter->leds[2], 2);
+  } else
+    rift_leds_init_dk2 (&filter->leds[0], 0);
 
   filter->last_pattern_time = GST_CLOCK_TIME_NONE;
-  filter->led_out_points = g_new0 (vec3f, 50);  /* At least as big as the HMD LED array */
 
+  if (filter->pose_filter)
+    kalman_pose_free (filter->pose_filter);
   filter->pose_filter = kalman_pose_new (NULL);
   memset (&filter->pose_pos, 0, sizeof (filter->pose_pos));
   memset (&filter->pose_orient, 0, sizeof (filter->pose_orient));
@@ -218,46 +224,77 @@ gst_ohmd_rift_sensor_init (GstOhmdRiftSensor * filter)
   double *const A = filter->camera_matrix.m;
   double *const k = filter->dist_coeffs;
 
+  if (filter->is_cv1) {
 #if 0
-  /* Camera matrix taken from one of my sensors (WMTD304A501EB2):
-   * f = [ 715.185 715.185 ], c = [ 658.333 469.870 ]
-   * k = [  0.069530 -0.019189  0.001986  0.000214 ]
-   */
-  A[0] = 715.185;
-  A[2] = 658.333;
-  A[4] = 715.185;
-  A[5] = 469.870;
-  A[8] = 1.0;
+    /* Camera matrix taken from one of my sensors (WMTD304A501EB2):
+     * f = [ 715.185 715.185 ], c = [ 658.333 469.870 ]
+     * k = [  0.069530 -0.019189  0.001986  0.000214 ]
+     */
+    A[0] = 715.185;
+    A[2] = 658.333;
+    A[4] = 715.185;
+    A[5] = 469.870;
+    A[8] = 1.0;
 
-  k[0] = 0.069530;
-  k[1] = -0.019189;
-  k[2] = 0.001986;
-  k[3] = 0.000214;
+    k[0] = 0.069530;
+    k[1] = -0.019189;
+    k[2] = 0.001986;
+    k[3] = 0.000214;
 #else
-  /* Camera matrix taken from one of my sensors (WMTD30333009TJ):
-   * f = [ 715.258 715.258 ], c = [ 636.018, 488.010 ]
-   * k = [  0.069530 -0.019189  0.001986  0.000214 ]
-   */
-  A[0] = 715.258;
-  A[2] = 636.018;
-  A[4] = 715.258;
-  A[5] = 488.010;
-  A[8] = 1.0;
+    /* Camera matrix taken from one of my sensors (WMTD30333009TJ):
+     * f = [ 715.258 715.258 ], c = [ 636.018, 488.010 ]
+     * k = [  0.069530 -0.019189  0.001986  0.000214 ]
+     */
+    A[0] = 715.258;
+    A[2] = 636.018;
+    A[4] = 715.258;
+    A[5] = 488.010;
+    A[8] = 1.0;
 
-  k[0] = 0.074007;
-  k[1] = -0.025007;
-  k[2] = 0.005786;
-  k[3] = -0.000620;
+    k[0] = 0.074007;
+    k[1] = -0.025007;
+    k[2] = 0.005786;
+    k[3] = -0.000620;
 #endif
+  } else {
+    A[0] = 684.600;
+    A[2] = 385.521;
+    A[4] = 684.671;
+    A[5] = 238.878;
 
+    k[0] = 0.069530;
+    k[1] = -0.019189;
+    k[2] = 0.001986;
+    k[3] = 0.000214;
+    k[0] = -0.491153;
+    k[1] = 0.295728;
+    k[2] = -0.000887;
+    k[3] = -0.000456;
+    k[4] = -0.102742;
+  }
+
+  if (filter->cs)
+    correspondence_search_free (filter->cs);
   filter->cs =
-      correspondence_search_new (&filter->camera_matrix, filter->dist_coeffs, true);
+      correspondence_search_new (&filter->camera_matrix, filter->dist_coeffs,
+      filter->is_cv1);
+
   filter->led_models[0] = led_search_model_new (&filter->leds[0]);
   correspondence_search_set_model (filter->cs, 0, filter->led_models[0]);
-  filter->led_models[1] = led_search_model_new (&filter->leds[1]);
-  correspondence_search_set_model (filter->cs, 1, filter->led_models[1]);
-  filter->led_models[2] = led_search_model_new (&filter->leds[2]);
-  correspondence_search_set_model (filter->cs, 2, filter->led_models[2]);
+
+  if (filter->is_cv1) {
+    filter->led_models[1] = led_search_model_new (&filter->leds[1]);
+    correspondence_search_set_model (filter->cs, 1, filter->led_models[1]);
+    filter->led_models[2] = led_search_model_new (&filter->leds[2]);
+    correspondence_search_set_model (filter->cs, 2, filter->led_models[2]);
+  }
+}
+
+
+static void
+gst_ohmd_rift_sensor_init (GstOhmdRiftSensor * filter)
+{
+  filter->led_out_points = g_new0 (vec3f, 50);  /* At least as big as the HMD LED array */
 }
 
 static void
@@ -299,6 +336,13 @@ gst_ohmd_rift_sensor_set_info (GstVideoFilter * vf,
     filter->fps_n = 625;
     filter->fps_n = 12;
   }
+
+  if (in_info->width == 1280)
+    filter->is_cv1 = true;
+  else
+    filter->is_cv1 = false;
+
+  gst_ohmd_rift_sensor_setup (filter);
 
   if (filter->bw)
     blobwatch_free (filter->bw);
@@ -425,7 +469,7 @@ tracker_process_blobs (GstOhmdRiftSensor * filter, GstClockTime ts)
    */
   if (estimate_initial_pose (bwobs->blobs, bwobs->num_blobs,
           filter->leds[0].points, filter->leds[0].num_points, camera_matrix,
-          dist_coeffs, true, &rot, &trans, &num_leds, true)) {
+          dist_coeffs, filter->is_cv1, &rot, &trans, &num_leds, true)) {
 
 #if KALMAN_FILTER
     kalman_pose_update (filter->pose_filter, ts, &trans, &rot);
@@ -577,7 +621,7 @@ gst_ohmd_rift_sensor_transform_frame (GstVideoFilter * base,
 
         /* Project HMD LEDs into the image */
         rift_project_points (filter->leds[d].points, filter->leds[d].num_points,
-            &filter->camera_matrix, filter->dist_coeffs, true,
+            &filter->camera_matrix, filter->dist_coeffs, filter->is_cv1,
             &filter->pose_orient, &filter->pose_pos, filter->led_out_points);
 
         /* Check how many LEDs have matching blobs in this pose,

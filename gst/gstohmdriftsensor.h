@@ -65,6 +65,8 @@ struct _GstOhmdRiftSensor {
   dmat3 camera_matrix;
   double dist_coeffs[5];
 
+  gboolean is_cv1;
+
   double angle;
 
   kalman_pose *pose_filter;
@@ -80,6 +82,8 @@ struct _GstOhmdRiftSensorClass {
 };
 
 GType gst_ohmd_rift_sensor_get_type (void);
+
+void rift_leds_init_dk2 (rift_leds *leds, uint8_t num_points);
 
 G_END_DECLS
 
