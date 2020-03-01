@@ -48,6 +48,7 @@ struct correspondence_search_s
 {
     int num_points;
     cs_image_point_t *points;
+    struct blob *blobs; /* Original blobs structs [num_points] */
 
     int num_models;
     cs_model_info_t models[CS_MAX_MODELS];

@@ -8,6 +8,7 @@
 
 #include "rift.h"
 #include "rift-sensor-maths.h"
+#include "rift-sensor-blobwatch.h"
 
 #if HAVE_OPENCV
 bool estimate_initial_pose(struct blob *blobs, int num_blobs,

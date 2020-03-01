@@ -24,6 +24,7 @@
 
 #include "rift-sensor-maths.h"
 #include "rift-sensor-opencv.h"
+#include "rift-sensor-pose-helper.h"
 
 #include "correspondence_search.h"
 
@@ -35,8 +36,6 @@
 
 #define MAX_SENSORS 4
 #define MAX_DEVICES 3
-
-#define MAX_OBJECT_LEDS 64
 
 typedef struct rift_sensor_ctx_s rift_sensor_ctx;
 typedef struct rift_tracked_device_s rift_tracked_device;

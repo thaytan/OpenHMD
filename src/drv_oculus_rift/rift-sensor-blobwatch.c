@@ -16,7 +16,7 @@ struct leds;
 
 #include <stdio.h>
 
-#define THRESHOLD 0x3f
+#define THRESHOLD 0x7f
 
 #define NUM_FRAMES_HISTORY	2
 #define MAX_EXTENTS_PER_LINE	11

@@ -35,6 +35,7 @@ plugin_sources = [
   '../src/drv_oculus_rift/rift-sensor-flicker.c',
   '../src/drv_oculus_rift/rift-sensor-maths.c',
   '../src/drv_oculus_rift/rift-sensor-opencv.cpp',
+  '../src/drv_oculus_rift/rift-sensor-pose-helper.c',
   '../src/drv_oculus_rift/kalman.cpp',
   '../src/drv_oculus_rift/correspondence_search.c',
   '../src/drv_oculus_rift/led_search.c',

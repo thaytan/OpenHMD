@@ -15,6 +15,7 @@
 #include "correspondence_search.h"
 #include "rift-sensor-opencv.h"
 #include "rift-sensor-blobwatch.h"
+#include "rift-sensor-pose-helper.h"
 
 #define MAX_SEARCH_DEPTH 6
 
@@ -60,6 +61,7 @@ correspondence_search_set_blobs (correspondence_search_t *cs, struct blob *blobs
 
     cs->points = calloc(num_blobs, sizeof (cs_image_point_t));
     cs->num_points = num_blobs;
+    cs->blobs = blobs;
 
     /* Undistort points so we can project / match properly */
     undistort_points (blobs, num_blobs, undistorted_points, cs->camera_matrix->m, cs->dist_coeffs, cs->dist_fisheye);
@@ -141,23 +143,6 @@ static int compare_blobs_distance (const void *elem1, const void *elem2, void *a
   return 0;
 }
 
-static cs_image_point_t *
-blobs_find_blob_at(correspondence_search_t *cs, double x, double y, double match_factor, double *sq_error)
-{
-    int i;
-    for (i = 0; i < cs->num_points; i++) {
-      cs_image_point_t *p = cs->points + i;
-      double dx = abs(x - p->point_homog[0]);
-      double dy = abs(y - p->point_homog[1]);
-
-      if (match_factor*dx <= p->size[0] && match_factor*dy <= p->size[1]) {
-        *sq_error = dx*dx + dy*dy;
-        return p;
-      }
-    }
-    return NULL;
-}
-
 static void
 dump_pose (correspondence_search_t *cs, led_search_model_t *model, quatf *orient, vec3f *trans, cs_model_info_t *mi)
 {
@@ -203,111 +188,48 @@ correspondence_search_project_pose (correspondence_search_t *cs, led_search_mode
   /* Given a pose, project each 3D LED point back to 2D and assign correspondences to blobs */
   /* If enough match, print out the pose */
 	rift_leds *leds = model->leds;
-  int i;
-  double projection_sqerror;
-  int matched_visible_blobs, prev_matched_blobs = 0;
-  int visible_leds;
-  double *matched_blobs[MAX_BLOBS_PER_FRAME];
-  rift_led *matched_leds[MAX_BLOBS_PER_FRAME];
-  int times_refined = 0;
 
   /* Incrememnt stats */
   cs->num_pose_checks++;
 
-again:
   if (trans->z < 0.05 || trans->z > 15) /* Invalid position, out of range */
     return false;
 
-  matched_visible_blobs = 0;
-  visible_leds = 0;
-  projection_sqerror = 0.0;
+  rift_pose_metrics score;
 
   /* Check how many LEDs have matching blobs in this pose,
    * if there's enough we have a good match */
+  /* FIXME: It would be better to be able to pass a list of undistorted
+   * blob points */
+  rift_evaluate_pose (&score, orient, trans, cs->blobs, cs->num_points,
+      leds->points, leds->num_points, cs->camera_matrix, cs->dist_coeffs, cs->dist_fisheye);
 
-  for (i = 0; i < leds->num_points; i++) {
-    rift_led *led = &leds->points[i];
-    vec3f pos, dir;
-
-    /* Project HMD LED into the image (no distortion) */
-    oquatf_get_rotated(orient, &led->pos, &pos);
-    ovec3f_add (&pos, trans, &pos);
-
-    if (pos.z < 0)
-      continue; // Can't be behind the camera
-
-    ovec3f_multiply_scalar (&pos, 1.0/pos.z, &pos);
-    oquatf_get_rotated(orient, &led->dir, &dir);
-    ovec3f_normalize_me(&dir);
-
-    /* Perspective projection */
-    double x = pos.x;
-    double y = pos.y;
-
-    ovec3f_normalize_me(&pos);
-
-    double facing_dot;
-    facing_dot = ovec3f_get_dot (&pos, &dir);
-
-    /* check it's camera facing */
-    if (facing_dot < 0) {
-      double sq_error;
-
-      cs_image_point_t *p = blobs_find_blob_at(cs, x, y, 1.25, &sq_error);
-      visible_leds++;
-
-      if (p != NULL) {
-        //printf ("matched (%f, %f) dot %f,\n", x, y, facing_dot);
-        matched_blobs[matched_visible_blobs] = p->point_homog;
-        matched_leds[matched_visible_blobs] = led;
-
-        matched_visible_blobs++;
-        projection_sqerror += sq_error;
-      }
-#if 0
-      else
-        printf ("no match (%f, %f) dot %f,\n", x, y, facing_dot);
-#endif
-    }
-  }
-
-  if (visible_leds > 4 && matched_visible_blobs > 4) {
-    if (visible_leds <= 2 * matched_visible_blobs) {
-
-      /* Refine the pose to best match all points we found */
-      if (matched_visible_blobs > prev_matched_blobs) {
-          refine_pose(matched_blobs, matched_leds, matched_visible_blobs, orient, trans, &projection_sqerror);
-          prev_matched_blobs = matched_visible_blobs;
-          times_refined++;
-          if (times_refined < 2)
-            goto again;
-      }
-
+  if (score.visible_leds > 4 && score.matched_blobs > 4) {
+    if (score.visible_leds <= 2 * score.matched_blobs) {
       if (mi) {
         bool is_new_best = false;
-        double error_per_led = projection_sqerror / matched_visible_blobs;
+        double error_per_led = score.reprojection_error / score.matched_blobs;
         double best_error_per_led = 10000.0;
 
         if (mi->best_matched > 0)
             best_error_per_led = mi->best_sqerror / mi->best_matched;
 
-        if (mi->best_matched < matched_visible_blobs && (error_per_led < best_error_per_led))
+        if (mi->best_matched < score.matched_blobs && (error_per_led < best_error_per_led))
             is_new_best = true; /* prefer more matched blobs with tighter error/LED  */
-        else if (mi->best_matched == matched_visible_blobs && mi->best_sqerror > projection_sqerror)
+        else if (mi->best_matched == score.matched_blobs && mi->best_sqerror > score.reprojection_error)
             is_new_best = true; /* else, prefer closer reprojection with at least as many matches*/
 
         if (is_new_best) {
-
-            mi->best_matched = matched_visible_blobs;
-            mi->best_visible = visible_leds;
+            mi->best_matched = score.matched_blobs;
+            mi->best_visible = score.visible_leds;
             mi->best_orient = *orient;
             mi->best_trans = *trans;
-            mi->best_sqerror = projection_sqerror;
+            mi->best_sqerror = score.reprojection_error;
 
             DEBUG("model %d new best pose candidate orient %f %f %f %f pos %f %f %f has %u visible LEDs, error %f (%f / LED)\n",
                    mi->id, orient->x, orient->y, orient->z, orient->w,
-                         trans->x, trans->y, trans->z, visible_leds, projection_sqerror, error_per_led);
-            DEBUG("model %d matched %u blobs of %u\n", mi->id, matched_visible_blobs, visible_leds);
+                         trans->x, trans->y, trans->z, score.visible_leds, score.reprojection_error, error_per_led);
+            DEBUG("model %d matched %u blobs of %u\n", mi->id, score.matched_blobs, score.visible_leds);
 #if DUMP_FULL_DEBUG
             dump_pose (cs, model, orient, trans, mi);
 #endif
@@ -315,13 +237,13 @@ again:
         } else {
           DEBUG("pose candidate orient %f %f %f %f pos %f %f %f has %u visible LEDs, error %f (%f / LED)\n",
                   orient->x, orient->y, orient->z, orient->w,
-                  trans->x, trans->y, trans->z, visible_leds, projection_sqerror,
+                  trans->x, trans->y, trans->z, score.visible_leds, score.reprojection_error,
                   error_per_led);
-          DEBUG("matched %u blobs of %u\n", matched_visible_blobs, visible_leds);
+          DEBUG("matched %u blobs of %u\n", score.matched_blobs, score.visible_leds);
         }
       }
       DEBUG("Found good pose match for device %u - %u LEDs matched %u visible ones\n",
-          mi->id, matched_visible_blobs, visible_leds);
+          mi->id, score.matched_blobs, score.visible_leds);
       return true;
     }
 #if 0
