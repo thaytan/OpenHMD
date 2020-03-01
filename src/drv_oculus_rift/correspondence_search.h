@@ -1,4 +1,8 @@
-
+// Copyright 2020 Jan Schmidt
+// SPDX-License-Identifier: BSL-1.0
+/*
+ * OpenHMD - Free and Open Source API and drivers for immersive technology.
+ */
 #ifndef __CORRESPONDENCE_SEARCH_H__
 #define __CORRESPONDENCE_SEARCH_H__
 

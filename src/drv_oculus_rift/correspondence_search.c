@@ -1,4 +1,9 @@
-#define _GNU_SOURCE // For qsort_r
+// Copyright 2020 Jan Schmidt
+// SPDX-License-Identifier: BSL-1.0
+/*
+ * OpenHMD - Free and Open Source API and drivers for immersive technology.
+ */
+#define _GNU_SOURCE // For qsort_r FIXME
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -204,6 +209,7 @@ correspondence_search_project_pose (correspondence_search_t *cs, led_search_mode
   int visible_leds;
   double *matched_blobs[MAX_BLOBS_PER_FRAME];
   rift_led *matched_leds[MAX_BLOBS_PER_FRAME];
+  int times_refined = 0;
 
   /* Incrememnt stats */
   cs->num_pose_checks++;
@@ -272,7 +278,9 @@ again:
       if (matched_visible_blobs > prev_matched_blobs) {
           refine_pose(matched_blobs, matched_leds, matched_visible_blobs, orient, trans, &projection_sqerror);
           prev_matched_blobs = matched_visible_blobs;
-          goto again;
+          times_refined++;
+          if (times_refined < 2)
+            goto again;
       }
 
       if (mi) {
