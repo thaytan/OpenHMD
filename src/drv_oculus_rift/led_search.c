@@ -48,7 +48,7 @@ led_search_candidate_t *led_search_candidate_new (rift_led *led, rift_leds *led_
     qsort_r (c->neighbours, c->num_neighbours, sizeof(rift_led *), compare_leds, c);
 
 #if 0
-  printf ("Have %u neighbours for LED %u (%f,%f,%f) dir (%f,%f,%f):\n", c->num_neighbours, c->led->led_id,
+  printf ("Have %u neighbours for LED (%f,%f,%f) dir (%f,%f,%f):\n", c->num_neighbours,
       c->led->pos.x, c->led->pos.y, c->led->pos.z,
       c->led->dir.x, c->led->dir.y, c->led->dir.z);
   for (i = 0; i < c->num_neighbours; i++) {
@@ -56,7 +56,7 @@ led_search_candidate_t *led_search_candidate_new (rift_led *led, rift_leds *led_
       vec3f delta;
 
       ovec3f_subtract (&cur->pos, &c->led->pos, &delta);
-      printf ("LED id %u @ (%f, %f, %f) dir (%f, %f, %f) dist %f\n", cur->led_id,
+      printf ("  LED %u @ (%f, %f, %f) dir (%f, %f, %f) dist %f\n", i,
               cur->pos.x, cur->pos.y, cur->pos.z,
               cur->dir.x, cur->dir.y, cur->dir.z,
               ovec3f_get_length (&delta));

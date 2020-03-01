@@ -27,6 +27,14 @@ correspondence_search_new(dmat3 *camera_matrix, double *dist_coeffs, bool dist_f
 }
 
 #define DUMP_SCENE 0
+#define DUMP_BLOBS  0
+#define DUMP_FULL_DEBUG 0
+
+#if DUMP_FULL_DEBUG
+#define DEBUG(s,...) printf(s,__VA_ARGS__)
+#else
+#define DEBUG(s,...)
+#endif
 
 #define MIN(a,b) ((a) < (b) ? a : b)
 #define MAX(a,b) ((a) > (b) ? a : b)
@@ -67,7 +75,7 @@ correspondence_search_set_blobs (correspondence_search_t *cs, struct blob *blobs
         p->blob = b;
         blob_list[i] = p;
 
-#if 0
+#if DUMP_BLOBS
         printf ("Blob %u = (%u,%u) -> (%f, %f) %f x %f (LED id %d)\n", i,
                 b->x, b->y,
                 p->point_homog[0], p->point_homog[1],
@@ -269,11 +277,16 @@ again:
 
       if (mi) {
         bool is_new_best = false;
+        double error_per_led = projection_sqerror / matched_visible_blobs;
+        double best_error_per_led = 10000.0;
 
-        if (mi->best_matched < 5 && mi->best_matched < matched_visible_blobs)
-            is_new_best = true; /* If < 5 blobs matched, prefer more matches */
-        else if (mi->best_sqerror > projection_sqerror)
-            is_new_best = true; /* else, prefer closer reprojection */
+        if (mi->best_matched > 0)
+            best_error_per_led = mi->best_sqerror / mi->best_matched;
+
+        if (mi->best_matched < matched_visible_blobs && (error_per_led < best_error_per_led))
+            is_new_best = true; /* prefer more matched blobs with tighter error/LED  */
+        else if (mi->best_matched == matched_visible_blobs && mi->best_sqerror > projection_sqerror)
+            is_new_best = true; /* else, prefer closer reprojection with at least as many matches*/
 
         if (is_new_best) {
 
@@ -283,28 +296,24 @@ again:
             mi->best_trans = *trans;
             mi->best_sqerror = projection_sqerror;
 
-#if 0
-            printf ("model %d new best pose candidate orient %f %f %f %f pos %f %f %f has %u visible LEDs, error %f\n",
+            DEBUG("model %d new best pose candidate orient %f %f %f %f pos %f %f %f has %u visible LEDs, error %f (%f / LED)\n",
                    mi->id, orient->x, orient->y, orient->z, orient->w,
-                         trans->x, trans->y, trans->z, visible_leds, projection_sqerror);
-            printf("model %d matched %u blobs of %u\n", mi->id, matched_visible_blobs, visible_leds);
+                         trans->x, trans->y, trans->z, visible_leds, projection_sqerror, error_per_led);
+            DEBUG("model %d matched %u blobs of %u\n", mi->id, matched_visible_blobs, visible_leds);
+#if DUMP_FULL_DEBUG
             dump_pose (cs, model, orient, trans, mi);
 #endif
             return true;
+        } else {
+          DEBUG("pose candidate orient %f %f %f %f pos %f %f %f has %u visible LEDs, error %f (%f / LED)\n",
+                  orient->x, orient->y, orient->z, orient->w,
+                  trans->x, trans->y, trans->z, visible_leds, projection_sqerror,
+                  error_per_led);
+          DEBUG("matched %u blobs of %u\n", matched_visible_blobs, visible_leds);
         }
-      } else {
-#if 0
-        printf ("pose candidate orient %f %f %f %f pos %f %f %f has %u visible LEDs, error %f\n",
-                orient->x, orient->y, orient->z, orient->w,
-                trans->x, trans->y, trans->z, visible_leds, projection_sqerror);
-        printf("matched %u blobs of %u\n", matched_visible_blobs, visible_leds);
-#endif
       }
-
-#if 0
-      printf ("Found good pose match for device %u - %u LEDs matched %u visible ones\n",
+      DEBUG("Found good pose match for device %u - %u LEDs matched %u visible ones\n",
           mi->id, matched_visible_blobs, visible_leds);
-#endif
       return true;
     }
 #if 0
