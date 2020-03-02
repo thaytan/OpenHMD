@@ -43,7 +43,7 @@ plugin_sources = [
   ]
 
 c_args = [ plugin_c_args, '-DHAVE_OPENCV=1' ]
-add_global_arguments(['-O3', '-mavx2', '-mfma', '-fno-math-errno'], language : 'c')
+add_global_arguments(['-mavx2', '-mfma', '-fno-math-errno'], language : 'c')
 
 gstohmdplugin = library('gstohmdplugin',
   plugin_sources,
