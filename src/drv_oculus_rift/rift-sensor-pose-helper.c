@@ -72,6 +72,7 @@ void rift_evaluate_pose (rift_pose_metrics *score, quatf *orient, vec3f *trans,
 	double reprojection_error = 0.0;
 	bool first_visible = true;
 	double led_radius;
+	bool good_pose_match = false;
 	rect_t bounds = { 0, };
 	int i;
 	
@@ -147,13 +148,24 @@ void rift_evaluate_pose (rift_pose_metrics *score, quatf *orient, vec3f *trans,
 		}
 	}
 
+
+  if (visible_leds > 4 && matched_blobs > 3) {
+    /* If we matched all the blobs in the pose bounding box (allowing 25% noise / overlapping blobs)
+     * or if we matched a large proportion (2/3) of the LEDs we expect to be visible, then consider this a good pose match */
+    if (unmatched_blobs * 4 <= matched_blobs ||
+        (2 * visible_leds <= 3 * matched_blobs)) {
+			good_pose_match = true;
+		}
+	}
+
 #if 0
 	printf ("score for pose is %u matched %u unmatched %u visible %f error\n",
 		matched_blobs, unmatched_blobs, visible_leds, reprojection_error);
 #endif
-	score->matched_blobs = matched_blobs;;
+	score->matched_blobs = matched_blobs;
 	score->unmatched_blobs = unmatched_blobs;
 	score->visible_leds = visible_leds;
 	score->reprojection_error = reprojection_error;
+	score->good_pose_match = good_pose_match;
 }
 

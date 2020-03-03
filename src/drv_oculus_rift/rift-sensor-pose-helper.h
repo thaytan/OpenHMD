@@ -18,6 +18,8 @@ typedef struct {
   int visible_leds;
 
   double reprojection_error;
+
+  bool good_pose_match; /* TRUE if rift_evaluate_pose() considered this a good match */
 } rift_pose_metrics;
 
 void rift_evaluate_pose (rift_pose_metrics *score, quatf *orient, vec3f *trans,

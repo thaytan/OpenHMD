@@ -210,51 +210,46 @@ correspondence_search_project_pose (correspondence_search_t *cs, led_search_mode
   rift_evaluate_pose (&score, orient, trans, cs->blobs, cs->num_points,
       leds->points, leds->num_points, cs->camera_matrix, cs->dist_coeffs, cs->dist_fisheye);
 
-  if (score.visible_leds > 4 && score.matched_blobs > 3) {
-    /* If we matched all the blobs in the pose bounding box (allowing 25% noise / overlapping blobs)
-     * or if we matched a large proportion (2/3) of the LEDs we expect to be visible, then OK */
-    if (score.unmatched_blobs * 4 <= score.matched_blobs ||
-        (2 * score.visible_leds <= 3 * score.matched_blobs)) {
-      if (mi) {
-        bool is_new_best = false;
-        double error_per_led = score.reprojection_error / score.matched_blobs;
-        double best_error_per_led = 10000.0;
+  if (score.good_pose_match) {
+    if (mi) {
+      bool is_new_best = false;
+      double error_per_led = score.reprojection_error / score.matched_blobs;
+      double best_error_per_led = 10000.0;
 
-        if (mi->best_score.matched_blobs > 0)
-            best_error_per_led = mi->best_score.reprojection_error / mi->best_score.matched_blobs;
+      if (mi->best_score.matched_blobs > 0)
+          best_error_per_led = mi->best_score.reprojection_error / mi->best_score.matched_blobs;
 
-        if (mi->best_score.matched_blobs < score.matched_blobs && (error_per_led < best_error_per_led))
-            is_new_best = true; /* prefer more matched blobs with tighter error/LED  */
-        else if (mi->best_score.matched_blobs == score.matched_blobs &&
-                mi->best_score.reprojection_error > score.reprojection_error)
-            is_new_best = true; /* else, prefer closer reprojection with at least as many matches*/
+      if (mi->best_score.matched_blobs < score.matched_blobs && (error_per_led < best_error_per_led))
+          is_new_best = true; /* prefer more matched blobs with tighter error/LED  */
+      else if (mi->best_score.matched_blobs == score.matched_blobs &&
+              mi->best_score.reprojection_error > score.reprojection_error)
+          is_new_best = true; /* else, prefer closer reprojection with at least as many matches*/
 
-        if (is_new_best) {
-            mi->best_score = score;
-            mi->best_orient = *orient;
-            mi->best_trans = *trans;
-            mi->good_pose_match = true;
+      if (is_new_best) {
+          mi->best_score = score;
+          mi->best_orient = *orient;
+          mi->best_trans = *trans;
+          mi->good_pose_match = true;
 
-            DEBUG("model %d new best pose candidate orient %f %f %f %f pos %f %f %f has %u visible LEDs, error %f (%f / LED)\n",
-                   mi->id, orient->x, orient->y, orient->z, orient->w,
-                         trans->x, trans->y, trans->z, score.visible_leds, score.reprojection_error, error_per_led);
-            DEBUG("model %d matched %u blobs of %u\n", mi->id, score.matched_blobs, score.visible_leds);
+          DEBUG("model %d new best pose candidate orient %f %f %f %f pos %f %f %f has %u visible LEDs, error %f (%f / LED)\n",
+                 mi->id, orient->x, orient->y, orient->z, orient->w,
+                       trans->x, trans->y, trans->z, score.visible_leds, score.reprojection_error, error_per_led);
+          DEBUG("model %d matched %u blobs of %u\n", mi->id, score.matched_blobs, score.visible_leds);
 #if DUMP_FULL_DEBUG
             dump_pose (cs, model, orient, trans, mi);
 #endif
-            return true;
-        } else {
-          DEBUG("pose candidate orient %f %f %f %f pos %f %f %f has %u visible LEDs, error %f (%f / LED)\n",
-                  orient->x, orient->y, orient->z, orient->w,
-                  trans->x, trans->y, trans->z, score.visible_leds, score.reprojection_error,
-                  error_per_led);
-          DEBUG("matched %u blobs of %u\n", score.matched_blobs, score.visible_leds);
-        }
+          return true;
+      } else {
+        DEBUG("pose candidate orient %f %f %f %f pos %f %f %f has %u visible LEDs, error %f (%f / LED)\n",
+                orient->x, orient->y, orient->z, orient->w,
+                trans->x, trans->y, trans->z, score.visible_leds, score.reprojection_error,
+                error_per_led);
+        DEBUG("matched %u blobs of %u\n", score.matched_blobs, score.visible_leds);
       }
-      LOG("Found good pose match for device %u - %u LEDs matched %u visible ones\n",
-          mi->id, score.matched_blobs, score.visible_leds);
-      return true;
     }
+    LOG("Found good pose match for device %u - %u LEDs matched %u visible ones\n",
+        mi->id, score.matched_blobs, score.visible_leds);
+    return true;
   }
 
   if (expected_match) {
