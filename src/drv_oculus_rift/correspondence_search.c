@@ -35,11 +35,19 @@ correspondence_search_new(dmat3 *camera_matrix, double *dist_coeffs, bool dist_f
 #define DUMP_SCENE 0
 #define DUMP_BLOBS  0
 #define DUMP_FULL_DEBUG 0
+#define DUMP_FULL_LOG 0
 
 #if DUMP_FULL_DEBUG
 #define DEBUG(s,...) printf(s,__VA_ARGS__)
 #else
 #define DEBUG(s,...)
+#endif
+
+#undef LOG
+#if DUMP_FULL_LOG_
+#define LOG(s,...) printf(s,__VA_ARGS__)
+#else
+#define LOG(s,...)
 #endif
 
 #define MIN(a,b) ((a) < (b) ? a : b)
@@ -179,11 +187,9 @@ dump_pose (correspondence_search_t *cs, led_search_model_t *model, quatf *orient
     printf ("]\n");
 }
 
-/* FIXME: Given 1 visible LED, we could just iterate the visible neighbours
- * from the model that we already sorted and checked and save time */
 bool
 correspondence_search_project_pose (correspondence_search_t *cs, led_search_model_t *model,
-        quatf *orient, vec3f *trans, cs_model_info_t *mi)
+        quatf *orient, vec3f *trans, cs_model_info_t *mi, bool expected_match)
 {
   /* Given a pose, project each 3D LED point back to 2D and assign correspondences to blobs */
   /* If enough match, print out the pose */
@@ -204,27 +210,30 @@ correspondence_search_project_pose (correspondence_search_t *cs, led_search_mode
   rift_evaluate_pose (&score, orient, trans, cs->blobs, cs->num_points,
       leds->points, leds->num_points, cs->camera_matrix, cs->dist_coeffs, cs->dist_fisheye);
 
-  if (score.visible_leds > 4 && score.matched_blobs > 4) {
-    if (score.visible_leds <= 2 * score.matched_blobs) {
+  if (score.visible_leds > 4 && score.matched_blobs > 3) {
+    /* If we matched all the blobs in the pose bounding box (allowing 25% noise / overlapping blobs)
+     * or if we matched a large proportion (2/3) of the LEDs we expect to be visible, then OK */
+    if (score.unmatched_blobs * 4 <= score.matched_blobs ||
+        (2 * score.visible_leds <= 3 * score.matched_blobs)) {
       if (mi) {
         bool is_new_best = false;
         double error_per_led = score.reprojection_error / score.matched_blobs;
         double best_error_per_led = 10000.0;
 
-        if (mi->best_matched > 0)
-            best_error_per_led = mi->best_sqerror / mi->best_matched;
+        if (mi->best_score.matched_blobs > 0)
+            best_error_per_led = mi->best_score.reprojection_error / mi->best_score.matched_blobs;
 
-        if (mi->best_matched < score.matched_blobs && (error_per_led < best_error_per_led))
+        if (mi->best_score.matched_blobs < score.matched_blobs && (error_per_led < best_error_per_led))
             is_new_best = true; /* prefer more matched blobs with tighter error/LED  */
-        else if (mi->best_matched == score.matched_blobs && mi->best_sqerror > score.reprojection_error)
+        else if (mi->best_score.matched_blobs == score.matched_blobs &&
+                mi->best_score.reprojection_error > score.reprojection_error)
             is_new_best = true; /* else, prefer closer reprojection with at least as many matches*/
 
         if (is_new_best) {
-            mi->best_matched = score.matched_blobs;
-            mi->best_visible = score.visible_leds;
+            mi->best_score = score;
             mi->best_orient = *orient;
             mi->best_trans = *trans;
-            mi->best_sqerror = score.reprojection_error;
+            mi->good_pose_match = true;
 
             DEBUG("model %d new best pose candidate orient %f %f %f %f pos %f %f %f has %u visible LEDs, error %f (%f / LED)\n",
                    mi->id, orient->x, orient->y, orient->z, orient->w,
@@ -242,16 +251,15 @@ correspondence_search_project_pose (correspondence_search_t *cs, led_search_mode
           DEBUG("matched %u blobs of %u\n", score.matched_blobs, score.visible_leds);
         }
       }
-      DEBUG("Found good pose match for device %u - %u LEDs matched %u visible ones\n",
+      LOG("Found good pose match for device %u - %u LEDs matched %u visible ones\n",
           mi->id, score.matched_blobs, score.visible_leds);
       return true;
     }
-#if 0
-    else {
-      printf ("Failed pose match - only %u LEDs matched %u visible ones\n",
-          matched_visible_blobs, visible_leds);
-    }
-#endif
+  }
+
+  if (expected_match) {
+    DEBUG ("Failed pose match - only %u blobs matched %u visible LEDs. %u unmatched blobs\n",
+        score.matched_blobs, score.visible_leds, score.unmatched_blobs);
   }
   return false;
 }
@@ -407,7 +415,7 @@ check_led_against_model_subset (correspondence_search_t *cs, cs_model_info_t *mi
         printf ("4th point @ %f %f offset %f pixels\n",
             checkpos.x, checkpos.y, distance * cs->camera_matrix->m[0]);
 #endif
-        if (correspondence_search_project_pose (cs, model, &orient, &trans, mi)) {
+        if (correspondence_search_project_pose (cs, model, &orient, &trans, mi, false)) {
 #if 0
           printf ("  P4P points %f,%f,%f -> %f %f\n"
                   "         %f,%f,%f -> %f %f\n"
@@ -568,7 +576,8 @@ correspondence_search_find_pose (correspondence_search_t *cs)
     /* Clear the pose information for each model */
     for (m = 0; m < cs->num_models; m++) {
         cs_model_info_t *mi = &cs->models[m];
-        mi->best_matched = mi->best_visible = 0;
+        memset (&mi->best_score, 0, sizeof (rift_pose_metrics));
+        mi->good_pose_match = false;
     }
     cs->num_trials = cs->num_pose_checks = 0;
 
@@ -601,8 +610,12 @@ correspondence_search_find_pose (correspondence_search_t *cs)
          if (estimate_initial_pose(matched_blobs, already_known_blobs,
              model->leds->points, model->leds->num_points, cs->camera_matrix, cs->dist_coeffs, cs->dist_fisheye,
              &mi->best_orient, &mi->best_trans, &num_matched_leds, &inliers, true)) {
-             printf ("%u existing correspondences for model %u matched %u\n", already_known_blobs, m, inliers);
-            if (correspondence_search_project_pose (cs, model, &mi->best_orient, &mi->best_trans, mi))
+             printf ("%u existing correspondences for model %u matched %u with pose orient %f %f %f %f pos %f %f %f\n",
+                     already_known_blobs, m, inliers,
+                     mi->best_orient.x, mi->best_orient.y, mi->best_orient.z, mi->best_orient.w,
+                     mi->best_trans.x, mi->best_trans.y, mi->best_trans.z);
+
+            if (correspondence_search_project_pose (cs, model, &mi->best_orient, &mi->best_trans, mi, true))
             {
                printf ("# pose orient %f %f %f %f pos %f %f %f\n",
                      mi->best_orient.x, mi->best_orient.y, mi->best_orient.z, mi->best_orient.w,
@@ -666,16 +679,17 @@ correspondence_search_find_pose (correspondence_search_t *cs)
 
     for (m = 0; m < cs->num_models; m++) {
         cs_model_info_t *mi = &cs->models[m];
-        printf ("# Best match for model %d was %d points out of %d with error %f (%d pixels)\n", m, mi->best_matched, mi->best_visible, mi->best_sqerror, (int) round(mi->best_sqerror * cs->camera_matrix->m[0] * cs->camera_matrix->m[4]));
+        printf ("# Best match for model %d was %d points out of %d with error %f (%d pixels)\n", m, mi->best_score.matched_blobs,
+                mi->best_score.visible_leds, mi->best_score.reprojection_error,
+                (int) round(mi->best_score.reprojection_error * cs->camera_matrix->m[0] * cs->camera_matrix->m[4]));
         printf ("# pose orient %f %f %f %f pos %f %f %f\n",
                       mi->best_orient.x, mi->best_orient.y, mi->best_orient.z, mi->best_orient.w,
                       mi->best_trans.x, mi->best_trans.y, mi->best_trans.z);
 #if DUMP_SCENE
         dump_pose (cs, mi->model, &mi->best_orient, &mi->best_trans, mi);
 #endif
-        if (mi->best_visible > 4 && mi->best_matched > 4) {
-            if (mi->best_visible < 2 * mi->best_matched)
-                found_poses++;
+        if (mi->good_pose_match) {
+          found_poses++;
         }
     }
 
@@ -692,12 +706,10 @@ correspondence_search_have_pose (correspondence_search_t *cs, int model_id, quat
     if (mi->id != model_id)
         continue;
 
-    if (mi->best_visible > 4 && mi->best_matched > 4) {
-      if (mi->best_visible < 2 * mi->best_matched) {
-          *orient = mi->best_orient;
-          *trans = mi->best_trans;
-          return true;
-      }
+    if (mi->good_pose_match) {
+      *orient = mi->best_orient;
+      *trans = mi->best_trans;
+      return true;
     }
   }
   return false;

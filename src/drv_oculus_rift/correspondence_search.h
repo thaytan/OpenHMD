@@ -9,6 +9,7 @@
 #include "rift.h"
 #include "rift-sensor-maths.h"
 #include "rift-sensor-blobwatch.h"
+#include "rift-sensor-pose-helper.h"
 #include "led_search.h"
 
 #define CS_MAX_MODELS 3
@@ -39,9 +40,7 @@ struct cs_model_info_s {
     quatf best_orient;
     vec3f best_trans;
     bool good_pose_match;
-    int best_matched;
-    int best_visible;
-    double best_sqerror;
+    rift_pose_metrics best_score;
 };
 
 struct correspondence_search_s
@@ -70,7 +69,7 @@ bool correspondence_search_set_model (correspondence_search_t *cs, int model_id,
 void correspondence_search_free (correspondence_search_t *cs);
 
 bool correspondence_search_project_pose (correspondence_search_t *cs, led_search_model_t *model,
-        quatf *orient, vec3f *trans, cs_model_info_t *mi);
+        quatf *orient, vec3f *trans, cs_model_info_t *mi, bool expected_match);
 int correspondence_search_find_pose (correspondence_search_t *cs);
 bool correspondence_search_have_pose (correspondence_search_t *cs, int model_id, quatf *orient, vec3f *trans);
 #endif
