@@ -72,7 +72,8 @@ extern "C" bool estimate_initial_pose(struct blob *blobs, int num_blobs,
 		taken |= (1ULL << blobs[i].led_id);
 		num_leds++;
 	}
-	*num_leds_out = num_leds;
+	if (num_leds_out)
+		*num_leds_out = num_leds;
 
 	if (num_leds < 4)
 		return false;
@@ -130,7 +131,8 @@ extern "C" bool estimate_initial_pose(struct blob *blobs, int num_blobs,
 			   use_extrinsic_guess, iterationsCount, reprojectionError,
 			   confidence, inliers, flags);
 
-	*num_inliers = inliers.rows;
+	if (num_inliers)
+		*num_inliers = inliers.rows;
 
 	vec3f v;
 	double angle = sqrt(rvec.dot(rvec));
@@ -231,7 +233,12 @@ void undistort_points (struct blob *blobs, int num_blobs,
   }
 }
 
-extern "C" void refine_pose(double **image_points,
+/*
+ * Refine pose operations on distortion correction UV image points,
+ * with values near the range [-1,1] (a bit bigger depending on the
+ * lens distortion). The image_points paramater is double[num_matches][2]
+ */
+extern "C" void refine_pose(vec3f *image_points,
 		    rift_led **leds, int num_matches,
 		    quatf *rot, vec3f *trans, double *reprojection_error)
 {
@@ -255,11 +262,17 @@ extern "C" void refine_pose(double **image_points,
 		list_points3d[i].x = leds[i]->pos.x;
 		list_points3d[i].y = leds[i]->pos.y;
 		list_points3d[i].z = leds[i]->pos.z;
-		list_points2d[i].x = image_points[i][0];
-		list_points2d[i].y = image_points[i][1];
+		list_points2d[i].x = image_points[i].x;
+		list_points2d[i].y = image_points[i].y;
 	}
 
+  // OpenCV 3.4.7 introduced a method to go straight to refining the pose with LM:
+#if CV_VERSION_MAJOR > 4 || (CV_VERSION_MAJOR == 3 && CV_VERSION_MINOR > 4) || (CV_VERSION_MAJOR == 3 && CV_VERSION_MINOR == 4 && CV_VERSION_REVISION >= 7) 
   cv::solvePnPRefineLM (list_points3d, list_points2d, dummyK, dummyD, rvec, tvec);
+#else
+	cv::solvePnPRansac(list_points3d, list_points2d, dummyK, dummyD, rvec, tvec,
+			   true, 10, 1.0 / 300.0, 0.95);
+#endif
 
 	vec3f v;
 	double angle = sqrt(rvec.dot(rvec));
@@ -285,8 +298,8 @@ extern "C" void refine_pose(double **image_points,
       ovec3f_add (&pos, trans, &pos);
       ovec3f_multiply_scalar (&pos, 1.0/pos.z, &pos);
 
-      dx = pos.x - image_points[i][0];
-      dy = pos.y - image_points[i][1];
+      dx = pos.x - image_points[i].x;
+      dy = pos.y - image_points[i].y;
 
       sq_error += (dx*dx) + (dy*dy);
     }

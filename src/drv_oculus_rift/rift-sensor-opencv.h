@@ -30,7 +30,7 @@ void undistort_points (struct blob *blobs, int num_blobs,
         vec3f *out_points,
         double camera_matrix[9], double dist_coeffs[5], bool dist_fisheye);
 
-void refine_pose(double **image_points,
+void refine_pose(vec3f *image_points,
     rift_led **leds, int num_matches,
     quatf *rot, vec3f *trans, double *reprojection_error);
 #else
