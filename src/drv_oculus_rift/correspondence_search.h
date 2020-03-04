@@ -71,5 +71,5 @@ void correspondence_search_free (correspondence_search_t *cs);
 bool correspondence_search_project_pose (correspondence_search_t *cs, led_search_model_t *model,
         quatf *orient, vec3f *trans, cs_model_info_t *mi, bool expected_match);
 int correspondence_search_find_pose (correspondence_search_t *cs);
-bool correspondence_search_have_pose (correspondence_search_t *cs, int model_id, quatf *orient, vec3f *trans);
+bool correspondence_search_have_pose (correspondence_search_t *cs, int model_id, quatf *orient, vec3f *trans, rift_pose_metrics *score);
 #endif

@@ -692,7 +692,8 @@ correspondence_search_find_pose (correspondence_search_t *cs)
 }
 
 bool
-correspondence_search_have_pose (correspondence_search_t *cs, int model_id, quatf *orient, vec3f *trans)
+correspondence_search_have_pose (correspondence_search_t *cs, int model_id, quatf *orient, vec3f *trans,
+    rift_pose_metrics *score)
 {
   int i;
 
@@ -704,6 +705,7 @@ correspondence_search_have_pose (correspondence_search_t *cs, int model_id, quat
     if (mi->good_pose_match) {
       *orient = mi->best_orient;
       *trans = mi->best_trans;
+      *score = mi->best_score;
       return true;
     }
   }

@@ -283,80 +283,41 @@ static void new_frame_start_cb(struct rift_sensor_uvc_stream *stream)
 }
 
 static void
-update_device_pose (rift_sensor_ctx *sensor_ctx, int device_id, rift_tracked_device *dev)
+update_device_pose (rift_sensor_ctx *sensor_ctx, int device_id, rift_tracked_device *dev,
+        rift_pose_metrics *score)
 {
-   int i;
    quatf *rot = &dev->pose_orient;
    vec3f trans = dev->pose_trans; /* Copy, because we modify it */
-	bool good_pose_match = false;
 
 	printf ("Have pose for device %d\n", device_id);
-   //ovec3f_inverse (&trans);
+  //ovec3f_inverse (&trans);
 
-   /* Project HMD LEDs into the image */
-   rift_project_points(dev->leds->points, dev->leds->num_points,
-       &sensor_ctx->camera_matrix, sensor_ctx->dist_coeffs, sensor_ctx->dist_fisheye,
-       rot, &trans, sensor_ctx->led_out_points);
+  /* Project HMD LEDs into the image */
+  rift_project_points(dev->leds->points, dev->leds->num_points,
+      &sensor_ctx->camera_matrix, sensor_ctx->dist_coeffs, sensor_ctx->dist_fisheye,
+      rot, &trans, sensor_ctx->led_out_points);
 
-   /* Check how many LEDs have matching blobs in this pose,
-    * if there's enough we have a good match */
-   int matched_visible_blobs = 0;
-   int visible_leds = 0;
-   for (i = 0; i < dev->leds->num_points; i++) {
-     vec3f *p = sensor_ctx->led_out_points + i;
-     int x = round(p->x);
-     int y = round(p->y);
-
-     vec3f normal, position;
-     double facing_dot;
-     oquatf_get_rotated(rot, &dev->leds->points[i].pos, &position);
-     ovec3f_add (&trans, &position, &position);
-
-		 ovec3f_normalize_me (&position);
-     oquatf_get_rotated(rot, &dev->leds->points[i].dir, &normal);
-     facing_dot = ovec3f_get_dot (&position, &normal);
-
-     if (facing_dot < -0.25) {
-       /* Strongly Camera facing */
-       struct blob *b = blobwatch_find_blob_at(sensor_ctx->bw, x, y);
-       visible_leds++;
-       if (b != NULL) {
-         matched_visible_blobs++;
-       }
-     }
-   }
-
-   if (visible_leds > 4 && matched_visible_blobs > 4) {
-     if (visible_leds < 2 * matched_visible_blobs) {
-       good_pose_match = true;
-       printf ("Found good pose match - %u LEDs matched %u visible ones\n",
-           matched_visible_blobs, visible_leds);
-		  printf ("Updating fusion for device %d pose quat %f %f %f %f  pos %f %f %f\n",
+  if (score->good_pose_match) {
+    printf ("Found good pose match - %u LEDs matched %u visible ones\n",
+         score->matched_blobs, score->visible_leds);
+	  printf ("Updating fusion for device %d pose quat %f %f %f %f  pos %f %f %f\n",
 				  device_id, rot->x, rot->y, rot->z, rot->w,
 					trans.x, trans.y, trans.z);
 
 
- 			/* FIXME: Our camera-local pose/position need translating based
- 			 * on room calibration */
- 			if (dev->fusion) {
-				ofusion_tracker_update (dev->fusion, sensor_ctx->frame_sof_ts, &trans, rot);
- 			}
-     }
-   }
-
-   if (!good_pose_match) {
-     printf ("Failed pose match - only %u LEDs matched %u visible ones\n",
-         matched_visible_blobs, visible_leds);
-   }
+ 		/* FIXME: Our camera-local pose/position need translating based
+ 		 * on room calibration */
+ 		if (dev->fusion) {
+			ofusion_tracker_update (dev->fusion, sensor_ctx->frame_sof_ts, &trans, rot);
+ 		}
 
 	 /* FIXME: Mark blobs with IDs that are unique across devices,
 		* once we're *sure* we have lock */
 #if 0
-   if (good_pose_match) {
-   for (i = 0; i < leds->num_points; i++) {
-     vec3f *p = sensor_ctx->led_out_points + i;
-     int x = round(p->x);
-     int y = round(p->y);
+    for (i = 0; i < leds->num_points; i++) {
+      vec3f *p = sensor_ctx->led_out_points + i;
+      int x = round(p->x);
+      int y = round(p->y);
 
  			vec3f normal, position;
  			double facing_dot;
@@ -375,8 +336,12 @@ update_device_pose (rift_sensor_ctx *sensor_ctx, int device_id, rift_tracked_dev
          b->led_id = i;
        }
  		}
- 	}
 #endif
+  }
+  else {
+    printf ("Failed pose match - only %u LEDs matched %u visible ones\n",
+        score->matched_blobs, score->visible_leds);
+  }
 }
 
 static void new_frame_cb(struct rift_sensor_uvc_stream *stream)
@@ -428,10 +393,12 @@ static void new_frame_cb(struct rift_sensor_uvc_stream *stream)
 		  int d;
 			for (d = 0; d < MAX_DEVICES; d++) {
 				rift_tracked_device *dev = sensor_ctx->tracker->devices + d;
+        rift_pose_metrics score;
+
 				if (dev->fusion == NULL)
 						continue; /* No such device */
-				if (correspondence_search_have_pose (sensor_ctx->cs, d, &dev->pose_orient, &dev->pose_trans))
-						update_device_pose (sensor_ctx, d, dev);
+				if (correspondence_search_have_pose (sensor_ctx->cs, d, &dev->pose_orient, &dev->pose_trans, &score))
+						update_device_pose (sensor_ctx, d, dev, &score);
 			}
  		}
 #if 0
