@@ -112,7 +112,7 @@ static inline void store_blob(struct extent *e, int y, struct blob *b)
 
 /*
  * Collects contiguous ranges of pixels with values larger than a threshold of
- * 0x9f in a given scanline and stores them in extents. Processing stops after
+ * THRESHOLD in a given scanline and stores them in extents. Processing stops after
  * num_extents.
  * Extents are marked with the same index as overlapping extents of the previous
  * scanline, and properties of the formed blobs are accumulated.
@@ -236,6 +236,7 @@ static void process_frame(uint8_t *lines, int width, int height, struct blobserv
 
 	ob->num_blobs = 0;
 
+	lines += width * y;
 	index = process_scanline(lines, width, height, y++, &el1, NULL, 0, ob);
 
 	for (; y < height; y++) {
@@ -297,7 +298,7 @@ void blobwatch_process(struct blobwatch *bw, uint8_t *frame,
 	if (bw->last_observation == -1) {
 		bw->last_observation = current;
 		if (output)
-			*output = NULL;
+			*output = ob;
 		return;
 	}
 
