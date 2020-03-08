@@ -56,6 +56,7 @@ struct rift_sensor_ctx_s
   int id;
   char serial_no[32];
   rift_tracker_ctx *tracker;
+	bool is_cv1;
 
   libusb_device_handle *usb_devh;
   int stream_started;
@@ -101,50 +102,79 @@ struct rift_tracker_ctx_s
 };
 
 static uint8_t rift_sensor_tracker_get_led_pattern_phase (rift_tracker_ctx *ctx, uint64_t *ts);
+static void update_device_pose (rift_sensor_ctx *sensor_ctx, int device_id, rift_tracked_device *dev,
+        rift_pose_metrics *score);
 
 static int tracker_process_blobs(rift_sensor_ctx *ctx)
 {
 	struct blobservation* bwobs = ctx->bwobs;
 	int ret = 0;
-
-#if 1
-  correspondence_search_set_blobs (ctx->cs, bwobs->blobs, bwobs->num_blobs);
-  ret = correspondence_search_find_pose (ctx->cs);
-
-#else
 	dmat3 *camera_matrix = &ctx->camera_matrix;
 	double *dist_coeffs = ctx->dist_coeffs;
 
 	quatf rot = ctx->pose_orient;
 	vec3f trans = ctx->pose_pos;
+	int d;
 
-	if (ctx->tracker->devices[0].fusion) {
-    rot = ctx->tracker->devices[0].fusion->orient;
-    trans = ctx->tracker->devices[0].fusion->world_position;
-  }
+	correspondence_search_set_blobs (ctx->cs, bwobs->blobs, bwobs->num_blobs);
 
-	int num_leds = 0;
-  /*
-   * Estimate initial pose using previously known [rot|trans].
-   */
-  if (estimate_initial_pose(bwobs->blobs, bwobs->num_blobs, ctx->tracker->leds->points,
-            ctx->tracker->leds->num_points, camera_matrix, dist_coeffs, &rot, &trans,
-            &num_leds, true)) {
-    // Reverse the Z direction of the translation we detected so motion toward the camera is
-    // forward motion
-    ovec3f_inverse (&trans);
+	for (d = 0; d < 3; d++) {
+		rift_tracked_device *dev = ctx->tracker->devices + d;
+		rift_pose_metrics score;
+		bool match_all_blobs = (d == 0); /* Let the HMD match whatever it can */
 
-    kalman_pose_update (ctx->pose_filter, ctx->frame_sof_ts, &trans, &rot);
-    kalman_pose_get_estimated (ctx->pose_filter, &ctx->pose_pos, &ctx->pose_orient);
+		if (dev->fusion == NULL)
+			continue; /* No such device */
+
+		rot = dev->fusion->orient;
+		trans = dev->fusion->world_position;
+
+		// Reverse the Z direction back to 'device pose'
+		// FIXME: Actually do a frame-of-reference translation to/from device space
+		ovec3f_inverse (&trans);
+
+		if (correspondence_search_find_one_pose (ctx->cs, d, match_all_blobs, &rot, &trans, &score)) {
+			if (score.good_pose_match) {
+				ret = 1;
+
+				/* Clear existing blob IDs for this device, then
+				 * back project LED ids into blobs if we find them and the dot product
+				 * shows them pointing strongly to the camera */
+				for (int index = 0; index < ctx->bwobs->num_blobs; index++) {
+					struct blob *b = ctx->bwobs->blobs + index;
+					if (LED_OBJECT_ID (b->led_id) == d) {
+						b->led_id = LED_INVALID_ID;
+					}
+				}
+
+				rift_mark_matching_blobs (&rot, &trans,
+						bwobs->blobs, bwobs->num_blobs, d,
+						dev->leds->points, dev->leds->num_points,
+						camera_matrix, dist_coeffs, ctx->is_cv1);
+
+				/* Refine the pose with PnP now that we've labelled the blobs */
+				estimate_initial_pose (ctx->bwobs->blobs, ctx->bwobs->num_blobs,
+					d, dev->leds->points, dev->leds->num_points, camera_matrix,
+					dist_coeffs, ctx->is_cv1,
+					&rot, &trans, NULL, NULL, true);
+
+				// Reverse the Z direction of the translation we detected so motion toward the camera is
+				// forward motion
+				ovec3f_inverse (&trans);
+
+				kalman_pose_update (ctx->pose_filter, ctx->frame_sof_ts, &trans, &rot);
+				kalman_pose_get_estimated (ctx->pose_filter, &ctx->pose_pos, &ctx->pose_orient);
+
+				update_device_pose (ctx, d, dev, &score);
+			}
+		}
+	}
 
 #if 0
     printf ("sensor %u Got PnP pose quat %f %f %f %f  pos %f %f %f from %d LEDs\n", ctx->id,
 				ctx->pose_orient.x, ctx->pose_orient.y, ctx->pose_orient.z, ctx->pose_orient.w,
 				ctx->pose_pos.x, ctx->pose_pos.y, ctx->pose_pos.z,
 				num_leds);
-#endif
-		ret = 1;
-  }
 #endif
 
 	return ret;
@@ -286,57 +316,34 @@ static void
 update_device_pose (rift_sensor_ctx *sensor_ctx, int device_id, rift_tracked_device *dev,
         rift_pose_metrics *score)
 {
-   quatf *rot = &dev->pose_orient;
+   quatf *orient = &dev->pose_orient;
    vec3f trans = dev->pose_trans; /* Copy, because we modify it */
 
 	printf ("Have pose for device %d\n", device_id);
-  //ovec3f_inverse (&trans);
+  ovec3f_inverse (&trans);
 
   /* Project HMD LEDs into the image */
   rift_project_points(dev->leds->points, dev->leds->num_points,
       &sensor_ctx->camera_matrix, sensor_ctx->dist_coeffs, sensor_ctx->dist_fisheye,
-      rot, &trans, sensor_ctx->led_out_points);
+      orient, &trans, sensor_ctx->led_out_points);
+
+	rift_evaluate_pose (score, orient, &trans,
+		sensor_ctx->bwobs->blobs, sensor_ctx->bwobs->num_blobs, device_id,
+		dev->leds->points, dev->leds->num_points,
+		&sensor_ctx->camera_matrix, sensor_ctx->dist_coeffs, sensor_ctx->dist_fisheye);
 
   if (score->good_pose_match) {
     printf ("Found good pose match - %u LEDs matched %u visible ones\n",
-         score->matched_blobs, score->visible_leds);
+				score->matched_blobs, score->visible_leds);
 	  printf ("Updating fusion for device %d pose quat %f %f %f %f  pos %f %f %f\n",
-				  device_id, rot->x, rot->y, rot->z, rot->w,
-					trans.x, trans.y, trans.z);
-
+			  device_id, orient->x, orient->y, orient->z, orient->w,
+				trans.x, trans.y, trans.z);
 
  		/* FIXME: Our camera-local pose/position need translating based
  		 * on room calibration */
  		if (dev->fusion) {
-			ofusion_tracker_update (dev->fusion, sensor_ctx->frame_sof_ts, &trans, rot);
+			ofusion_tracker_update (dev->fusion, sensor_ctx->frame_sof_ts, &trans, orient);
  		}
-
-	 /* FIXME: Mark blobs with IDs that are unique across devices,
-		* once we're *sure* we have lock */
-#if 0
-    for (i = 0; i < leds->num_points; i++) {
-      vec3f *p = sensor_ctx->led_out_points + i;
-      int x = round(p->x);
-      int y = round(p->y);
-
- 			vec3f normal, position;
- 			double facing_dot;
- 			oquatf_get_rotated(rot, &leds->points[i].pos, &position);
- 			ovec3f_add (&trans, &position, &position);
- 			oquatf_get_rotated(rot, &leds->points[i].dir, &normal);
- 			facing_dot = ovec3f_get_dot (&position, &normal);
-
- 			if (facing_dot < -0.25) {
-       /* Camera facing */
-       /* Back project LED ids into blobs if we find them */
-       struct blob *b = blobwatch_find_blob_at(sensor_ctx->bw, x, y);
-       if (b != NULL && b->led_id != i) {
-         /* Found a blob! */
-         LOGD ("Marking LED %d at %d,%d (was %d)\n", i, x, y, b->led_id);
-         b->led_id = i;
-       }
- 		}
-#endif
   }
   else {
     printf ("Failed pose match - only %u LEDs matched %u visible ones\n",
@@ -388,34 +395,22 @@ static void new_frame_cb(struct rift_sensor_uvc_stream *stream)
 		led_pattern_phase, NULL, 0, &sensor_ctx->bwobs);
 
 	if (sensor_ctx->bwobs && sensor_ctx->bwobs->num_blobs > 0) {
-
-    if (tracker_process_blobs (sensor_ctx)) {
-		  int d;
-			for (d = 0; d < MAX_DEVICES; d++) {
-				rift_tracked_device *dev = sensor_ctx->tracker->devices + d;
-        rift_pose_metrics score;
-
-				if (dev->fusion == NULL)
-						continue; /* No such device */
-				if (correspondence_search_have_pose (sensor_ctx->cs, d, &dev->pose_orient, &dev->pose_trans, &score))
-						update_device_pose (sensor_ctx, d, dev, &score);
-			}
- 		}
+		tracker_process_blobs (sensor_ctx);
 #if 0
-			printf("Sensor %d phase %d Blobs: %d\n", sensor_ctx->id, led_pattern_phase, sensor_ctx->bwobs->num_blobs);
+		printf("Sensor %d phase %d Blobs: %d\n", sensor_ctx->id, led_pattern_phase, sensor_ctx->bwobs->num_blobs);
 
-			for (int index = 0; index < sensor_ctx->bwobs->num_blobs; index++)
-			{
-				printf("Sensor %d Blob[%d]: %d,%d %dx%d id %d pattern %x age %u\n", sensor_ctx->id,
-					index,
-					sensor_ctx->bwobs->blobs[index].x,
-					sensor_ctx->bwobs->blobs[index].y,
-					sensor_ctx->bwobs->blobs[index].width,
-					sensor_ctx->bwobs->blobs[index].height,
-					sensor_ctx->bwobs->blobs[index].led_id,
-					sensor_ctx->bwobs->blobs[index].pattern,
-					sensor_ctx->bwobs->blobs[index].pattern_age);
-			}
+		for (int index = 0; index < sensor_ctx->bwobs->num_blobs; index++)
+		{
+			printf("Sensor %d Blob[%d]: %d,%d %dx%d id %d pattern %x age %u\n", sensor_ctx->id,
+				index,
+				sensor_ctx->bwobs->blobs[index].x,
+				sensor_ctx->bwobs->blobs[index].y,
+				sensor_ctx->bwobs->blobs[index].width,
+				sensor_ctx->bwobs->blobs[index].height,
+				sensor_ctx->bwobs->blobs[index].led_id,
+				sensor_ctx->bwobs->blobs[index].pattern,
+				sensor_ctx->bwobs->blobs[index].pattern_age);
+		}
 #endif
 	}
 
@@ -474,6 +469,7 @@ rift_sensor_new (ohmd_context* ohmd_ctx, int id, const char *serial_no, libusb_d
   sensor_ctx = ohmd_alloc(ohmd_ctx, sizeof (rift_sensor_ctx));
 
   sensor_ctx->id = id;
+  sensor_ctx->is_cv1 = (desc.idProduct == CV1_PID);
   strcpy ((char *) sensor_ctx->serial_no, (char *) serial_no);
   sensor_ctx->tracker = tracker;
   sensor_ctx->usb_devh = usb_devh;
