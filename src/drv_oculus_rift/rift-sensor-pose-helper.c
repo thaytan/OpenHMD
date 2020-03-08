@@ -48,7 +48,8 @@ static vec3f *find_best_matching_led (vec3f *led_points, int num_leds, struct bl
 		}
 	}
 
-	*out_sqerror = best_sqerror;
+	if (out_sqerror)
+		*out_sqerror = best_sqerror;
 	return best_led;
 }
 
@@ -66,9 +67,9 @@ void rift_evaluate_pose (rift_pose_metrics *score, quatf *orient, vec3f *trans,
 	vec3f led_out_points[MAX_OBJECT_LEDS];
 	vec3f visible_led_points[MAX_OBJECT_LEDS];
 	
-	int matched_blobs = 0;
-	int unmatched_blobs = 0;
-	int visible_leds = 0;
+	int num_matched_blobs = 0;
+	int num_unmatched_blobs = 0;
+	int num_visible_leds = 0;
 	double reprojection_error = 0.0;
 	bool first_visible = true;
 	double led_radius;
@@ -111,8 +112,8 @@ void rift_evaluate_pose (rift_pose_metrics *score, quatf *orient, vec3f *trans,
 #endif
 
 		if (facing_dot < -0.25) {
-			visible_led_points[visible_leds] = *p;
-			visible_leds++;
+			visible_led_points[num_visible_leds] = *p;
+			num_visible_leds++;
 			
 			/* Expand the bounding box */
 			if (first_visible) {
@@ -138,35 +139,37 @@ void rift_evaluate_pose (rift_pose_metrics *score, quatf *orient, vec3f *trans,
 			b->x < bounds.right && b->y < bounds.bottom) {
 			double sqerror;
 
-			vec3f *match_led = find_best_matching_led (visible_led_points, visible_leds, b, led_radius, &sqerror);
-			if (match_led != NULL) {
+			vec3f *match_led_pos = find_best_matching_led (visible_led_points, num_visible_leds, b, led_radius, &sqerror);
+			if (match_led_pos != NULL) {
 				reprojection_error += sqerror;
-				matched_blobs++;
+				num_matched_blobs++;
 			} else {
-				unmatched_blobs++;
+				num_unmatched_blobs++;
 			}
 		}
 	}
 
-
-  if (visible_leds > 4 && matched_blobs > 3) {
+  if (num_visible_leds > 4 && num_matched_blobs > 3) {
     /* If we matched all the blobs in the pose bounding box (allowing 25% noise / overlapping blobs)
      * or if we matched a large proportion (2/3) of the LEDs we expect to be visible, then consider this a good pose match */
-    if (unmatched_blobs * 4 <= matched_blobs ||
-        (2 * visible_leds <= 3 * matched_blobs)) {
+    if (num_unmatched_blobs * 4 <= num_matched_blobs ||
+        (2 * num_visible_leds <= 3 * num_matched_blobs)) {
 			good_pose_match = true;
 		}
 	}
 
 #if 0
 	printf ("score for pose is %u matched %u unmatched %u visible %f error\n",
-		matched_blobs, unmatched_blobs, visible_leds, reprojection_error);
+		num_matched_blobs, num_unmatched_blobs, num_visible_leds, reprojection_error);
 #endif
-	score->matched_blobs = matched_blobs;
-	score->unmatched_blobs = unmatched_blobs;
-	score->visible_leds = visible_leds;
-	score->reprojection_error = reprojection_error;
-	score->good_pose_match = good_pose_match;
+
+	if (score) {
+		score->matched_blobs = num_matched_blobs;
+		score->unmatched_blobs = num_unmatched_blobs;
+		score->visible_leds = num_visible_leds;
+		score->reprojection_error = reprojection_error;
+		score->good_pose_match = good_pose_match;
+	}
 }
 
 void rift_mark_matching_blobs (quatf *orient, vec3f *trans,
