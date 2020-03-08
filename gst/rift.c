@@ -50,7 +50,7 @@ static rift_led hmd_leds[] = {
   { .pos = {{11832.000000,25969.000000,-164177.000000}}, .dir={{0.208077,0.144049,-0.967447}}, .pattern=0x309 },
 };
 
-static rift_led right_control_leds[] = {
+static rift_led left_control_leds[] = {
 { .pos = {{0.029946,-0.008461,-0.011452 }}, .dir={{0.884067,0.388313,-0.260075 }}, .pattern=0x0 },
 { .pos = {{0.035536,-0.033164,-0.010440 }}, .dir={{0.967153,-0.024843,-0.252978 }}, .pattern=0x00 },
 { .pos = {{0.029571,-0.055917,-0.011534 }}, .dir={{0.844946,-0.443012,-0.299679 }}, .pattern=0x00 },
@@ -77,7 +77,7 @@ static rift_led right_control_leds[] = {
 { .pos = {{0.017511,-0.001385,-0.023864 }}, .dir={{0.563180,0.669812,-0.483922 }}, .pattern=0x00 },
 };
 
-static rift_led left_control_leds[] = {
+static rift_led right_control_leds[] = {
 { .pos = {{ -0.029829,-0.008241,-0.011167 }}, .dir ={{-0.868435,0.426789,-0.252331 }}, .pattern=0x00 },
 { .pos = {{ -0.035554,-0.031966,-0.010456 }}, .dir ={{-0.974995,-0.004233,-0.222187 }}, .pattern=0x00 },
 { .pos = {{ -0.029983,-0.055260,-0.011469 }}, .dir ={{-0.872345,-0.433877,-0.225311 }}, .pattern=0x00 },
@@ -110,8 +110,8 @@ struct {
 } all_test_leds[3] =
 { 
     { hmd_leds, sizeof(hmd_leds) / sizeof(hmd_leds[0]) },
-    { right_control_leds, sizeof(right_control_leds) / sizeof(right_control_leds[0]) },
     { left_control_leds, sizeof(left_control_leds) / sizeof(left_control_leds[0]) },
+    { right_control_leds, sizeof(right_control_leds) / sizeof(right_control_leds[0]) },
 };
 
 void
