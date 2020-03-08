@@ -11,18 +11,19 @@
 
 #include "rift.h"
 
-#define MAX_BLOBS_PER_FRAME  60
+#define MAX_BLOBS_PER_FRAME  100
 #define LED_INVALID_ID -1
 #define LED_NOISE_ID -2
+#define LED_LOCAL_ID(l) (((l) < 0) ? (l) : (l) & 0xFF)
 #define LED_OBJECT_ID(l) (((l) < 0) ? (l) : (l) >> 8)
 #define LED_MAKE_ID(o,n) ((o) << 8 | (n))
 
 struct blob {
 	/* center of bounding box */
-	uint16_t x;
-	uint16_t y;
-	int16_t vx;
-	int16_t vy;
+	float x;
+	float y;
+	float vx;
+	float vy;
 	/* bounding box */
 	uint16_t width;
 	uint16_t height;
@@ -34,7 +35,7 @@ struct blob {
 	uint32_t pattern_age;
 	uint16_t pattern_bits[10];
 	int8_t pattern_prev_phase;
-	int8_t led_id;
+	int led_id;
 };
 
 /*

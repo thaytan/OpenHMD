@@ -16,10 +16,14 @@ struct leds;
 
 #include <stdio.h>
 
-#define THRESHOLD 0x7f
+/* 0x24 works much better for Rift CV1, but needs to be higher for DK2 */
+#define THRESHOLD_CV1  0x24
+#define THRESHOLD_DK2  0x7f
+
+#define THRESHOLD THRESHOLD_DK2
 
 #define NUM_FRAMES_HISTORY	2
-#define MAX_EXTENTS_PER_LINE	11
+#define MAX_EXTENTS_PER_LINE	30
 
 #define abs(x) ((x) >= 0 ? (x) : -(x))
 #define min(x, y) ((x) < (y) ? (x) : (y))
@@ -94,8 +98,8 @@ void blobwatch_free (struct blobwatch *bw)
 static inline void store_blob(struct extent *e, int y, struct blob *b)
 {
 	b += e->index;
-	b->x = (e->left + e->right) / 2;
-	b->y = (e->top + y) / 2;
+	b->x = (e->left + e->right) / 2.0;
+	b->y = (e->top + y) / 2.0;
 	b->vx = 0;
 	b->vy = 0;
 	b->width = e->right - e->left + 1;
@@ -129,7 +133,7 @@ static int process_scanline(uint8_t *line, int width, int height, int y,
 	struct blob *blobs = ob->blobs;
 	int num_extents = MAX_EXTENTS_PER_LINE;
 	int num_blobs = MAX_BLOBS_PER_FRAME;
-	int center;
+	float center;
 	int x, e = 0;
 
 	if (prev_el)
@@ -149,11 +153,12 @@ static int process_scanline(uint8_t *line, int width, int height, int y,
 			x++;
 
 		end = x - 1;
-		/* Filter out single pixel and two-pixel extents */
+
+		/* Filter out single pixel extents */
 		if (end < start + 1)
 			continue;
 
-		center = (start + end) / 2;
+		center = (start + end) / 2.0;
 
 		extent->start = start;
 		extent->end = end;
@@ -174,7 +179,7 @@ static int process_scanline(uint8_t *line, int width, int height, int y,
 			 * considered to be part of the same blob.
 			 */
 			if (le < le_end &&
-			    le->start <= center && le->end > center) {
+			    le->start <= center && le->end >= center) {
 				extent->top = le->top;
 				extent->left = min(extent->start, le->left);
 				extent->right = max(extent->end, le->right);

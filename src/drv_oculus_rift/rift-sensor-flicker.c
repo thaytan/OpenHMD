@@ -32,7 +32,7 @@ static int hamming_distance(uint16_t a, uint16_t b)
 #endif
 
 static int pattern_find_id(rift_led *leds, int num_patterns,
-			   uint16_t pattern, int8_t *id)
+			   uint16_t pattern, int *id)
 {
 	int i;
 
