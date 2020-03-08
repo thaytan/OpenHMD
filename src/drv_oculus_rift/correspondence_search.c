@@ -237,7 +237,7 @@ correspondence_search_project_pose (correspondence_search_t *cs, led_search_mode
           mi->best_score = score;
           mi->best_orient = *orient;
           mi->best_trans = *trans;
-          mi->good_pose_match = (error_per_led < 5.0);
+          mi->good_pose_match = (mi->best_score.matched_blobs > 4) && (error_per_led < 3.0);
 
           DEBUG("model %d new best pose candidate orient %f %f %f %f pos %f %f %f has %u visible LEDs, error %f (%f / LED)\n",
                  mi->id, orient->x, orient->y, orient->z, orient->w,
