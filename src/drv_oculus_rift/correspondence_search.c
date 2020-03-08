@@ -214,7 +214,7 @@ correspondence_search_project_pose (correspondence_search_t *cs, led_search_mode
   /* FIXME: It would be better to be able to pass a list of undistorted
    * blob points */
   rift_evaluate_pose (&score, orient, trans, cs->blobs, cs->num_points,
-      leds->points, leds->num_points, cs->camera_matrix, cs->dist_coeffs, cs->dist_fisheye);
+      mi->id, leds->points, leds->num_points, cs->camera_matrix, cs->dist_coeffs, cs->dist_fisheye);
 
   if (score.good_pose_match) {
     if (mi) {

@@ -55,7 +55,7 @@ static vec3f *find_best_matching_led (vec3f *led_points, int num_leds, struct bl
 
 void rift_evaluate_pose (rift_pose_metrics *score, quatf *orient, vec3f *trans,
 	struct blob *blobs, int num_blobs,
-	rift_led *leds, int num_leds,
+	int device_id, rift_led *leds, int num_leds,
 	dmat3 *camera_matrix, double dist_coeffs[5], bool dist_fisheye)
 {
 	/*
@@ -135,6 +135,12 @@ void rift_evaluate_pose (rift_pose_metrics *score, quatf *orient, vec3f *trans,
 	/* Iterate the blobs and see which ones are within the bounding box and have a matching LED */
 	for (i = 0; i < num_blobs; i++) {
 		struct blob *b = blobs + i;
+		int led_object_id = LED_OBJECT_ID (b->led_id);
+
+		/* Skip blobs which already have an ID not belonging to this device */
+		if (led_object_id != LED_INVALID_ID && led_object_id != device_id)
+			continue;
+
 		if (b->x >= bounds.left && b->y >= bounds.top &&
 			b->x < bounds.right && b->y < bounds.bottom) {
 			double sqerror;
@@ -246,9 +252,10 @@ void rift_mark_matching_blobs (quatf *orient, vec3f *trans,
 	/* Iterate the blobs and see which ones are within the bounding box and have a matching LED */
 	for (i = 0; i < num_blobs; i++) {
 		struct blob *b = blobs + i;
+		int led_object_id = LED_OBJECT_ID (b->led_id);
 
-		/* Skip blobs which already have an ID */
-		if (b->led_id >= 0)
+		/* Skip blobs which already have an ID not belonging to this device */
+		if (led_object_id != LED_INVALID_ID && led_object_id != device_id)
 			continue;
 
 		if (b->x >= bounds.left && b->y >= bounds.top &&

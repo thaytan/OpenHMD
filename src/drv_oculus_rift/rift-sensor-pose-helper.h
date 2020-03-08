@@ -24,7 +24,7 @@ typedef struct {
 
 void rift_evaluate_pose (rift_pose_metrics *score, quatf *orient, vec3f *trans,
     struct blob *blobs, int num_blobs,
-		rift_led *leds, int num_leds,
+		int device_id, rift_led *leds, int num_leds,
 		dmat3 *camera_matrix, double dist_coeffs[5], bool dist_fisheye);
 
 void rift_mark_matching_blobs (quatf *orient, vec3f *trans,
