@@ -12,7 +12,7 @@
 
 #if HAVE_OPENCV
 bool estimate_initial_pose(struct blob *blobs, int num_blobs,
-			   rift_led *leds, int num_leds,
+			   int device_id, rift_led *leds, int num_leds,
 			   dmat3 *camera_matrix, double dist_coeffs[5], bool dist_fisheye,
 			   quatf *rot, vec3f *trans, int *num_leds_out,
 			   int *num_inliers, bool use_extrinsic_guess);
@@ -36,13 +36,14 @@ void refine_pose(vec3f *image_points,
 #else
 static inline
 bool estimate_initial_pose(struct blob *blobs, int num_blobs,
-			   rift_led *leds, int num_leds,
+			   int device_id, rift_led *leds, int num_leds,
 			   dmat3 *camera_matrix, double dist_coeffs[5], bool dist_fisheye,
 			   quatf *rot, vec3f *trans, int *num_leds_out,
 			   int *num_inliers, bool use_extrinsic_guess);
 {
 	(void)blobs;
 	(void)num_blobs;
+	(void)device_id;
 	(void)leds;
 	(void)num_leds;
 	(void)camera_matrix;

@@ -598,7 +598,7 @@ search_pose_for_model (correspondence_search_t *cs, cs_model_info_t *mi)
     /* FIXME: We should do this check for available correspondences and reproject before even giving these
      * blobs to the correspondence_search, and then set this model to be skipped */
     if (estimate_initial_pose(matched_blobs, already_known_blobs,
-        model->leds->points, model->leds->num_points, cs->camera_matrix, cs->dist_coeffs, cs->dist_fisheye,
+        mi->id, model->leds->points, model->leds->num_points, cs->camera_matrix, cs->dist_coeffs, cs->dist_fisheye,
         &mi->best_orient, &mi->best_trans, &num_matched_leds, &inliers, true)) {
        if (correspondence_search_project_pose (cs, model, &mi->best_orient, &mi->best_trans, mi, true))
        {

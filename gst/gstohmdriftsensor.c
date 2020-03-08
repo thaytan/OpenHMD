@@ -478,7 +478,7 @@ tracker_process_blobs (GstOhmdRiftSensor * filter, GstClockTime ts)
 
 				/* Refine the pose with PnP now that we've labelled the blobs */
 				estimate_initial_pose (filter->bwobs->blobs, filter->bwobs->num_blobs,
-					filter->leds[d].points, filter->leds[d].num_points, &filter->camera_matrix,
+					d, filter->leds[d].points, filter->leds[d].num_points, &filter->camera_matrix,
 					filter->dist_coeffs, filter->is_cv1,
 					&filter->pose_orient, &filter->pose_pos, NULL, NULL, true);
 			}

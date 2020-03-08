@@ -35,7 +35,7 @@ quatf_to_3x3 (cv::Mat &mat, quatf *me) {
 }
 
 extern "C" bool estimate_initial_pose(struct blob *blobs, int num_blobs,
-    rift_led *leds, int num_led_pos,
+    int device_id, rift_led *leds, int num_led_pos,
     dmat3 *camera_matrix, double dist_coeffs[5], bool dist_fisheye,
     quatf *rot, vec3f *trans, int *num_leds_out,
     int *num_inliers, bool use_extrinsic_guess)
@@ -65,11 +65,14 @@ extern "C" bool estimate_initial_pose(struct blob *blobs, int num_blobs,
 
 	/* count identified leds */
 	for (i = 0; i < num_blobs; i++) {
-		if (blobs[i].led_id < 0)
+		int led_id = blobs[i].led_id;
+		if (LED_OBJECT_ID(led_id) != device_id)
+			continue; /* invalid or LED id for another object */
+		led_id = LED_LOCAL_ID(led_id);
+
+		if (taken & (1ULL << led_id))
 			continue;
-		if (taken & (1ULL << blobs[i].led_id))
-			continue;
-		taken |= (1ULL << blobs[i].led_id);
+		taken |= (1ULL << led_id);
 		num_leds++;
 	}
 	if (num_leds_out)
@@ -84,23 +87,25 @@ extern "C" bool estimate_initial_pose(struct blob *blobs, int num_blobs,
 
 	taken = 0;
 	for (i = 0, j = 0; i < num_blobs && j < num_leds; i++) {
-		if (blobs[i].led_id < 0)
+		int led_id = blobs[i].led_id;
+		if (LED_OBJECT_ID(led_id) != device_id)
+			continue; /* invalid or LED id for another object */
+		led_id = LED_LOCAL_ID(led_id);
+		if (taken & (1ULL << led_id))
 			continue;
-		if (taken & (1ULL << blobs[i].led_id))
-			continue;
-		taken |= (1ULL << blobs[i].led_id);
-		list_points3d[j].x = leds[blobs[i].led_id].pos.x;
-		list_points3d[j].y = leds[blobs[i].led_id].pos.y;
-		list_points3d[j].z = leds[blobs[i].led_id].pos.z;
+		taken |= (1ULL << led_id);
+		list_points3d[j].x = leds[led_id].pos.x;
+		list_points3d[j].y = leds[led_id].pos.y;
+		list_points3d[j].z = leds[led_id].pos.z;
 		list_points2d[j].x = blobs[i].x;
 		list_points2d[j].y = blobs[i].y;
 		j++;
 
 		LOGD ("LED %d at %d,%d (3D %f %f %f)\n",
 		    blobs[i].led_id, blobs[i].x, blobs[i].y,
-		    leds[blobs[i].led_id].pos.x,
-		    leds[blobs[i].led_id].pos.y,
-		    leds[blobs[i].led_id].pos.z);
+		    leds[led_id].pos.x,
+		    leds[led_id].pos.y,
+		    leds[led_id].pos.z);
 	}
 
 	num_leds = j;
