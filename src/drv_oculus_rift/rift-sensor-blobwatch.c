@@ -16,12 +16,6 @@ struct leds;
 
 #include <stdio.h>
 
-/* 0x24 works much better for Rift CV1, but needs to be higher for DK2 */
-#define THRESHOLD_CV1  0x24
-#define THRESHOLD_DK2  0x7f
-
-#define THRESHOLD THRESHOLD_DK2
-
 #define NUM_FRAMES_HISTORY	2
 #define MAX_EXTENTS_PER_LINE	30
 
@@ -51,6 +45,7 @@ struct extent_line {
  * Blob detector internal state
  */
 struct blobwatch {
+	uint8_t threshold;
 	int width;
 	int height;
 	int last_observation;
@@ -69,7 +64,7 @@ void blobwatch_set_flicker(struct blobwatch *bw, bool enable)
  *
  * Returns the newly allocated blobwatch structure.
  */
-struct blobwatch *blobwatch_new(int width, int height)
+struct blobwatch *blobwatch_new(uint8_t threshold, int width, int height)
 {
 	struct blobwatch *bw = malloc(sizeof(*bw));
 
@@ -77,6 +72,7 @@ struct blobwatch *blobwatch_new(int width, int height)
 		return NULL;
 
 	memset(bw, 0, sizeof(*bw));
+	bw->threshold = threshold;
 	bw->width = width;
 	bw->height = height;
 	bw->last_observation = -1;
@@ -123,7 +119,7 @@ static inline void store_blob(struct extent *e, int y, struct blob *b)
  *
  * Returns the number of extents found.
  */
-static int process_scanline(uint8_t *line, int width, int height, int y,
+static int process_scanline(uint8_t *line, struct blobwatch *bw, int y,
 			    struct extent_line *el, struct extent_line *prev_el,
 			    int index, struct blobservation *ob)
 {
@@ -139,17 +135,17 @@ static int process_scanline(uint8_t *line, int width, int height, int y,
 	if (prev_el)
 		le_end += prev_el->num;
 
-	for (x = 0; x < width; x++) {
+	for (x = 0; x < bw->width; x++) {
 		int start, end;
 
 		/* Loop until pixel value exceeds threshold */
-		if (line[x] <= THRESHOLD)
+		if (line[x] <= bw->threshold)
 			continue;
 
 		start = x++;
 
 		/* Loop until pixel value falls below threshold */
-		while (x < width && line[x] > THRESHOLD)
+		while (x < bw->width && line[x] > bw->threshold)
 			x++;
 
 		end = x - 1;
@@ -216,7 +212,7 @@ static int process_scanline(uint8_t *line, int width, int height, int y,
 
 	el->num = e;
 
-	if (y == height - 1) {
+	if (y == bw->height - 1) {
 		/* All extents of the last line are finished blobs, too. */
 		for (extent = el->extents; extent < el->extents + el->num;
 		     extent++) {
@@ -232,7 +228,7 @@ static int process_scanline(uint8_t *line, int width, int height, int y,
  * Processes extents from all scanlines in a frame and stores the
  * resulting blobs in ob->blobs.
  */
-static void process_frame(uint8_t *lines, int width, int height, struct blobservation *ob)
+static void process_frame(uint8_t *lines, struct blobwatch *bw, struct blobservation *ob)
 {
 	struct extent_line el1;
 	struct extent_line el2;
@@ -241,12 +237,12 @@ static void process_frame(uint8_t *lines, int width, int height, struct blobserv
 
 	ob->num_blobs = 0;
 
-	lines += width * y;
-	index = process_scanline(lines, width, height, y++, &el1, NULL, 0, ob);
+	lines += bw->width * y;
+	index = process_scanline(lines, bw, y++, &el1, NULL, 0, ob);
 
-	for (; y < height; y++) {
-		lines += width;
-		index = process_scanline(lines, width, height, y, y&1? &el2 : &el1, y&1? &el1 : &el2,
+	for (; y < bw->height; y++) {
+		lines += bw->width;
+		index = process_scanline(lines, bw, y, y&1? &el2 : &el1, y&1? &el1 : &el2,
 					 index, ob);
 	}
 
@@ -297,7 +293,10 @@ void blobwatch_process(struct blobwatch *bw, uint8_t *frame,
 	int closest_last_ob_distsq[MAX_BLOBS_PER_FRAME]; // distsq of ob that is closest to each last_ob
 	int i, j;
 
-	process_frame(frame, width, height, ob);
+	bw->width = width;
+	bw->height = height;
+
+	process_frame(frame, bw, ob);
 
 	/* If there is no previous observation, our work is done here */
 	if (bw->last_observation == -1) {

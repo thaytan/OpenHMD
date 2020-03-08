@@ -18,6 +18,12 @@
 #define LED_OBJECT_ID(l) (((l) < 0) ? (l) : (l) >> 8)
 #define LED_MAKE_ID(o,n) ((o) << 8 | (n))
 
+/* 0x24 works much better for Rift CV1, but the threshold needs
+ * to be higher for DK2 which has more background bleed and bigger
+ * tracking LEDs */
+#define BLOB_THRESHOLD_CV1  0x24
+#define BLOB_THRESHOLD_DK2  0x7f
+
 struct blob {
 	/* center of bounding box */
 	float x;
@@ -50,7 +56,7 @@ struct blobservation {
 
 struct blobwatch;
 
-struct blobwatch *blobwatch_new(int width, int height);
+struct blobwatch *blobwatch_new(uint8_t threshold, int width, int height);
 void blobwatch_free (struct blobwatch *bw);
 void blobwatch_process(struct blobwatch *bw, uint8_t *frame,
 		       int width, int height, uint8_t led_pattern_phase,

@@ -346,7 +346,7 @@ gst_ohmd_rift_sensor_set_info (GstVideoFilter * vf,
 
   if (filter->bw)
     blobwatch_free (filter->bw);
-  filter->bw = blobwatch_new (in_info->width, in_info->height);
+  filter->bw = blobwatch_new (filter->is_cv1 ? BLOB_THRESHOLD_CV1 : BLOB_THRESHOLD_DK2, in_info->width, in_info->height);
   blobwatch_set_flicker (filter->bw, false);
   return TRUE;
 }

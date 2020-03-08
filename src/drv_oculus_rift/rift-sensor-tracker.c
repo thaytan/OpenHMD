@@ -494,7 +494,7 @@ rift_sensor_new (ohmd_context* ohmd_ctx, int id, const char *serial_no, libusb_d
   sensor_ctx->debug_vid = ohmd_pw_video_stream_new (stream_id, sensor_ctx->stream.width, sensor_ctx->stream.height, 625, 12);
   sensor_ctx->debug_metadata = ohmd_pw_debug_stream_new (stream_id);
 
-  sensor_ctx->bw = blobwatch_new(sensor_ctx->stream.width, sensor_ctx->stream.height);
+  sensor_ctx->bw = blobwatch_new(sensor_ctx->is_cv1 ? BLOB_THRESHOLD_CV1 : BLOB_THRESHOLD_DK2, sensor_ctx->stream.width, sensor_ctx->stream.height);
 
 	LOGV("Sensor %d - reading Calibration\n", id);
 	ret = rift_sensor_get_calibration(sensor_ctx, desc.idProduct);
