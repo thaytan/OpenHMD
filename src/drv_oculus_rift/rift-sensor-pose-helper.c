@@ -169,3 +169,98 @@ void rift_evaluate_pose (rift_pose_metrics *score, quatf *orient, vec3f *trans,
 	score->good_pose_match = good_pose_match;
 }
 
+void rift_mark_matching_blobs (quatf *orient, vec3f *trans,
+	struct blob *blobs, int num_blobs,
+	int device_id, rift_led *leds, int num_leds,
+	dmat3 *camera_matrix, double dist_coeffs[5], bool dist_fisheye)
+{
+	/*
+	 * 1. Project the LED points with the provided pose
+	 * 2. Build a bounding box for the points
+	 * 3. For blobs within the bounding box, see if they match a LED
+	 * 4. Mark each blob with an ID based on the LED id and device ID
+	 */
+	vec3f led_out_points[MAX_OBJECT_LEDS];
+	vec3f visible_led_points[MAX_OBJECT_LEDS];
+	rift_led *visible_leds[MAX_OBJECT_LEDS];
+
+	int num_visible_leds = 0;
+	bool first_visible = true;
+	double led_radius;
+	rect_t bounds = { 0, };
+	int i;
+
+	assert (num_leds > 0);
+	assert (num_blobs > 0);
+
+	/* Project HMD LEDs into the distorted image space */
+	rift_project_points(leds, num_leds,
+	    camera_matrix, dist_coeffs, dist_fisheye,
+	    orient, trans, led_out_points);
+
+	/* FIXME: Estimate LED size based on distance */
+	led_radius = 5;
+
+	/* Calculate the bounding box and visible LEDs */
+	for (i = 0; i < num_leds; i++) {
+		vec3f *p = led_out_points + i;
+
+		/* FIXME: Don't hard code the screen size here */
+		if (p->x < 0 || p->y < 0 || p->x > 1280 || p->y > 960)
+		 continue; // Outside the visible screen space
+
+		vec3f normal, position;
+		double facing_dot;
+		oquatf_get_rotated(orient, &leds[i].pos, &position);
+		ovec3f_add (trans, &position, &position);
+
+		ovec3f_normalize_me (&position);
+		oquatf_get_rotated(orient, &leds[i].dir, &normal);
+		facing_dot = ovec3f_get_dot (&position, &normal);
+
+		if (facing_dot < -0.25) {
+			visible_led_points[num_visible_leds] = *p;
+			visible_leds[num_visible_leds] = leds + i;
+			num_visible_leds++;
+
+			/* Expand the bounding box */
+			if (first_visible) {
+				bounds.left = p->x - led_radius;
+				bounds.top = p->y - led_radius;
+				bounds.right= p->x + 2 * led_radius;
+				bounds.bottom = p->x + 2 * led_radius;
+				first_visible = false;
+			}
+			else {
+				expand_rect(&bounds, p->x - led_radius, p->y - led_radius, 2 * led_radius, 2 * led_radius);
+			}
+		}
+	}
+
+	//printf ("Bounding box for pose is %f,%f -> %f,%f\n", bounds.left, bounds.top, bounds.right, bounds.bottom);
+	assert (bounds.top >= -led_radius);
+
+	/* Iterate the blobs and see which ones are within the bounding box and have a matching LED */
+	for (i = 0; i < num_blobs; i++) {
+		struct blob *b = blobs + i;
+
+		/* Skip blobs which already have an ID */
+		if (b->led_id >= 0)
+			continue;
+
+		if (b->x >= bounds.left && b->y >= bounds.top &&
+			b->x < bounds.right && b->y < bounds.bottom) {
+
+			vec3f *match_led_pos = find_best_matching_led (visible_led_points, num_visible_leds, b, led_radius, NULL);
+			if (match_led_pos != NULL) {
+				int index = match_led_pos - visible_led_points;
+				rift_led *match_led = visible_leds[index];
+
+				/* FIXME: Get the ID directly from the LED */
+				int led_index = match_led - leds;
+				b->led_id = LED_MAKE_ID (device_id, led_index);
+				printf ("Marking LED %d/%d at %f,%f now %u\n", device_id, led_index, b->x, b->y, b->led_id);
+			}
+		}
+	}
+}
