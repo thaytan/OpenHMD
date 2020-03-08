@@ -74,8 +74,6 @@ struct rift_sensor_ctx_s
   correspondence_search_t *cs;
 
   kalman_pose *pose_filter;
-  vec3f pose_pos;
-  quatf pose_orient;
 
 	vec3f led_out_points[MAX_OBJECT_LEDS];
 
@@ -112,8 +110,8 @@ static int tracker_process_blobs(rift_sensor_ctx *ctx)
 	dmat3 *camera_matrix = &ctx->camera_matrix;
 	double *dist_coeffs = ctx->dist_coeffs;
 
-	quatf rot = ctx->pose_orient;
-	vec3f trans = ctx->pose_pos;
+	quatf rot;
+	vec3f trans;
 	int d;
 
 	correspondence_search_set_blobs (ctx->cs, bwobs->blobs, bwobs->num_blobs);
@@ -131,7 +129,7 @@ static int tracker_process_blobs(rift_sensor_ctx *ctx)
 
 		// Reverse the Z direction back to 'device pose'
 		// FIXME: Actually do a frame-of-reference translation to/from device space
-		ovec3f_inverse (&trans);
+		trans.z = -trans.z;
 
 		if (correspondence_search_find_one_pose (ctx->cs, d, match_all_blobs, &rot, &trans, &score)) {
 			if (score.good_pose_match) {
@@ -158,24 +156,13 @@ static int tracker_process_blobs(rift_sensor_ctx *ctx)
 					dist_coeffs, ctx->is_cv1,
 					&rot, &trans, NULL, NULL, true);
 
-				// Reverse the Z direction of the translation we detected so motion toward the camera is
-				// forward motion
-				ovec3f_inverse (&trans);
-
 				kalman_pose_update (ctx->pose_filter, ctx->frame_sof_ts, &trans, &rot);
-				kalman_pose_get_estimated (ctx->pose_filter, &ctx->pose_pos, &ctx->pose_orient);
+				kalman_pose_get_estimated (ctx->pose_filter, &dev->pose_trans, &dev->pose_orient);
 
 				update_device_pose (ctx, d, dev, &score);
 			}
 		}
 	}
-
-#if 0
-    printf ("sensor %u Got PnP pose quat %f %f %f %f  pos %f %f %f from %d LEDs\n", ctx->id,
-				ctx->pose_orient.x, ctx->pose_orient.y, ctx->pose_orient.z, ctx->pose_orient.w,
-				ctx->pose_pos.x, ctx->pose_pos.y, ctx->pose_pos.z,
-				num_leds);
-#endif
 
 	return ret;
 }
@@ -183,17 +170,19 @@ static int tracker_process_blobs(rift_sensor_ctx *ctx)
 void
 rift_sensor_tracker_add_device (rift_tracker_ctx *ctx, int device_id, fusion *f, rift_leds *leds)
 {
-    int i;
+	int i;
 
-		assert (device_id < MAX_DEVICES);
-		ctx->devices[device_id].fusion = f;
-		ctx->devices[device_id].leds = leds;
-    ctx->devices[device_id].led_search = led_search_model_new (leds);
+	assert (device_id < MAX_DEVICES);
+	ctx->devices[device_id].fusion = f;
+	ctx->devices[device_id].leds = leds;
+	ctx->devices[device_id].led_search = led_search_model_new (leds);
 
-	  for (i = 0; i < ctx->n_sensors; i++) {
-		  rift_sensor_ctx *sensor_ctx = ctx->sensors[i];
-      correspondence_search_set_model (sensor_ctx->cs, device_id, ctx->devices[device_id].led_search);
-    }
+	for (i = 0; i < ctx->n_sensors; i++) {
+		rift_sensor_ctx *sensor_ctx = ctx->sensors[i];
+		correspondence_search_set_model (sensor_ctx->cs, device_id, ctx->devices[device_id].led_search);
+	}
+
+	printf("device %d online. Now tracking.\n", device_id);
 }
 
 static int
@@ -316,39 +305,31 @@ static void
 update_device_pose (rift_sensor_ctx *sensor_ctx, int device_id, rift_tracked_device *dev,
         rift_pose_metrics *score)
 {
-   quatf *orient = &dev->pose_orient;
-   vec3f trans = dev->pose_trans; /* Copy, because we modify it */
-
-	printf ("Have pose for device %d\n", device_id);
-  ovec3f_inverse (&trans);
-
-  /* Project HMD LEDs into the image */
-  rift_project_points(dev->leds->points, dev->leds->num_points,
-      &sensor_ctx->camera_matrix, sensor_ctx->dist_coeffs, sensor_ctx->dist_fisheye,
-      orient, &trans, sensor_ctx->led_out_points);
+	 quatf *orient = &dev->pose_orient;
+	 vec3f trans = dev->pose_trans;
 
 	rift_evaluate_pose (score, orient, &trans,
-		sensor_ctx->bwobs->blobs, sensor_ctx->bwobs->num_blobs, device_id,
-		dev->leds->points, dev->leds->num_points,
+		sensor_ctx->bwobs->blobs, sensor_ctx->bwobs->num_blobs,
+		device_id, dev->leds->points, dev->leds->num_points,
 		&sensor_ctx->camera_matrix, sensor_ctx->dist_coeffs, sensor_ctx->dist_fisheye);
 
-  if (score->good_pose_match) {
-    printf ("Found good pose match - %u LEDs matched %u visible ones\n",
-				score->matched_blobs, score->visible_leds);
-	  printf ("Updating fusion for device %d pose quat %f %f %f %f  pos %f %f %f\n",
-			  device_id, orient->x, orient->y, orient->z, orient->w,
-				trans.x, trans.y, trans.z);
+	if (score->good_pose_match) {
+		printf ("Found good pose match - %u LEDs matched %u visible ones\n",
+			score->matched_blobs, score->visible_leds);
+		printf ("Updating fusion for device %d pose quat %f %f %f %f  pos %f %f %f\n",
+			device_id, orient->x, orient->y, orient->z, orient->w,
+			trans.x, trans.y, trans.z);
 
  		/* FIXME: Our camera-local pose/position need translating based
- 		 * on room calibration */
- 		if (dev->fusion) {
-			ofusion_tracker_update (dev->fusion, sensor_ctx->frame_sof_ts, &trans, orient);
- 		}
-  }
-  else {
-    printf ("Failed pose match - only %u LEDs matched %u visible ones\n",
-        score->matched_blobs, score->visible_leds);
-  }
+		 * on room calibration. For now, just invert the position */
+		trans.z = -trans.z;
+
+		ofusion_tracker_update (dev->fusion, sensor_ctx->frame_sof_ts, &trans, orient);
+	}
+	else {
+		printf ("Failed pose match - only %u LEDs matched %u visible ones\n",
+		    score->matched_blobs, score->visible_leds);
+	}
 }
 
 static void new_frame_cb(struct rift_sensor_uvc_stream *stream)
@@ -433,6 +414,7 @@ static void new_frame_cb(struct rift_sensor_uvc_stream *stream)
 
 		ohmd_pw_video_stream_push (sensor_ctx->debug_vid, sensor_ctx->frame_sof_ts, stream->frame);
 	}
+#if 0
 	if (sensor_ctx->debug_metadata) {
 		char *debug_str;
 
@@ -445,6 +427,7 @@ static void new_frame_cb(struct rift_sensor_uvc_stream *stream)
 		ohmd_pw_debug_stream_push (sensor_ctx->debug_metadata, sensor_ctx->frame_sof_ts, debug_str);
 		free(debug_str);
   }
+#endif
 }
 
 
@@ -475,8 +458,6 @@ rift_sensor_new (ohmd_context* ohmd_ctx, int id, const char *serial_no, libusb_d
   sensor_ctx->usb_devh = usb_devh;
 
   sensor_ctx->pose_filter = kalman_pose_new (ohmd_ctx);
-  memset (&sensor_ctx->pose_pos, 0, sizeof(sensor_ctx->pose_pos));
-  memset (&sensor_ctx->pose_orient, 0, sizeof(sensor_ctx->pose_orient));
 
   sensor_ctx->stream.sof_cb = new_frame_start_cb;
   sensor_ctx->stream.frame_cb = new_frame_cb;
