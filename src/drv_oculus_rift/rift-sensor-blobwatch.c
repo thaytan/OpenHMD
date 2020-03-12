@@ -136,7 +136,7 @@ static void process_scanline(uint8_t *line, struct blobwatch *bw, int y,
 
 	for (x = 0; x < bw->width; x++) {
 		int start, end;
-    bool is_new_extent = true;
+		bool is_new_extent = true;
 
 		/* Loop until pixel value exceeds threshold */
 		if (line[x] <= bw->threshold)
@@ -149,10 +149,6 @@ static void process_scanline(uint8_t *line, struct blobwatch *bw, int y,
 			x++;
 
 		end = x - 1;
-
-		/* Filter out single pixel extents */
-		if (end < start + 1)
-			continue;
 
 		center = (start + end) / 2.0;
 
@@ -167,8 +163,12 @@ static void process_scanline(uint8_t *line, struct blobwatch *bw, int y,
 			 */
 			while (le < le_end && le->end < center &&
 			       ob->num_blobs < num_blobs) {
-				store_blob(le++, ob->num_blobs++, y, blobs);
-      }
+				/* Don't store 1x1 blobs */
+				if (le->top != y || le->left != le->right)
+					store_blob(le, ob->num_blobs++, y, blobs);
+
+				le++;
+			}
 
 			/*
 			 * A previous extent with significant overlap is
@@ -180,7 +180,7 @@ static void process_scanline(uint8_t *line, struct blobwatch *bw, int y,
 				extent->left = min(extent->start, le->left);
 				extent->right = max(extent->end, le->right);
 				extent->area += le->area;
-        is_new_extent = false;
+				is_new_extent = false;
 				le++;
 			}
 		}
@@ -205,8 +205,12 @@ static void process_scanline(uint8_t *line, struct blobwatch *bw, int y,
 		 * If there are no more extents on this line, all remaining
 		 * extents in the previous line are finished blobs. Store them.
 		 */
-		while (le < le_end && ob->num_blobs < num_blobs)
-			store_blob(le++, ob->num_blobs++, y, blobs);
+		while (le < le_end && ob->num_blobs < num_blobs) {
+			/* Don't store 1x1 blobs */
+			if (le->top != y || le->left != le->right)
+				store_blob(le, ob->num_blobs++, y, blobs);
+			le++;
+		}
 	}
 
 	el->num = e;
@@ -215,7 +219,11 @@ static void process_scanline(uint8_t *line, struct blobwatch *bw, int y,
 		/* All extents of the last line are finished blobs, too. */
 		for (extent = el->extents; extent < el->extents + el->num;
 		     extent++) {
-			if (ob->num_blobs < num_blobs)
+			if (ob->num_blobs >= num_blobs)
+				break;
+
+			/* Don't store 1x1 blobs */
+			if (le->top != y || le->left != le->right)
 				store_blob(extent, ob->num_blobs++, y, blobs);
 		}
 	}
