@@ -441,12 +441,12 @@ struct blob *blobwatch_find_blob_at(struct blobwatch *bw, int x, int y)
 {
 	int last = bw->last_observation;
 	struct blobservation *ob;
-  int i;
+	int i;
 
 	if (last == -1) {
-      /* No blobs to match against yet */
-      return NULL;
-  }
+			/* No blobs to match against yet */
+			return NULL;
+	}
 
 	ob = &bw->history[last];
 	for (i = 0; i < ob->num_blobs; i++) {
@@ -454,12 +454,12 @@ struct blob *blobwatch_find_blob_at(struct blobwatch *bw, int x, int y)
 		int dx = abs(x - b->x);
 		int dy = abs(y - b->y);
 
-    /* Check if the target is outside the bounding box */
+		/* Check if the target is outside the bounding box */
 		if (2 * dx > b->width ||
 		    2 * dy > b->height)
 			continue;
-    return b;
-  }
+		return b;
+	}
 
-  return NULL;
+	return NULL;
 }
