@@ -30,7 +30,6 @@ struct extent {
 	uint16_t top;
 	uint16_t left;
 	uint16_t right;
-	uint8_t index;
 	uint32_t area;
 };
 
@@ -89,11 +88,11 @@ void blobwatch_free (struct blobwatch *bw)
 
 /*
  * Stores blob information collected in the last extent e into the blob
- * array b at index e->index.
+ * array b at the given index.
  */
-static inline void store_blob(struct extent *e, int y, struct blob *b)
+static inline void store_blob(struct extent *e, int index, int y, struct blob *b)
 {
-	b += e->index;
+	b += index;
 	b->x = (e->left + e->right) / 2.0;
 	b->y = (e->top + y) / 2.0;
 	b->vx = 0;
@@ -119,9 +118,9 @@ static inline void store_blob(struct extent *e, int y, struct blob *b)
  *
  * Returns the number of extents found.
  */
-static int process_scanline(uint8_t *line, struct blobwatch *bw, int y,
+static void process_scanline(uint8_t *line, struct blobwatch *bw, int y,
 			    struct extent_line *el, struct extent_line *prev_el,
-			    int index, struct blobservation *ob)
+			    struct blobservation *ob)
 {
 	struct extent *le_end = prev_el->extents;
 	struct extent *le = prev_el->extents;
@@ -137,6 +136,7 @@ static int process_scanline(uint8_t *line, struct blobwatch *bw, int y,
 
 	for (x = 0; x < bw->width; x++) {
 		int start, end;
+    bool is_new_extent = true;
 
 		/* Loop until pixel value exceeds threshold */
 		if (line[x] <= bw->threshold)
@@ -158,17 +158,17 @@ static int process_scanline(uint8_t *line, struct blobwatch *bw, int y,
 
 		extent->start = start;
 		extent->end = end;
-		extent->index = index;
 		extent->area = x - start;
 
-		if (prev_el && index < num_blobs) {
+		if (prev_el && ob->num_blobs < num_blobs) {
 			/*
 			 * Previous extents without significant overlap are the
 			 * bottom of finished blobs. Store them into an array.
 			 */
 			while (le < le_end && le->end < center &&
-			       le->index < num_blobs)
-				store_blob(le++, y, blobs);
+			       ob->num_blobs < num_blobs) {
+				store_blob(le++, ob->num_blobs++, y, blobs);
+      }
 
 			/*
 			 * A previous extent with significant overlap is
@@ -180,7 +180,7 @@ static int process_scanline(uint8_t *line, struct blobwatch *bw, int y,
 				extent->left = min(extent->start, le->left);
 				extent->right = max(extent->end, le->right);
 				extent->area += le->area;
-				extent->index = le->index;
+        is_new_extent = false;
 				le++;
 			}
 		}
@@ -189,11 +189,10 @@ static int process_scanline(uint8_t *line, struct blobwatch *bw, int y,
 		 * If this extent is not part of a previous blob, increment the
 		 * blob index.
 		 */
-		if (extent->index == index) {
+		if (is_new_extent) {
 			extent->top = y;
 			extent->left = extent->start;
 			extent->right = extent->end;
-			index++;
 		}
 
 		if (++e == num_extents)
@@ -206,8 +205,8 @@ static int process_scanline(uint8_t *line, struct blobwatch *bw, int y,
 		 * If there are no more extents on this line, all remaining
 		 * extents in the previous line are finished blobs. Store them.
 		 */
-		while (le < le_end && le->index < num_blobs)
-			store_blob(le++, y, blobs);
+		while (le < le_end && ob->num_blobs < num_blobs)
+			store_blob(le++, ob->num_blobs++, y, blobs);
 	}
 
 	el->num = e;
@@ -216,12 +215,10 @@ static int process_scanline(uint8_t *line, struct blobwatch *bw, int y,
 		/* All extents of the last line are finished blobs, too. */
 		for (extent = el->extents; extent < el->extents + el->num;
 		     extent++) {
-			if (extent->index < num_blobs)
-				store_blob(extent, y, blobs);
+			if (ob->num_blobs < num_blobs)
+				store_blob(extent, ob->num_blobs++, y, blobs);
 		}
 	}
-
-	return index;
 }
 
 /*
@@ -232,21 +229,17 @@ static void process_frame(uint8_t *lines, struct blobwatch *bw, struct blobserva
 {
 	struct extent_line el1;
 	struct extent_line el2;
-	int index = 0;
 	int y = 2;
 
 	ob->num_blobs = 0;
 
 	lines += bw->width * y;
-	index = process_scanline(lines, bw, y++, &el1, NULL, 0, ob);
+	process_scanline(lines, bw, y++, &el1, NULL, ob);
 
 	for (; y < bw->height; y++) {
 		lines += bw->width;
-		index = process_scanline(lines, bw, y, y&1? &el2 : &el1, y&1? &el1 : &el2,
-					 index, ob);
+		process_scanline(lines, bw, y, y&1? &el2 : &el1, y&1? &el1 : &el2, ob);
 	}
-
-	ob->num_blobs = min(MAX_BLOBS_PER_FRAME, index);
 }
 
 /*
