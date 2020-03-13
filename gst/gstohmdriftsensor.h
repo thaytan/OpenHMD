@@ -62,6 +62,11 @@ struct _GstOhmdRiftSensor {
   struct blobwatch* bw;
   struct blobservation* bwobs;
 
+  gboolean draw_side_by_side;
+  gboolean draw_led_markers;
+  gboolean draw_blob_squares;
+  gboolean dump_blobs;
+
   dmat3 camera_matrix;
   double dist_coeffs[5];
 

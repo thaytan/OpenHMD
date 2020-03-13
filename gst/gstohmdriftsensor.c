@@ -43,8 +43,12 @@
 
 #include "gstohmdriftsensor.h"
 
-#define DUMP_BLOBS 0
 #define KALMAN_FILTER 1
+
+#define DEFAULT_DRAW_SIDE_BY_SIDE FALSE
+#define DEFAULT_DRAW_LED_MARKERS TRUE
+#define DEFAULT_DRAW_BLOB_SQUARES FALSE
+#define DEFAULT_DUMP_BLOBS FALSE
 
 const guint32 OHMD_MARKER = ('O' << 24 | 'H' << 16 | 'M' << 8 | 'D');
 
@@ -61,6 +65,10 @@ enum
 enum
 {
   PROP_0,
+  PROP_DRAW_SIDE_BY_SIDE,
+  PROP_DRAW_LED_MARKERS,
+  PROP_DRAW_BLOB_SQUARES,
+  PROP_DUMP_BLOBS
 };
 
 /* the capabilities of the inputs and outputs.
@@ -93,6 +101,140 @@ static gboolean gst_ohmd_rift_sensor_set_info (GstVideoFilter * filter,
 
 static GstFlowReturn gst_ohmd_rift_sensor_transform_frame (GstVideoFilter *
     filter, GstVideoFrame * in_frame, GstVideoFrame * out_frame);
+
+/* Function that can halve the value
+ * of ints, fractions, int/fraction ranges and lists of ints/fractions */
+static gboolean
+_halve_value (GValue * out, const GValue * in_value)
+{
+  /* Fundamental fixed types first */
+  if (G_VALUE_HOLDS_INT (in_value)) {
+    g_value_init (out, G_TYPE_INT);
+    g_value_set_int (out, MAX (g_value_get_int (in_value) / 2, 1));
+  } else if (GST_VALUE_HOLDS_INT_RANGE (in_value)) {
+    gint range_min = gst_value_get_int_range_min (in_value);
+    gint range_max = gst_value_get_int_range_max (in_value);
+    gint range_step = gst_value_get_int_range_step (in_value);
+    g_value_init (out, GST_TYPE_INT_RANGE);
+    if (range_min != 1)
+      range_min = MAX (1, range_min / 2);
+    if (range_max != G_MAXINT)
+      range_max = MAX (1, range_max / 2);
+    gst_value_set_int_range_step (out, range_min,
+        range_max, MAX (1, range_step / 2));
+  } else if (GST_VALUE_HOLDS_LIST (in_value)) {
+    gint i;
+    g_value_init (out, GST_TYPE_LIST);
+    for (i = 0; i < gst_value_list_get_size (in_value); i++) {
+      const GValue *entry;
+      GValue tmp = G_VALUE_INIT;
+
+      entry = gst_value_list_get_value (in_value, i);
+      /* Random list values might not be the right type */
+      if (!_halve_value (&tmp, entry))
+        goto fail;
+      gst_value_list_append_and_take_value (out, &tmp);
+    }
+  } else {
+    return FALSE;
+  }
+
+  return TRUE;
+fail:
+  g_value_unset (out);
+  return FALSE;
+}
+
+static GstStructure *
+_halve_structure_field (const GstStructure * in, const gchar * field_name)
+{
+  GstStructure *out;
+  const GValue *in_value = gst_structure_get_value (in, field_name);
+  GValue tmp = G_VALUE_INIT;
+
+  if (G_UNLIKELY (in_value == NULL))
+    return gst_structure_copy (in);     /* Field doesn't exist, leave it as is */
+
+  if (!_halve_value (&tmp, in_value))
+    return NULL;
+
+  out = gst_structure_copy (in);
+  gst_structure_set_value (out, field_name, &tmp);
+  g_value_unset (&tmp);
+
+  return out;
+}
+
+/* Function that can double the value
+ * of ints, fractions, int/fraction ranges and lists of ints/fractions */
+static gboolean
+_double_value (GValue * out, const GValue * in_value)
+{
+  /* Fundamental fixed types first */
+  if (G_VALUE_HOLDS_INT (in_value)) {
+    gint n = g_value_get_int (in_value);
+    g_value_init (out, G_TYPE_INT);
+    if (n <= G_MAXINT / 2)
+      g_value_set_int (out, n * 2);
+    else
+      g_value_set_int (out, G_MAXINT);
+  } else if (GST_VALUE_HOLDS_INT_RANGE (in_value)) {
+    gint range_min = gst_value_get_int_range_min (in_value);
+    gint range_max = gst_value_get_int_range_max (in_value);
+    gint range_step = gst_value_get_int_range_step (in_value);
+    if (range_min != 1) {
+      range_min = MIN (G_MAXINT / 2, range_min);
+      range_min *= 2;
+    }
+    if (range_max != G_MAXINT) {
+      range_max = MIN (G_MAXINT / 2, range_max);
+      range_max *= 2;
+    }
+    range_step = MIN (G_MAXINT / 2, range_step);
+    g_value_init (out, GST_TYPE_INT_RANGE);
+    gst_value_set_int_range_step (out, range_min, range_max, range_step);
+  } else if (GST_VALUE_HOLDS_LIST (in_value)) {
+    gint i;
+    g_value_init (out, GST_TYPE_LIST);
+    for (i = 0; i < gst_value_list_get_size (in_value); i++) {
+      const GValue *entry;
+      GValue tmp = G_VALUE_INIT;
+
+      entry = gst_value_list_get_value (in_value, i);
+      /* Random list values might not be the right type */
+      if (!_double_value (&tmp, entry))
+        goto fail;
+      gst_value_list_append_and_take_value (out, &tmp);
+    }
+  } else {
+    return FALSE;
+  }
+
+  return TRUE;
+fail:
+  g_value_unset (out);
+  return FALSE;
+}
+
+static GstStructure *
+_double_structure_field (const GstStructure * in, const gchar * field_name)
+{
+  GstStructure *out;
+  const GValue *in_value = gst_structure_get_value (in, field_name);
+  GValue tmp = G_VALUE_INIT;
+
+  if (G_UNLIKELY (in_value == NULL))
+    return gst_structure_copy (in);     /* Field doesn't exist, leave it as is */
+
+  if (!_double_value (&tmp, in_value))
+    return NULL;
+
+  out = gst_structure_copy (in);
+  gst_structure_set_value (out, field_name, &tmp);
+  g_value_unset (&tmp);
+
+  return out;
+}
 
 static GstCaps *
 gst_ohmd_rift_sensor_caps_remove_format_info (GstCaps * caps)
@@ -127,18 +269,71 @@ gst_ohmd_rift_sensor_caps_remove_format_info (GstCaps * caps)
   return res;
 }
 
+/* Return a copy of the caps with the requested field halved in value/range */
+static GstCaps *
+_halve_caps_field (const GstCaps * in, const gchar * field_name)
+{
+  gint i;
+  GstCaps *out = gst_caps_new_empty ();
+
+  for (i = 0; i < gst_caps_get_size (in); i++) {
+    const GstStructure *cur = gst_caps_get_structure (in, i);
+    GstCapsFeatures *f = gst_caps_get_features (in, i);
+
+    GstStructure *res = _halve_structure_field (cur, field_name);
+    out =
+        gst_caps_merge_structure_full (out, res,
+        f ? gst_caps_features_copy (f) : NULL);
+  }
+
+  return out;
+}
+
+/* Return a copy of the caps with the requested field doubled in value/range */
+static GstCaps *
+_double_caps_field (const GstCaps * in, const gchar * field_name)
+{
+  gint i;
+  GstCaps *out = gst_caps_new_empty ();
+
+  for (i = 0; i < gst_caps_get_size (in); i++) {
+    const GstStructure *cur = gst_caps_get_structure (in, i);
+    GstCapsFeatures *f = gst_caps_get_features (in, i);
+
+    GstStructure *res = _double_structure_field (cur, field_name);
+    out =
+        gst_caps_merge_structure_full (out, res,
+        f ? gst_caps_features_copy (f) : NULL);
+  }
+
+  return out;
+}
+
 static GstCaps *
 gst_ohmd_rift_sensor_transform_caps (GstBaseTransform * btrans,
-    GstPadDirection direction, GstCaps * caps, GstCaps * filter)
+    GstPadDirection direction, GstCaps * caps, GstCaps * filter_caps)
 {
+  GstOhmdRiftSensor *filter = GST_OHMDRIFTSENSOR (btrans);
   GstCaps *tmp, *tmp2;
   GstCaps *result;
 
   /* Get all possible caps that we can transform to */
   tmp = gst_ohmd_rift_sensor_caps_remove_format_info (caps);
 
-  if (filter) {
-    tmp2 = gst_caps_intersect_full (filter, tmp, GST_CAPS_INTERSECT_FIRST);
+  if (filter->draw_side_by_side) {
+    /* We need to double or halve the width, depending on the direction */
+    if (direction == GST_PAD_SINK) {
+      tmp2 = _double_caps_field (tmp, "width");
+    } else {
+      tmp2 = _halve_caps_field (tmp, "width");
+    }
+
+    gst_caps_unref (tmp);
+    tmp = tmp2;
+  }
+
+  if (filter_caps) {
+    tmp2 = gst_caps_intersect_full (filter_caps, tmp, GST_CAPS_INTERSECT_FIRST);
     gst_caps_unref (tmp);
     tmp = tmp2;
   }
@@ -155,10 +350,13 @@ static void
 gst_ohmd_rift_sensor_finalize (GObject * obj)
 {
   GstOhmdRiftSensor *filter = GST_OHMDRIFTSENSOR (obj);
+
   if (filter->bw)
     blobwatch_free (filter->bw);
   if (filter->pose_filter)
     kalman_pose_free (filter->pose_filter);
+  if (filter->cs)
+    correspondence_search_free (filter->cs);
 
   g_free (filter->led_out_points);
   G_OBJECT_CLASS (parent_class)->finalize (obj);
@@ -199,6 +397,24 @@ gst_ohmd_rift_sensor_class_init (GstOhmdRiftSensorClass * klass)
 
   GST_DEBUG_CATEGORY_INIT (gst_ohmd_rift_sensor_debug, "ohmdriftsensor", 0,
       "OpenHMD Rift Sensor Filter");
+
+  g_object_class_install_property (gobject_class, PROP_DRAW_SIDE_BY_SIDE,
+      g_param_spec_boolean ("draw-side-by-side", "Draw Side-by-Side",
+          "Draw the processed frame with the original frame side-by-side",
+          DEFAULT_DRAW_SIDE_BY_SIDE,
+          G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+  g_object_class_install_property (gobject_class, PROP_DRAW_LED_MARKERS,
+      g_param_spec_boolean ("draw-led-markers", "Draw LED markers",
+          "Draw the processed frame markers for extracted LED positions",
+          DEFAULT_DRAW_LED_MARKERS,
+          G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+  g_object_class_install_property (gobject_class, PROP_DRAW_BLOB_SQUARES,
+      g_param_spec_boolean ("draw-blob-squares", "Draw BLOB squares",
+          "Draw the squares around detected blobs", DEFAULT_DRAW_BLOB_SQUARES,
+          G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+  g_object_class_install_property (gobject_class, PROP_DUMP_BLOBS,
+      g_param_spec_boolean ("dump-blobs", "Dump BLOBs", "Dump BLOB info",
+          DEFAULT_DUMP_BLOBS, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
 }
 
 static void
@@ -295,15 +511,32 @@ static void
 gst_ohmd_rift_sensor_init (GstOhmdRiftSensor * filter)
 {
   filter->led_out_points = g_new0 (vec3f, 50);  /* At least as big as the HMD LED array */
+
+  filter->draw_side_by_side = DEFAULT_DRAW_SIDE_BY_SIDE;
+  filter->draw_led_markers = DEFAULT_DRAW_LED_MARKERS;
+  filter->draw_blob_squares = DEFAULT_DRAW_BLOB_SQUARES;
+  filter->dump_blobs = DEFAULT_DUMP_BLOBS;
 }
 
 static void
 gst_ohmd_rift_sensor_set_property (GObject * object, guint prop_id,
     const GValue * value, GParamSpec * pspec)
 {
-  //GstOhmdRiftSensor *filter = GST_OHMDRIFTSENSOR (object);
+  GstOhmdRiftSensor *filter = GST_OHMDRIFTSENSOR (object);
 
   switch (prop_id) {
+    case PROP_DRAW_SIDE_BY_SIDE:
+      filter->draw_side_by_side = g_value_get_boolean (value);
+      break;
+    case PROP_DRAW_LED_MARKERS:
+      filter->draw_led_markers = g_value_get_boolean (value);
+      break;
+    case PROP_DRAW_BLOB_SQUARES:
+      filter->draw_blob_squares = g_value_get_boolean (value);
+      break;
+    case PROP_DUMP_BLOBS:
+      filter->dump_blobs = g_value_get_boolean (value);
+      break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
       break;
@@ -314,9 +547,21 @@ static void
 gst_ohmd_rift_sensor_get_property (GObject * object, guint prop_id,
     GValue * value, GParamSpec * pspec)
 {
-  //GstOhmdRiftSensor *filter = GST_OHMDRIFTSENSOR (object);
+  GstOhmdRiftSensor *filter = GST_OHMDRIFTSENSOR (object);
 
   switch (prop_id) {
+    case PROP_DRAW_SIDE_BY_SIDE:
+      g_value_set_boolean (value, filter->draw_side_by_side);
+      break;
+    case PROP_DRAW_LED_MARKERS:
+      g_value_set_boolean (value, filter->draw_led_markers);
+      break;
+    case PROP_DRAW_BLOB_SQUARES:
+      g_value_set_boolean (value, filter->draw_blob_squares);
+      break;
+    case PROP_DUMP_BLOBS:
+      g_value_set_boolean (value, filter->dump_blobs);
+      break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
       break;
@@ -346,7 +591,9 @@ gst_ohmd_rift_sensor_set_info (GstVideoFilter * vf,
 
   if (filter->bw)
     blobwatch_free (filter->bw);
-  filter->bw = blobwatch_new (filter->is_cv1 ? BLOB_THRESHOLD_CV1 : BLOB_THRESHOLD_DK2, in_info->width, in_info->height);
+  filter->bw =
+      blobwatch_new (filter->is_cv1 ? BLOB_THRESHOLD_CV1 : BLOB_THRESHOLD_DK2,
+      in_info->width, in_info->height);
   blobwatch_set_flicker (filter->bw, false);
   return TRUE;
 }
@@ -401,8 +648,37 @@ clamp_rect (gint * x, gint * y, gint * rw, gint * rh, gint width, gint height)
 
 
 static void
-paint_rgb_rect (guint8 *in_pixels, gint in_stride, guint8 * pixels, gint width, gint stride, gint height,
-    gint start_x, gint start_y, gint box_width, gint box_height, guint32 mask_colour)
+draw_rgb_rect (guint8 * pixels, gint width, gint stride, gint height,
+    gint start_x, gint start_y, gint box_width, gint box_height, guint32 colour)
+{
+  clamp_rect (&start_x, &start_y, &box_width, &box_height, width, height);
+
+  gint x, y;
+  guint8 *dest = pixels + stride * start_y + 3 * start_x;
+  for (x = 0; x < box_width; x++) {
+    GST_WRITE_UINT24_BE (dest, colour);
+    dest += 3;
+  }
+
+  for (y = 1; y < box_height - 1; y++) {
+    dest = pixels + stride * (start_y + y) + 3 * start_x;
+
+    GST_WRITE_UINT24_BE (dest, colour);
+    dest += 3 * (box_width - 1);
+    GST_WRITE_UINT24_BE (dest, colour);
+  }
+
+  dest = pixels + stride * (start_y + box_height - 1) + 3 * start_x;
+  for (x = 0; x < box_width; x++) {
+    GST_WRITE_UINT24_BE (dest, colour);
+    dest += 3;
+  }
+}
+
+static void
+paint_rgb_rect (guint8 * in_pixels, gint in_stride, guint8 * pixels, gint width,
+    gint stride, gint height, gint start_x, gint start_y, gint box_width,
+    gint box_height, guint32 mask_colour)
 {
   clamp_rect (&start_x, &start_y, &box_width, &box_height, width, height);
 
@@ -417,9 +693,11 @@ paint_rgb_rect (guint8 *in_pixels, gint in_stride, guint8 * pixels, gint width, 
     src = in_pixels + in_stride * (start_y + y) + start_x;
     dest = pixels + stride * (start_y + y) + 3 * start_x;
     for (x = 0; x < box_width; x++) {
-      *dest++ = (r * src[0]) >> 8;
-      *dest++ = (g * src[0]) >> 8;
-      *dest++ = (b * src[0]) >> 8;
+      guint8 s = 0xFF;
+      src[0];
+      *dest++ = (r * s) >> 8;
+      *dest++ = (g * s) >> 8;
+      *dest++ = (b * s) >> 8;
       src++;
     }
   }
@@ -452,38 +730,39 @@ tracker_process_blobs (GstOhmdRiftSensor * filter, GstClockTime ts)
   rift_pose_metrics score;
 
 #if 1
-	correspondence_search_set_blobs (filter->cs, bwobs->blobs, bwobs->num_blobs);
+  correspondence_search_set_blobs (filter->cs, bwobs->blobs, bwobs->num_blobs);
 
-	for (d = 0; d < 3; d++) {
-		bool match_all_blobs = (d == 0); /* Let the HMD match whatever it can */
+  for (d = 0; d < 3; d++) {
+    bool match_all_blobs = (d == 0);    /* Let the HMD match whatever it can */
 
-		if (correspondence_search_find_one_pose (filter->cs, d, match_all_blobs, &filter->pose_orient, &filter->pose_pos, &score)) {
-			ret = TRUE;
+    if (correspondence_search_find_one_pose (filter->cs, d, match_all_blobs,
+            &filter->pose_orient, &filter->pose_pos, &score)) {
+      ret = TRUE;
 
-			if (score.good_pose_match) {
-				/* Clear existing blob IDs for this device, then
-				 * back project LED ids into blobs if we find them and the dot product
-				 * shows them pointing strongly to the camera */
-				for (int index = 0; index < filter->bwobs->num_blobs; index++) {
-					struct blob *b = filter->bwobs->blobs + index;
-					if (LED_OBJECT_ID (b->led_id) == d) {
-						b->led_id = LED_INVALID_ID;
-					}
-				}
+      if (score.good_pose_match) {
+        /* Clear existing blob IDs for this device, then
+         * back project LED ids into blobs if we find them and the dot product
+         * shows them pointing strongly to the camera */
+        for (int index = 0; index < filter->bwobs->num_blobs; index++) {
+          struct blob *b = filter->bwobs->blobs + index;
+          if (LED_OBJECT_ID (b->led_id) == d) {
+            b->led_id = LED_INVALID_ID;
+          }
+        }
 
-				rift_mark_matching_blobs (&filter->pose_orient, &filter->pose_pos,
-						bwobs->blobs, bwobs->num_blobs, d,
-						filter->leds[d].points, filter->leds[d].num_points,
-						&filter->camera_matrix, filter->dist_coeffs, filter->is_cv1);
+        rift_mark_matching_blobs (&filter->pose_orient, &filter->pose_pos,
+            bwobs->blobs, bwobs->num_blobs, d,
+            filter->leds[d].points, filter->leds[d].num_points,
+            &filter->camera_matrix, filter->dist_coeffs, filter->is_cv1);
 
-				/* Refine the pose with PnP now that we've labelled the blobs */
-				estimate_initial_pose (filter->bwobs->blobs, filter->bwobs->num_blobs,
-					d, filter->leds[d].points, filter->leds[d].num_points, &filter->camera_matrix,
-					filter->dist_coeffs, filter->is_cv1,
-					&filter->pose_orient, &filter->pose_pos, NULL, NULL, true);
-			}
-		}
-	}
+        /* Refine the pose with PnP now that we've labelled the blobs */
+        estimate_initial_pose (filter->bwobs->blobs, filter->bwobs->num_blobs,
+            d, filter->leds[d].points, filter->leds[d].num_points,
+            &filter->camera_matrix, filter->dist_coeffs, filter->is_cv1,
+            &filter->pose_orient, &filter->pose_pos, NULL, NULL, true);
+      }
+    }
+  }
 #else
   dmat3 *camera_matrix = &filter->camera_matrix;
   double *dist_coeffs = filter->dist_coeffs;
@@ -531,7 +810,6 @@ tracker_process_blobs (GstOhmdRiftSensor * filter, GstClockTime ts)
   return ret;
 }
 
-#if DUMP_BLOBS
 int
 compare_blobs (const void *elem1, const void *elem2)
 {
@@ -550,7 +828,6 @@ compare_blobs (const void *elem1, const void *elem2)
 
   return 0;
 }
-#endif
 
 static GstFlowReturn
 gst_ohmd_rift_sensor_transform_frame (GstVideoFilter * base,
@@ -606,6 +883,15 @@ gst_ohmd_rift_sensor_transform_frame (GstVideoFilter * base,
       d[0] = d[1] = src[x];
       d[2] = 0;
     }
+    if (filter->draw_side_by_side) {
+      /* Expand to RGB and copy the source to the RHS */
+      guint8 *d = dest + width * 3;
+      for (x = 0; x < width; x++) {
+        /* Expand GRAY8 to yellow */
+        d[0] = d[1] = d[2] = src[x];
+        d += 3;
+      }
+    }
 
     dest += out_stride;
     src += in_stride;
@@ -616,19 +902,27 @@ gst_ohmd_rift_sensor_transform_frame (GstVideoFilter * base,
 
     GST_INFO_OBJECT (filter, "Sensor %d phase %d Blobs: %d", filter->id,
         led_pattern_phase, filter->bwobs->num_blobs);
-#if DUMP_BLOBS
-    g_print ("Sensor %d phase %d Blobs: %d\n", filter->id, led_pattern_phase,
-        filter->bwobs->num_blobs);
-#endif
 
     /* Copy pointers into the sorted blobs array */
     for (int index = 0; index < filter->bwobs->num_blobs; index++)
       sorted_blobs[index] = filter->bwobs->blobs + index;
 
-#if DUMP_BLOBS
-    qsort (sorted_blobs, filter->bwobs->num_blobs, sizeof (struct blob *),
-        compare_blobs);
-#endif
+    if (filter->dump_blobs) {
+      g_print ("Sensor %d phase %d Blobs: %d\n", filter->id, led_pattern_phase,
+          filter->bwobs->num_blobs);
+
+      qsort (sorted_blobs, filter->bwobs->num_blobs, sizeof (struct blob *),
+          compare_blobs);
+
+      for (int index = 0; index < filter->bwobs->num_blobs; index++) {
+        struct blob *b = sorted_blobs[index];
+        g_print
+            ("Sensor %d Blob)[%d]: %f,%f %dx%d (age %d) id %d pattern %x (unchanged %u)\n",
+            filter->id, index, b->x, b->y, b->width, b->height, b->age,
+            b->led_id, b->pattern, b->pattern_age);
+      }
+      g_print ("\n");
+    }
 
     /* Process the blobs, which also label them if we find good
      * poses */
@@ -639,13 +933,6 @@ gst_ohmd_rift_sensor_transform_frame (GstVideoFilter * base,
       struct blob *b = sorted_blobs[index];
       gint start_x, start_y, w, h;
 
-#if DUMP_BLOBS
-      g_print
-            ("Sensor %d Blob)[%d]: %d,%d %dx%d (age %d) id %d pattern %x (unchanged %u)\n",
-            filter->id, index, b->x, b->y, b->width, b->height, b->age,
-            b->led_id, b->pattern, b->pattern_age);
-#endif
-
       start_x = b->x - b->width / 2.0;
       start_y = b->y - b->height / 2.0;
       w = b->width;
@@ -653,13 +940,16 @@ gst_ohmd_rift_sensor_transform_frame (GstVideoFilter * base,
       clamp_rect (&start_x, &start_y, &w, &h, width, height);
 
       /* Paint unknown blobs purple, known blobs green */
-      paint_rgb_rect (in_frame->data[0], in_stride, out_frame->data[0], width, out_stride, height, start_x,
-          start_y, b->width, b->height,
-          b->led_id == LED_INVALID_ID ? 0xFF00FF : 0x00FFFF);
+      if (filter->draw_blob_squares) {
+        draw_rgb_rect (out_frame->data[0], width, out_stride, height, start_x,
+            start_y, b->width, b->height,
+            b->led_id == LED_INVALID_ID ? 0xFF00FF : 0x00FFFF);
+      } else {
+        paint_rgb_rect (in_frame->data[0], in_stride, out_frame->data[0], width,
+            out_stride, height, start_x, start_y, b->width, b->height,
+            b->led_id == LED_INVALID_ID ? 0xFF00FF : 0x00FFFF);
+      }
     }
-#if DUMP_BLOBS
-     g_print ("\n");
-#endif
 
     if (found_poses) {
       int d;
@@ -677,32 +967,33 @@ gst_ohmd_rift_sensor_transform_frame (GstVideoFilter * base,
         draw_rgb_filled_rect (out_frame->data[0], width, out_stride, height,
             16 * d, 0, 16, 16, colours[d]);
 
-        /* Loop over the LED points a final time and draw markers
-         * into the video over the top */
+        if (filter->draw_led_markers) {
+          /* Loop over the LED points a final time and draw markers
+           * into the video over the top */
 
-        /* Project HMD LEDs into the image again doh */
-        rift_project_points (filter->leds[d].points, filter->leds[d].num_points,
-            &filter->camera_matrix, filter->dist_coeffs, filter->is_cv1,
-            &filter->pose_orient, &filter->pose_pos, filter->led_out_points);
+          /* Project HMD LEDs into the image again doh */
+          rift_project_points (filter->leds[d].points,
+              filter->leds[d].num_points, &filter->camera_matrix,
+              filter->dist_coeffs, filter->is_cv1, &filter->pose_orient,
+              &filter->pose_pos, filter->led_out_points);
 
-        for (i = 0; i < filter->leds[d].num_points; i++) {
-          vec3f *p = filter->led_out_points + i;
-          vec3f facing;
-          int x = round (p->x);
-          int y = round (p->y);
-    
-          oquatf_get_rotated (&filter->pose_orient,
-              &filter->leds[d].points[i].dir, &facing);
-    
-          if (facing.z < -0.25) {
-            /* Camera facing */
-            draw_rgb_marker (out_frame->data[0], width, out_stride, height, x,
-                y, 6, 6, colours[d]);
-          } else {
-#if 1
-            draw_rgb_marker (out_frame->data[0], width, out_stride, height, x,
-                y, 3, 3, 0x202000);
-#endif
+          for (i = 0; i < filter->leds[d].num_points; i++) {
+            vec3f *p = filter->led_out_points + i;
+            vec3f facing;
+            int x = round (p->x);
+            int y = round (p->y);
+
+            oquatf_get_rotated (&filter->pose_orient,
+                &filter->leds[d].points[i].dir, &facing);
+
+            if (facing.z < -0.25) {
+              /* Camera facing */
+              draw_rgb_marker (out_frame->data[0], width, out_stride, height, x,
+                  y, 6, 6, colours[d]);
+            } else {
+              draw_rgb_marker (out_frame->data[0], width, out_stride, height, x,
+                  y, 3, 3, 0x202000);
+            }
           }
         }
       }
