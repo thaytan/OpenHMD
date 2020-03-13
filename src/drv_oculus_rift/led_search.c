@@ -95,5 +95,6 @@ void led_search_model_free (led_search_model_t *model)
     for (i = 0; i < model->num_points; i++) {
         led_search_candidate_free (model->points[i]);
     }
+    free (model->points);
     free (model);
 }
