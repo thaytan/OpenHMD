@@ -12,6 +12,20 @@ Open Source XR driver development has largely moved to the Monado project:
 # OpenHMD
 This project aims to provide a Free and Open Source API and drivers for immersive technology, such as head mounted displays with built in head tracking.
 
+## Oculus Rift Development
+
+This repository is primarily for development of support for Oculus Rift CV1 and Rift S headsets.
+
+### Oculus Rift CV1
+
+2020-03-01 - Upstream OpenHMD has support for 3DOF tracking of the headset and hand controllers. Development toward full positional tracking is happening here in the https://github.com/thaytan/OpenHMD/tree/dev-oculus-position-hack branch.
+
+The focus is on improving the computer vision for finding the headset and hand controller LED constellations in the camera views, and filtering / sensor fusion for tracking. 
+
+### Oculus Rift S
+
+2020-06-01 - For Rift S, current development is focussed on reverse engineering the headset USB protocol and firmware details. There is a preliminary driver that supports 3DOF for the headset only, with no distortion in https://github.com/thaytan/OpenHMD/tree/dev-rift-s
+
 ## License
 OpenHMD is released under the permissive Boost Software License (see LICENSE for more information), to make sure it can be linked and distributed with both free and non-free software. While it doesn't require contribution from the users, it is still very appreciated.
 
