@@ -12,6 +12,12 @@
 #include "openhmdi.h"
 
 // vector
+void ovec3f_set(vec3f* me, float x, float y, float z)
+{
+	me->x = x;
+	me->y = y;
+	me->z = z;
+}
 
 float ovec3f_get_length(const vec3f* me)
 {
@@ -57,6 +63,12 @@ float ovec3f_get_angle(const vec3f* me, const vec3f* vec)
 	return acosf(dot / lengths);
 }
 
+void ovec3f_multiply_scalar (const vec3f* a, const float s, vec3f* out)
+{
+	out->x = a->x * s;
+	out->y = a->y * s;
+	out->z = a->z * s;
+}
 
 // quaternion
 
