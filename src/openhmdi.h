@@ -25,6 +25,7 @@
 
 #define OHMD_MAX(_a, _b) ((_a) > (_b) ? (_a) : (_b))
 #define OHMD_MIN(_a, _b) ((_a) < (_b) ? (_a) : (_b))
+#define OHMD_CLAMP(_a, minval, maxval) (OHMD_MAX (OHMD_MIN((_a), (maxval)), (minval)))
 
 #define OHMD_STRINGIFY(_what) #_what
 
