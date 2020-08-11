@@ -3,11 +3,13 @@
 /*
  * OpenHMD - Free and Open Source API and drivers for immersive technology.
  */
+#include <strings.h>
 
-#include <spa/support/type-map.h>
-#include <spa/param/format-utils.h>
 #include <spa/param/video/format-utils.h>
 #include <spa/param/props.h>
+#include <spa/node/io.h>
+#include <spa/node/utils.h>
+#include <spa/pod/filter.h>
 
 #include <pipewire/pipewire.h>
 
@@ -18,24 +20,15 @@
 typedef struct ohmd_pw_global_data_s ohmd_pw_global_data;
 typedef struct ohmd_pw_base_stream_s ohmd_pw_base_stream;
 
-struct ohmd_pw_types_cache {
-	struct spa_type_media_type media_type;
-	struct spa_type_media_subtype media_subtype;
-	struct spa_type_format_video format_video;
-	struct spa_type_video_format video_format;
-};
-
 struct ohmd_pw_global_data_s {
 	int use_count;
-
-	struct ohmd_pw_types_cache types;
 
 	struct pw_loop *loop;
 	struct pw_thread_loop *thread;
 
-	struct pw_core *core;
-	struct pw_type *type_map;
-	struct pw_remote *remote;
+	struct pw_context *context;
+	struct pw_core *pw_core;
+
 	struct spa_hook remote_listener;
 };
 
@@ -66,14 +59,6 @@ static ohmd_pw_global_data *ohmd_pw_global_data_ptr = NULL;
 static void ohmd_pipewire_global_deinit();
 static ohmd_pw_global_data *ohmd_pipewire_global_init();
 
-static void init_types(struct ohmd_pw_types_cache *types, struct spa_type_map *map)
-{
-		spa_type_media_type_map(map, &types->media_type);
-		spa_type_media_subtype_map(map, &types->media_subtype);
-		spa_type_format_video_map(map, &types->format_video);
-		spa_type_video_format_map(map, &types->video_format);
-}
-
 static void on_stream_state_changed(void *_data, enum pw_stream_state old, enum pw_stream_state state,
 				    const char *error)
 {
@@ -84,78 +69,51 @@ static void on_stream_state_changed(void *_data, enum pw_stream_state old, enum 
 	{
 		break;
 	}
+  case PW_STREAM_STATE_ERROR:
+  case PW_STREAM_STATE_UNCONNECTED:
 	default:
 		break;
 	}
 }
 
 static void
-on_video_stream_format_changed(void *_data, const struct spa_pod *format)
+on_video_stream_param_changed(void *_data, uint32_t id, const struct spa_pod *param)
 {
 	ohmd_pw_video_stream *v = _data;
-	ohmd_pw_global_data *gdata = v->base.gdata;
+	//ohmd_pw_global_data *gdata = v->base.gdata;
 	struct pw_stream *stream = v->base.stream;
-	struct pw_type *types = gdata->type_map;
 	uint8_t params_buffer[1024];
 	struct spa_pod_builder b = SPA_POD_BUILDER_INIT(params_buffer, sizeof(params_buffer));
 	const struct spa_pod *params[2];
 	int stride, h;
 
-	if (format == NULL) {
-		pw_stream_finish_format(stream, 0, NULL, 0);
+	if (param == NULL || id != SPA_PARAM_Format)
 		return;
-	}
-	spa_format_video_raw_parse(format, &v->format, &gdata->types.format_video);
+
+	spa_format_video_raw_parse(param, &v->format);
 
 	stride = v->width;
 	h = v->height;
 
-	params[0] = spa_pod_builder_object(&b,
-		types->param.idBuffers, types->param_buffers.Buffers,
-		":", types->param_buffers.size,    "i", stride * h,
-		":", types->param_buffers.stride,  "i", stride,
-		":", types->param_buffers.buffers, "iru", 2,
-			SPA_POD_PROP_MIN_MAX(1, 32),
-		":", types->param_buffers.align,   "i", 16);
+	params[0] = spa_pod_builder_add_object(&b,
+		SPA_TYPE_OBJECT_ParamBuffers, SPA_PARAM_Buffers,
+		SPA_PARAM_BUFFERS_size,    SPA_POD_Int(stride * h),
+		SPA_PARAM_BUFFERS_stride,  SPA_POD_Int(stride),
+		SPA_PARAM_BUFFERS_buffers, SPA_POD_CHOICE_RANGE_Int(2, 1, 32),
+		SPA_PARAM_BUFFERS_align,   SPA_POD_Int(16));
 
-	params[1] = spa_pod_builder_object(&b,
-		types->param.idMeta, types->param_meta.Meta,
-		":", types->param_meta.type, "I", types->meta.Header,
-		":", types->param_meta.size, "i", sizeof(struct spa_meta_header));
+	params[1] = spa_pod_builder_add_object(&b,
+		SPA_TYPE_OBJECT_ParamMeta, SPA_PARAM_Meta,
+		SPA_PARAM_META_type, SPA_POD_Id(SPA_META_Header),
+		SPA_PARAM_META_size, SPA_POD_Int(sizeof (struct spa_meta_header)));
 
-	pw_stream_finish_format(stream, 0, params, 2);
+	pw_stream_update_params(stream, params, 2);
 }
 
 static const struct pw_stream_events video_stream_events = {
 	PW_VERSION_STREAM_EVENTS,
 	.state_changed = on_stream_state_changed,
-	.format_changed = on_video_stream_format_changed,
-};
-
-static void on_state_changed(void *_data, enum pw_remote_state old, enum pw_remote_state state, const char *error)
-{
-	//struct ohmd_pw_global_data *data = _data;
-	//struct pw_remote *remote = data->remote;
-
-	switch (state) {
-	case PW_REMOTE_STATE_ERROR:
-		LOGE("remote error: %s\n", error);
-		break;
-
-	case PW_REMOTE_STATE_CONNECTED:
-	{
-
-		break;
-	}
-	default:
-		printf("remote state: \"%s\"\n", pw_remote_state_as_string(state));
-		break;
-	}
-}
-
-static const struct pw_remote_events remote_events = {
-	PW_VERSION_REMOTE_EVENTS,
-	.state_changed = on_state_changed,
+	.param_changed = on_video_stream_param_changed,
 };
 
 static ohmd_pw_global_data *ohmd_pipewire_global_init()
@@ -173,16 +131,9 @@ static ohmd_pw_global_data *ohmd_pipewire_global_init()
 	pw_init(NULL, NULL);
 
 	gdata->loop = pw_loop_new(NULL);
-	gdata->thread = pw_thread_loop_new(gdata->loop, "pipewire-loop");
-	gdata->core = pw_core_new(gdata->loop, NULL);
-	gdata->type_map = pw_core_get_type(gdata->core);
-	gdata->remote = pw_remote_new(gdata->core, NULL, 0);
-
-	init_types(&gdata->types, gdata->type_map->map);
-
-	pw_remote_add_listener(gdata->remote, &gdata->remote_listener, &remote_events, &gdata);
-
-	pw_remote_connect(gdata->remote);
+	gdata->thread = pw_thread_loop_new_full(gdata->loop, "pipewire-loop", NULL);
+	gdata->context = pw_context_new(gdata->loop, NULL, 0);
+	gdata->pw_core = pw_context_connect(gdata->context, NULL, 0);
 
 	if (pw_thread_loop_start(gdata->thread) != 0) {
 			ohmd_pipewire_global_deinit();
@@ -207,7 +158,7 @@ static void ohmd_pipewire_global_deinit()
 
 	pw_thread_loop_stop(gdata->thread);
 
-	pw_core_destroy(gdata->core);
+	pw_context_destroy(gdata->context);
 	pw_thread_loop_destroy(gdata->thread);
 	pw_loop_destroy(gdata->loop);
 
@@ -246,24 +197,24 @@ ohmd_pw_video_stream_new (const char *stream_id, int w, int h, int fps_n, int fp
 	/* Publish the stream */
 	pw_thread_loop_lock(gdata->thread);
 
-	base->stream = pw_stream_new(gdata->remote, stream_id,
-				pw_properties_new("media.class", "Video/Source",
-					PW_NODE_PROP_MEDIA, "Video",
-					PW_NODE_PROP_CATEGORY, "Source",
-					PW_NODE_PROP_ROLE, "Rift Sensor",
+	base->stream = pw_stream_new(gdata->pw_core, stream_id,
+				pw_properties_new(PW_KEY_MEDIA_CLASS, "Video/Source",
+					PW_KEY_MEDIA_TYPE, "Video",
+					PW_KEY_MEDIA_CATEGORY, "Source",
+					PW_KEY_MEDIA_ROLE, "Rift Sensor",
 					NULL));
 
-	params[0] = spa_pod_builder_object(&b,
-			gdata->type_map->param.idEnumFormat, gdata->type_map->spa_format,
-			"I", gdata->types.media_type.video,
-			"I", gdata->types.media_subtype.raw,
-			":", gdata->types.format_video.format,    "I", gdata->types.video_format.GRAY8, /* FIXME: Support other colorspace? */
-			":", gdata->types.format_video.size,      "R", &SPA_RECTANGLE(ret->width, ret->height),
-			":", gdata->types.format_video.framerate, "F", &SPA_FRACTION(ret->fps_n, ret->fps_d));
+	params[0] = spa_pod_builder_add_object(&b,
+			SPA_TYPE_OBJECT_Format, SPA_PARAM_EnumFormat,
+			SPA_FORMAT_mediaType,       SPA_POD_Id(SPA_MEDIA_TYPE_video),
+			SPA_FORMAT_mediaSubtype,    SPA_POD_Id(SPA_MEDIA_SUBTYPE_raw),
+			SPA_FORMAT_VIDEO_format,    SPA_POD_Id(SPA_VIDEO_FORMAT_GRAY8), /* FIXME: Support other colorspace? */
+			SPA_FORMAT_VIDEO_size,      SPA_POD_Rectangle(&SPA_RECTANGLE(ret->width, ret->height)),
+			SPA_FORMAT_VIDEO_framerate, SPA_POD_Fraction(&SPA_FRACTION(ret->fps_n, ret->fps_d)));
 
 	pw_stream_add_listener(base->stream, &base->listener, &video_stream_events, ret);
 
-	pw_stream_connect(base->stream, PW_DIRECTION_OUTPUT, NULL,
+	pw_stream_connect(base->stream, PW_DIRECTION_OUTPUT, PW_ID_ANY,
 			  PW_STREAM_FLAG_DRIVER | PW_STREAM_FLAG_MAP_BUFFERS, params, 1);
 
 	pw_thread_loop_unlock(gdata->thread);
@@ -307,7 +258,6 @@ void ohmd_pw_stream_push_common (ohmd_pw_base_stream *base, int64_t pts, const u
 	/* Get a buffer from pipewire and copy into it */
 	/* FIXME: When using pipewire support, we could capture directly into pipewire buffers */
 	ohmd_pw_global_data *gdata = base->gdata;
-	struct pw_type *types = gdata->type_map;
 
 	struct spa_meta_header *h;
 	struct pw_buffer *buf;
@@ -325,7 +275,7 @@ void ohmd_pw_stream_push_common (ohmd_pw_base_stream *base, int64_t pts, const u
 	if ((p = b->datas[0].data) == NULL)
 			goto done;
 
-	if ((h = spa_buffer_find_meta(b, types->meta.Header))) {
+	if ((h = spa_buffer_find_meta_data(b, SPA_META_Header, sizeof(*h)))) {
 			h->pts = pts;
 			h->flags = 0;
 			h->seq = base->seq++;
@@ -333,7 +283,7 @@ void ohmd_pw_stream_push_common (ohmd_pw_base_stream *base, int64_t pts, const u
 	}
 
 	memcpy (p, data, data_len);
-	b->datas[0].chunk->size = b->datas[0].maxsize;
+	b->datas[0].chunk->size = OHMD_MIN (data_len, b->datas[0].maxsize);
 
 done:
 	pw_thread_loop_lock (gdata->thread);
@@ -348,41 +298,40 @@ void ohmd_pw_video_stream_push (ohmd_pw_video_stream *v, int64_t pts, const uint
 }
 
 static void
-on_debug_stream_format_changed(void *_data, const struct spa_pod *format)
+on_debug_stream_param_changed(void *_data, uint32_t id, const struct spa_pod *format)
 {
 	ohmd_pw_debug_stream *s = _data;
-	ohmd_pw_global_data *gdata = s->base.gdata;
+	//ohmd_pw_global_data *gdata = s->base.gdata;
 	struct pw_stream *stream = s->base.stream;
-	struct pw_type *types = gdata->type_map;
 	uint8_t params_buffer[1024];
 	struct spa_pod_builder b = SPA_POD_BUILDER_INIT(params_buffer, sizeof(params_buffer));
 	const struct spa_pod *params[2];
 
 	if (format == NULL) {
-		pw_stream_finish_format(stream, 0, NULL, 0);
+		pw_stream_update_params(stream, NULL, 0);
 		return;
 	}
 
-	params[0] = spa_pod_builder_object(&b,
-		types->param.idBuffers, types->param_buffers.Buffers,
-		":", types->param_buffers.size,    "i", MAX_DEBUG_BLOB_SIZE,
-		":", types->param_buffers.stride,  "i", 1,
-		":", types->param_buffers.buffers, "iru", 2,
-			SPA_POD_PROP_MIN_MAX(1, 32),
-		":", types->param_buffers.align,   "i", 16);
+	params[0] = spa_pod_builder_add_object(&b,
+		SPA_TYPE_OBJECT_ParamBuffers, SPA_PARAM_Buffers,
+		SPA_PARAM_BUFFERS_buffers, SPA_POD_CHOICE_RANGE_Int(2, 1, 32),
+		SPA_PARAM_BUFFERS_blocks,  SPA_POD_Int(1),
+		SPA_PARAM_BUFFERS_size,    SPA_POD_Int(MAX_DEBUG_BLOB_SIZE),
+		SPA_PARAM_BUFFERS_stride,  SPA_POD_Int(1),
+		SPA_PARAM_BUFFERS_align,   SPA_POD_Int(16));
 
-	params[1] = spa_pod_builder_object(&b,
-		types->param.idMeta, types->param_meta.Meta,
-		":", types->param_meta.type, "I", types->meta.Header,
-		":", types->param_meta.size, "i", sizeof(struct spa_meta_header));
+	params[1] = spa_pod_builder_add_object(&b,
+		SPA_TYPE_OBJECT_ParamMeta, SPA_PARAM_Meta,
+		SPA_PARAM_META_type, SPA_POD_Id(SPA_META_Header),
+		SPA_PARAM_META_size, SPA_POD_Int(sizeof(struct spa_meta_header)));
 
-	pw_stream_finish_format(stream, 0, params, 2);
+	pw_stream_update_params(stream, params, 2);
 }
 
 static const struct pw_stream_events debug_stream_events = {
 	PW_VERSION_STREAM_EVENTS,
 	.state_changed = on_stream_state_changed,
-	.format_changed = on_debug_stream_format_changed,
+	.param_changed = on_debug_stream_param_changed,
 };
 
 ohmd_pw_debug_stream *ohmd_pw_debug_stream_new (const char *stream_id)
@@ -401,7 +350,7 @@ ohmd_pw_debug_stream *ohmd_pw_debug_stream_new (const char *stream_id)
 	if (gdata == NULL)
 		goto fail;
 
-	text_type = spa_type_map_get_id(gdata->type_map->map, "text");
+	text_type = SPA_FORMAT_START_Application + 0x7972; /* "OH" ascii value */
 
 	/* Create data store */
 	ret = calloc (sizeof(ohmd_pw_debug_stream), 1);
@@ -412,20 +361,21 @@ ohmd_pw_debug_stream *ohmd_pw_debug_stream_new (const char *stream_id)
 	/* Publish the stream */
 	pw_thread_loop_lock(gdata->thread);
 
-	base->stream = pw_stream_new(gdata->remote, stream_id,
-				pw_properties_new("media.class", "Text/Source",
-					PW_NODE_PROP_MEDIA, "Text",
-					PW_NODE_PROP_CATEGORY, "Source",
-					PW_NODE_PROP_ROLE, "OpenHMD Debug",
+	base->stream = pw_stream_new(gdata->pw_core, stream_id,
+				pw_properties_new(PW_KEY_MEDIA_CLASS, "Text/Source",
+					PW_KEY_MEDIA_TYPE, "Text",
+					PW_KEY_MEDIA_CATEGORY, "Source",
+					PW_KEY_MEDIA_ROLE, "OpenHMD Debug",
 					NULL));
 
-	params[0] = spa_pod_builder_object(&b,
-			gdata->type_map->param.idEnumFormat, gdata->type_map->spa_format,
-			"I", text_type, "I", gdata->types.media_subtype.raw);
+	params[0] = spa_pod_builder_add_object(&b,
+			SPA_TYPE_OBJECT_Format, SPA_PARAM_EnumFormat,
+			SPA_FORMAT_mediaType, SPA_POD_Id(text_type),
+      SPA_FORMAT_mediaSubtype, SPA_POD_Id(SPA_MEDIA_SUBTYPE_raw));
 
 	pw_stream_add_listener(base->stream, &base->listener, &debug_stream_events, ret);
 
-	pw_stream_connect(base->stream, PW_DIRECTION_OUTPUT, NULL,
+	pw_stream_connect(base->stream, PW_DIRECTION_OUTPUT, PW_ID_ANY,
 			  PW_STREAM_FLAG_DRIVER | PW_STREAM_FLAG_MAP_BUFFERS, params, 1);
 
 	pw_thread_loop_unlock(gdata->thread);

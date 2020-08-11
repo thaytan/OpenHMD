@@ -69,8 +69,8 @@ have_pipewire = false
 if debugging_mode
 	c_args += '-DOHMD_DEBUGGING_MODE'
 
-	pw_dep = dependency('libpipewire-0.2', version : '>= 0.2.2', required : false)
-	spa_dep = dependency('libspa-0.1', version : '>= 0.2.2', required: false)
+	pw_dep = dependency('libpipewire-0.3', version : '>= 0.3.0', required : false)
+	spa_dep = dependency('libspa-0.2', version : '>= 0.2', required: false)
 	have_pipewire = debugging_mode and pw_dep.found() and spa_dep.found()
 endif
 
