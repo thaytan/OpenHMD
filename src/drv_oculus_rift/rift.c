@@ -441,6 +441,22 @@ static void handle_rift_radio_message(rift_hmd_t *hmd, pkt_rift_radio_message *m
 	}
 }
 
+static void rift_send_keepalive(rift_hmd_t *priv)
+{
+	unsigned char buffer[FEATURE_BUFFER_SIZE];
+
+	// send keep alive message
+	pkt_keep_alive keep_alive = { 0, priv->sensor_config.keep_alive_interval };
+	int ka_size;
+	if (priv->revision == REV_DK1)
+		ka_size = encode_dk1_keep_alive(buffer, &keep_alive);
+	else
+		ka_size = encode_dk2_keep_alive(buffer, &keep_alive);
+	if (send_feature_report(priv, buffer, ka_size) == -1)
+		LOGW("error sending keepalive");
+}
+
+
 static void handle_rift_radio_report(rift_hmd_t* hmd, unsigned char* buffer, int size)
 {
 	pkt_rift_radio_report r;
@@ -462,15 +478,7 @@ static void update_hmd(rift_hmd_t *priv)
 	double t = ohmd_get_tick();
 	if(t - priv->last_keep_alive >= (double)priv->sensor_config.keep_alive_interval / 1000.0 - .2){
 		// send keep alive message
-		pkt_keep_alive keep_alive = { 0, priv->sensor_config.keep_alive_interval };
-		int ka_size;
-		if (priv->revision == REV_DK1)
-			ka_size = encode_dk1_keep_alive(buffer, &keep_alive);
-		else
-			ka_size = encode_dk2_keep_alive(buffer, &keep_alive);
-		if (send_feature_report(priv, buffer, ka_size) == -1)
-			LOGE("error sending keepalive");
-
+		rift_send_keepalive(priv);
 		// Update the time of the last keep alive we have sent.
 		priv->last_keep_alive = t;
 	}
@@ -876,6 +884,11 @@ static rift_hmd_t *open_hmd(ohmd_driver* driver, ohmd_device_desc* desc)
 		goto cleanup;
 	}
 
+	/* Send a keepalive msg first, to wake up the headset */
+	rift_send_keepalive(priv);
+	// Update the time of the last keep alive we have sent.
+	priv->last_keep_alive = ohmd_get_tick();
+
 	/* For the CV1, try and open the radio HID device */
 	if (desc->revision == REV_CV1) {
 		priv->radio_handle = open_hid_dev (driver->ctx, OCULUS_VR_INC_ID, RIFT_CV1_PID, 1);
@@ -946,15 +959,6 @@ static rift_hmd_t *open_hmd(ohmd_driver* driver, ohmd_device_desc* desc)
 		ohmd_set_error(driver->ctx, "failed to read LED info from device");
 		goto cleanup;
 	}
-
-	// set keep alive interval to n seconds
-	pkt_keep_alive keep_alive = { 0, KEEP_ALIVE_VALUE };
-	size = encode_dk1_keep_alive(buf, &keep_alive);
-	if (send_feature_report(priv, buf, size) == -1)
-		LOGE("error setting up keepalive");
-
-	// Update the time of the last keep alive we have sent.
-	priv->last_keep_alive = ohmd_get_tick();
 
 	// update sensor settings with new keep alive value
 	// (which will have been ignored in favor of the default 1000 ms one)
