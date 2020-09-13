@@ -116,7 +116,7 @@ bool vive_decode_config_packet(vive_imu_config* result,
 	}
 
 	LOGD("Decompressed from %u to %u bytes\n",
-	     (mz_uint32)packet.length, (mz_uint32)output_size);
+	     (mz_uint32)size, (mz_uint32)output_size);
 
 	trim((char*)output, (char*)output, (unsigned int)output_size);
 
