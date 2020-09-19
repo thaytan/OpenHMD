@@ -44,7 +44,8 @@ typedef struct {
 	float accel_mean;
 
 	float last_output_time;
-	bool have_gravity_vector;
+	float last_tracker_obs_time;
+	float last_gravity_vector_time;
 } fusion;
 
 void ofusion_init(fusion* me);

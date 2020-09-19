@@ -33,11 +33,15 @@ void ofusion_init(fusion* me)
 	ovec3f_set(&me->world_vel, 0, 0, 0);
 
 	me->last_output_time = 0.0;
+	me->last_tracker_obs_time = 0.0;
+	me->last_gravity_vector_time = 0.0;
 }
 
 static void ofusion_update_dt(fusion* me, float dt, const vec3f* ang_vel, const vec3f* accel, const vec3f* mag)
 {
+	double now = ohmd_get_tick();
 	vec3f world_accel;
+
 	oquatf_get_rotated(&me->orient, accel, &world_accel);
 	me->iterations += 1;
 
@@ -109,7 +113,7 @@ static void ofusion_update_dt(fusion* me, float dt, const vec3f* ang_vel, const 
 					me->grav_error_axis = tilt;
 				}
 			}
-			me->have_gravity_vector = true;
+			me->last_gravity_vector_time = now;
 		}
 
 		// perform gravity tilt correction
@@ -141,8 +145,9 @@ static void ofusion_update_dt(fusion* me, float dt, const vec3f* ang_vel, const 
 	oquatf_normalize_me(&me->orient);
 
 	/* Skip position interpolation at first until we've had
-	 * time to measure gravity */
-	if (me->have_gravity_vector) {
+	 * time to measure gravity, otherwise the local acceleration
+	 * information can't be trusted anyway */
+	if (now - me->last_gravity_vector_time < 1.0) {
 		// Take the new corrected orientation and re-convert the accel to world accel
 		// then subtract expected gravity acceleration, and double integrate to get
 		// new position / velocity
@@ -164,7 +169,16 @@ static void ofusion_update_dt(fusion* me, float dt, const vec3f* ang_vel, const 
 		ovec3f_multiply_scalar (&me->world_vel, dt, &delta_position);
 		ovec3f_multiply_scalar (&local_accel, 0.5*dt*dt, &tmp);
 		ovec3f_add (&delta_position, &tmp, &delta_position);
-		ovec3f_add (&me->world_position, &delta_position, &me->world_position);
+
+		/* If we've seen a tracker observation in the last half second,
+		 * then interpolate position. Stop after 0.5 seconds, before
+		 * we drift too far. */
+		/* TODO; use filtering that refines the sensor bias information
+		 * that to do more accurate position interpolation,
+		 * Use state variance to know if our estimate of acceleration/
+		 * position are well known enough to do the interpolation */
+		if (now - me->last_tracker_obs_time < 0.5)
+			ovec3f_add (&me->world_position, &delta_position, &me->world_position);
 
 		// new velocity = old_velocity + accel*dt
 		ovec3f_multiply_scalar (&local_accel, dt, &delta_vel);
@@ -193,11 +207,17 @@ void ofusion_update_at (fusion* me, float time, const vec3f* ang_vel, const vec3
 
 void ofusion_tracker_update(fusion* me, float time, const vec3f* pos, const quatf *orient)
 {
+	double now = ohmd_get_tick();
+
 	// TODO: Use Kalman filtering
 	// For now, directly update the time pose and position for now, and calculate
 	// some max velocity based on error from the current position
+	// TODO: Add variance information to the data, about how certain the pose is,
+	// in each dimension, based on tracker-specific information such as
+	// observation angle and distance.
 	me->world_position = *pos;
 	me->orient = *orient;
 	ovec3f_set(&me->world_vel, 0, 0, 0);
+	me->last_tracker_obs_time = now;
 }
 
