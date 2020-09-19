@@ -38,16 +38,17 @@ struct ohmd_pw_base_stream_s {
 	struct spa_hook listener;
 	enum pw_stream_state state;
 	uint32_t seq;
+	bool connected;
 };
 
 struct ohmd_pw_video_stream_s {
 	ohmd_pw_base_stream base;
 
-	int width;
-	int height;
-	int fps_n, fps_d;
+	ohmd_pw_video_format format;
 
-	struct spa_video_info_raw format;
+	uint32_t stride;
+	uint16_t width, height;
+	uint16_t fps_n, fps_d;
 };
 
 struct ohmd_pw_debug_stream_s {
@@ -60,18 +61,23 @@ static void ohmd_pipewire_global_deinit();
 static ohmd_pw_global_data *ohmd_pipewire_global_init();
 
 static void on_stream_state_changed(void *_data, enum pw_stream_state old, enum pw_stream_state state,
-				    const char *error)
+				const char *error)
 {
+	ohmd_pw_base_stream *s = _data;
+
 	printf("stream state: \"%s\"\n", pw_stream_state_as_string(state));
+	s->state = state;
 
 	switch (state) {
 	case PW_STREAM_STATE_STREAMING:
 	{
+		s->connected = true;
 		break;
 	}
-  case PW_STREAM_STATE_ERROR:
-  case PW_STREAM_STATE_UNCONNECTED:
+	case PW_STREAM_STATE_ERROR:
+	case PW_STREAM_STATE_UNCONNECTED:
 	default:
+		s->connected = false;
 		break;
 	}
 }
@@ -90,9 +96,7 @@ on_video_stream_param_changed(void *_data, uint32_t id, const struct spa_pod *pa
 	if (param == NULL || id != SPA_PARAM_Format)
 		return;
 
-	spa_format_video_raw_parse(param, &v->format);
-
-	stride = v->width;
+	stride = v->stride;
 	h = v->height;
 
 	params[0] = spa_pod_builder_add_object(&b,
@@ -169,7 +173,8 @@ static void ohmd_pipewire_global_deinit()
 }
 
 ohmd_pw_video_stream *
-ohmd_pw_video_stream_new (const char *stream_id, int w, int h, int fps_n, int fps_d)
+ohmd_pw_video_stream_new (const char *stream_id, ohmd_pw_video_format format,
+                          uint16_t w, uint16_t h, uint16_t fps_n, uint16_t fps_d)
 {
 	ohmd_pw_video_stream *ret = NULL;
 	ohmd_pw_base_stream *base = NULL;
@@ -189,6 +194,7 @@ ohmd_pw_video_stream_new (const char *stream_id, int w, int h, int fps_n, int fp
 	base = (ohmd_pw_base_stream *)(ret);
 
 	base->gdata = gdata;
+	ret->format = format;
 	ret->width = w;
 	ret->height = h;
 	ret->fps_n = fps_n;
@@ -204,18 +210,33 @@ ohmd_pw_video_stream_new (const char *stream_id, int w, int h, int fps_n, int fp
 					PW_KEY_MEDIA_ROLE, "Rift Sensor",
 					NULL));
 
+	enum spa_video_format spa_format;
+
+	switch (format) {
+		case OHMD_PW_VIDEO_FORMAT_GRAY8:
+			ret->stride = (uint32_t) ret->width;
+			spa_format = SPA_VIDEO_FORMAT_GRAY8;
+			break;
+		case OHMD_PW_VIDEO_FORMAT_RGB:
+			ret->stride = 3 * (uint32_t) ret->width;
+			spa_format = SPA_VIDEO_FORMAT_RGB;
+			break;
+		default:
+			break;
+	}
+
 	params[0] = spa_pod_builder_add_object(&b,
 			SPA_TYPE_OBJECT_Format, SPA_PARAM_EnumFormat,
 			SPA_FORMAT_mediaType,       SPA_POD_Id(SPA_MEDIA_TYPE_video),
 			SPA_FORMAT_mediaSubtype,    SPA_POD_Id(SPA_MEDIA_SUBTYPE_raw),
-			SPA_FORMAT_VIDEO_format,    SPA_POD_Id(SPA_VIDEO_FORMAT_GRAY8), /* FIXME: Support other colorspace? */
+			SPA_FORMAT_VIDEO_format,    SPA_POD_Id(spa_format),
 			SPA_FORMAT_VIDEO_size,      SPA_POD_Rectangle(&SPA_RECTANGLE(ret->width, ret->height)),
 			SPA_FORMAT_VIDEO_framerate, SPA_POD_Fraction(&SPA_FRACTION(ret->fps_n, ret->fps_d)));
 
 	pw_stream_add_listener(base->stream, &base->listener, &video_stream_events, ret);
 
 	pw_stream_connect(base->stream, PW_DIRECTION_OUTPUT, PW_ID_ANY,
-			  PW_STREAM_FLAG_DRIVER | PW_STREAM_FLAG_MAP_BUFFERS, params, 1);
+			PW_STREAM_FLAG_DRIVER | PW_STREAM_FLAG_MAP_BUFFERS, params, 1);
 
 	pw_thread_loop_unlock(gdata->thread);
 	return ret;
@@ -243,7 +264,7 @@ void ohmd_pw_stream_free_common (ohmd_pw_base_stream *s)
 
 	/* Free the struct */
 	free (s);
-	
+
 	/* Release the global pipewire state */
 	ohmd_pipewire_global_deinit();
 }
@@ -256,7 +277,6 @@ void ohmd_pw_video_stream_free (ohmd_pw_video_stream *v)
 void ohmd_pw_stream_push_common (ohmd_pw_base_stream *base, int64_t pts, const uint8_t *data, size_t data_len)
 {
 	/* Get a buffer from pipewire and copy into it */
-	/* FIXME: When using pipewire support, we could capture directly into pipewire buffers */
 	ohmd_pw_global_data *gdata = base->gdata;
 
 	struct spa_meta_header *h;
@@ -282,6 +302,8 @@ void ohmd_pw_stream_push_common (ohmd_pw_base_stream *base, int64_t pts, const u
 			h->dts_offset = 0;
 	}
 
+	/* FIXME: When using pipewire support, we could capture directly into pipewire buffers with
+	 * some API to alloc / return buffers */
 	memcpy (p, data, data_len);
 	b->datas[0].chunk->size = OHMD_MIN (data_len, b->datas[0].maxsize);
 
@@ -291,10 +313,15 @@ done:
 	pw_thread_loop_unlock (gdata->thread);
 }
 
+bool ohmd_pw_video_stream_connected (ohmd_pw_video_stream *v)
+{
+	ohmd_pw_base_stream *base = (ohmd_pw_base_stream *)(v);
+	return base != NULL && base->connected;
+}
+
 void ohmd_pw_video_stream_push (ohmd_pw_video_stream *v, int64_t pts, const uint8_t *pixels)
 {
-	/* FIXME: Other frame formats */
-	ohmd_pw_stream_push_common((ohmd_pw_base_stream *) v, pts, pixels, v->width * v->height);
+	ohmd_pw_stream_push_common((ohmd_pw_base_stream *) v, pts, pixels, v->stride * v->height);
 }
 
 static void
@@ -371,12 +398,12 @@ ohmd_pw_debug_stream *ohmd_pw_debug_stream_new (const char *stream_id)
 	params[0] = spa_pod_builder_add_object(&b,
 			SPA_TYPE_OBJECT_Format, SPA_PARAM_EnumFormat,
 			SPA_FORMAT_mediaType, SPA_POD_Id(text_type),
-      SPA_FORMAT_mediaSubtype, SPA_POD_Id(SPA_MEDIA_SUBTYPE_raw));
+			SPA_FORMAT_mediaSubtype, SPA_POD_Id(SPA_MEDIA_SUBTYPE_raw));
 
 	pw_stream_add_listener(base->stream, &base->listener, &debug_stream_events, ret);
 
 	pw_stream_connect(base->stream, PW_DIRECTION_OUTPUT, PW_ID_ANY,
-			  PW_STREAM_FLAG_DRIVER | PW_STREAM_FLAG_MAP_BUFFERS, params, 1);
+			PW_STREAM_FLAG_DRIVER | PW_STREAM_FLAG_MAP_BUFFERS, params, 1);
 
 	pw_thread_loop_unlock(gdata->thread);
 	return ret;
@@ -385,6 +412,12 @@ fail:
 	if (ret)
 		free (ret);
 	return NULL;
+}
+
+bool ohmd_pw_debug_stream_connected (ohmd_pw_debug_stream *s)
+{
+	ohmd_pw_base_stream *base = (ohmd_pw_base_stream *)(s);
+	return base != NULL && base->connected;
 }
 
 void ohmd_pw_debug_stream_push (ohmd_pw_debug_stream *s, int64_t pts, const char *debug_str)

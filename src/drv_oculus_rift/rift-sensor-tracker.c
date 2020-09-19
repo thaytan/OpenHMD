@@ -395,7 +395,7 @@ static void new_frame_cb(struct rift_sensor_uvc_stream *stream)
 #endif
 	}
 
-	if (sensor_ctx->debug_vid) {
+	if (ohmd_pw_video_stream_connected(sensor_ctx->debug_vid)) {
 		/* Write 'OHMD' and the flicker pattern phase into the frame for debug / storing */
 		stream->frame[0] = 'O'; stream->frame[1] = 'H'; stream->frame[2] = 'M'; stream->frame[3] = 'D';
 		stream->frame[4] = led_pattern_phase;
@@ -415,7 +415,7 @@ static void new_frame_cb(struct rift_sensor_uvc_stream *stream)
 		ohmd_pw_video_stream_push (sensor_ctx->debug_vid, sensor_ctx->frame_sof_ts, stream->frame);
 	}
 #if 0
-	if (sensor_ctx->debug_metadata) {
+	if (ohmd_pw_debug_stream_connected(sensor_ctx->debug_metadata)) {
 		char *debug_str;
 
 		asprintf (&debug_str, "{ ts: %llu, exposure_phase: %d, position: { %f, %f, %f }, orientation: { %f, %f, %f, %f } }",
@@ -472,7 +472,7 @@ rift_sensor_new (ohmd_context* ohmd_ctx, int id, const char *serial_no, libusb_d
   snprintf(stream_id,64,"openhmd-rift-sensor-%s", sensor_ctx->serial_no);
   stream_id[63] = 0;
 
-  sensor_ctx->debug_vid = ohmd_pw_video_stream_new (stream_id, sensor_ctx->stream.width, sensor_ctx->stream.height, 625, 12);
+  sensor_ctx->debug_vid = ohmd_pw_video_stream_new (stream_id, OHMD_PW_VIDEO_FORMAT_GRAY8, sensor_ctx->stream.width, sensor_ctx->stream.height, 625, 12);
   sensor_ctx->debug_metadata = ohmd_pw_debug_stream_new (stream_id);
 
   sensor_ctx->bw = blobwatch_new(sensor_ctx->is_cv1 ? BLOB_THRESHOLD_CV1 : BLOB_THRESHOLD_DK2, sensor_ctx->stream.width, sensor_ctx->stream.height);
