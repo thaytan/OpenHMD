@@ -1,6 +1,7 @@
 #ifndef __UVC_H__
 #define __UVC_H__
 
+#include <libusb.h>
 #include <stdbool.h>
 #include <stdint.h>
 

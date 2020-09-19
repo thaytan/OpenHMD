@@ -26,30 +26,15 @@
 #include "rift-sensor-opencv.h"
 #include "rift-sensor-pose-helper.h"
 
-#include "correspondence_search.h"
+#include "rift-debug-draw.h"
 
 #include "kalman.h"
 #include "ohmd-pipewire.h"
 
 #define ASSERT_MSG(_v, label, ...) if(!(_v)){ fprintf(stderr, __VA_ARGS__); goto label; }
-#define min(a,b) ((a) < (b) ? (a) : (b))
 
 #define MAX_SENSORS 4
 #define MAX_DEVICES 3
-
-typedef struct rift_sensor_ctx_s rift_sensor_ctx;
-typedef struct rift_tracked_device_s rift_tracked_device;
-
-struct rift_tracked_device_s
-{
-  rift_leds *leds;
-  led_search_model_t *led_search;
-
-	fusion *fusion;
-
-  quatf pose_orient;
-  vec3f pose_trans;
-};
 
 struct rift_sensor_ctx_s
 {
@@ -78,6 +63,7 @@ struct rift_sensor_ctx_s
 	vec3f led_out_points[MAX_OBJECT_LEDS];
 
   ohmd_pw_video_stream *debug_vid;
+  uint8_t *debug_frame;
   ohmd_pw_debug_stream *debug_metadata;
 };
 
@@ -127,9 +113,14 @@ static int tracker_process_blobs(rift_sensor_ctx *ctx)
 		rot = dev->fusion->orient;
 		trans = dev->fusion->world_position;
 
+	  printf ("Searching for matching pose for device %d, initial quat %f %f %f %f  pos %f %f %f\n",
+		  d, rot.x, rot.y, rot.z, rot.w,
+		  trans.x, trans.y, trans.z);
+
 		// Reverse the Z direction back to 'device pose'
 		// FIXME: Actually do a frame-of-reference translation to/from device space
 		trans.z = -trans.z;
+		rot.y = -rot.y;
 
 		if (correspondence_search_find_one_pose (ctx->cs, d, match_all_blobs, &rot, &trans, &score)) {
 			if (score.good_pose_match) {
@@ -158,6 +149,10 @@ static int tracker_process_blobs(rift_sensor_ctx *ctx)
 
 				kalman_pose_update (ctx->pose_filter, ctx->frame_sof_ts, &trans, &rot);
 				kalman_pose_get_estimated (ctx->pose_filter, &dev->pose_trans, &dev->pose_orient);
+
+				printf ("kalman filter for device %d yielded quat %f %f %f %f  pos %f %f %f\n",
+					d, dev->pose_orient.x, dev->pose_orient.y, dev->pose_orient.z, dev->pose_orient.w,
+					dev->pose_trans.x, dev->pose_trans.y, dev->pose_trans.z);
 
 				update_device_pose (ctx, d, dev, &score);
 			}
@@ -305,10 +300,10 @@ static void
 update_device_pose (rift_sensor_ctx *sensor_ctx, int device_id, rift_tracked_device *dev,
         rift_pose_metrics *score)
 {
-	 quatf *orient = &dev->pose_orient;
-	 vec3f trans = dev->pose_trans;
+	quatf orient = dev->pose_orient;
+	vec3f trans = dev->pose_trans;
 
-	rift_evaluate_pose (score, orient, &trans,
+	rift_evaluate_pose (score, &orient, &trans,
 		sensor_ctx->bwobs->blobs, sensor_ctx->bwobs->num_blobs,
 		device_id, dev->leds->points, dev->leds->num_points,
 		&sensor_ctx->camera_matrix, sensor_ctx->dist_coeffs, sensor_ctx->dist_fisheye);
@@ -317,14 +312,15 @@ update_device_pose (rift_sensor_ctx *sensor_ctx, int device_id, rift_tracked_dev
 		printf ("Found good pose match - %u LEDs matched %u visible ones\n",
 			score->matched_blobs, score->visible_leds);
 		printf ("Updating fusion for device %d pose quat %f %f %f %f  pos %f %f %f\n",
-			device_id, orient->x, orient->y, orient->z, orient->w,
+			device_id, orient.x, orient.y, orient.z, orient.w,
 			trans.x, trans.y, trans.z);
 
  		/* FIXME: Our camera-local pose/position need translating based
 		 * on room calibration. For now, just invert the position */
 		trans.z = -trans.z;
+		orient.y = -orient.y;
 
-		ofusion_tracker_update (dev->fusion, sensor_ctx->frame_sof_ts, &trans, orient);
+		ofusion_tracker_update (dev->fusion, sensor_ctx->frame_sof_ts, &trans, &orient);
 	}
 	else {
 		printf ("Failed pose match - only %u LEDs matched %u visible ones\n",
@@ -396,23 +392,10 @@ static void new_frame_cb(struct rift_sensor_uvc_stream *stream)
 	}
 
 	if (ohmd_pw_video_stream_connected(sensor_ctx->debug_vid)) {
-		/* Write 'OHMD' and the flicker pattern phase into the frame for debug / storing */
-		stream->frame[0] = 'O'; stream->frame[1] = 'H'; stream->frame[2] = 'M'; stream->frame[3] = 'D';
-		stream->frame[4] = led_pattern_phase;
-		// If we got a good pose match, draw something in the top right
-#if 0
-		if (good_pose_match) {
-				int x, y;
-				for (y = 0; y < 16; y++) {
-						uint8_t *cur = stream->frame + (y * stream->width) - 16;
-						for (x = 0; x < 16; x++) {
-								*cur++ = 0xFF;
-						}
-				}
-		}
-#endif
-
-		ohmd_pw_video_stream_push (sensor_ctx->debug_vid, sensor_ctx->frame_sof_ts, stream->frame);
+		rift_debug_draw_frame (sensor_ctx->debug_frame, sensor_ctx->bwobs, sensor_ctx->cs, stream,
+			tracker_ctx->devices, sensor_ctx->is_cv1, sensor_ctx->camera_matrix,
+			sensor_ctx->dist_fisheye, sensor_ctx->dist_coeffs);
+		ohmd_pw_video_stream_push (sensor_ctx->debug_vid, sensor_ctx->frame_sof_ts, sensor_ctx->debug_frame);
 	}
 #if 0
 	if (ohmd_pw_debug_stream_connected(sensor_ctx->debug_metadata)) {
@@ -472,7 +455,11 @@ rift_sensor_new (ohmd_context* ohmd_ctx, int id, const char *serial_no, libusb_d
   snprintf(stream_id,64,"openhmd-rift-sensor-%s", sensor_ctx->serial_no);
   stream_id[63] = 0;
 
-  sensor_ctx->debug_vid = ohmd_pw_video_stream_new (stream_id, OHMD_PW_VIDEO_FORMAT_GRAY8, sensor_ctx->stream.width, sensor_ctx->stream.height, 625, 12);
+  sensor_ctx->debug_vid = ohmd_pw_video_stream_new (stream_id, OHMD_PW_VIDEO_FORMAT_RGB, sensor_ctx->stream.width * 2, sensor_ctx->stream.height, 625, 12);
+	if (sensor_ctx->debug_vid) {
+		/* Allocate an RGB debug frame, twice the width of the input */
+		sensor_ctx->debug_frame = ohmd_alloc(ohmd_ctx, 2 * 3 * sensor_ctx->stream.width * sensor_ctx->stream.height);
+	}
   sensor_ctx->debug_metadata = ohmd_pw_debug_stream_new (stream_id);
 
   sensor_ctx->bw = blobwatch_new(sensor_ctx->is_cv1 ? BLOB_THRESHOLD_CV1 : BLOB_THRESHOLD_DK2, sensor_ctx->stream.width, sensor_ctx->stream.height);
@@ -545,6 +532,8 @@ rift_sensor_free (rift_sensor_ctx *sensor_ctx)
 
 	if (sensor_ctx->debug_vid != NULL)
 		ohmd_pw_video_stream_free (sensor_ctx->debug_vid);
+	if (sensor_ctx->debug_frame != NULL)
+		free (sensor_ctx->debug_frame);
 	if (sensor_ctx->debug_metadata != NULL)
 		ohmd_pw_debug_stream_free (sensor_ctx->debug_metadata);
 
