@@ -101,7 +101,7 @@ extern "C" bool estimate_initial_pose(struct blob *blobs, int num_blobs,
 		list_points2d[j].y = blobs[i].y;
 		j++;
 
-		LOGD ("LED %d at %d,%d (3D %f %f %f)\n",
+		LOGD ("LED %d at %f,%f (3D %f %f %f)\n",
 		    blobs[i].led_id, blobs[i].x, blobs[i].y,
 		    leds[led_id].pos.x,
 		    leds[led_id].pos.y,
