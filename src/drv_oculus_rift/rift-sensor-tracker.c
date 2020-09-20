@@ -135,7 +135,21 @@ static int tracker_process_blobs(rift_sensor_ctx *ctx)
 			ctx->id, d, cam_pose.orient.x, cam_pose.orient.y, cam_pose.orient.z, cam_pose.orient.w,
 			cam_pose.pos.x, cam_pose.pos.y, cam_pose.pos.z);
 
-		if (correspondence_search_find_one_pose (ctx->cs, d, match_all_blobs, &cam_pose.orient, &cam_pose.pos, &score)) {
+		rift_evaluate_pose (&score, &cam_pose.orient, &cam_pose.pos,
+			ctx->bwobs->blobs, ctx->bwobs->num_blobs,
+			dev->id, dev->leds->points, dev->leds->num_points,
+			&ctx->camera_matrix, ctx->dist_coeffs, ctx->dist_fisheye);
+
+#if 0
+		if (score.good_pose_match)
+			printf ("Sensor %d already had good pose match for device %d matched %u blobs of %u\n",
+				ctx->id, d, score.matched_blobs, score.visible_leds);
+		else
+			printf ("Sensor %d needs correspondence search for device %d matched %u blobs of %u\n",
+				ctx->id, d, score.matched_blobs, score.visible_leds);
+#endif
+
+		if (score.good_pose_match || correspondence_search_find_one_pose (ctx->cs, d, match_all_blobs, &cam_pose.orient, &cam_pose.pos, &score)) {
 			if (score.good_pose_match) {
 				ret = 1;
 
