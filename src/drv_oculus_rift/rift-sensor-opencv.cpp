@@ -239,7 +239,7 @@ void undistort_points (struct blob *blobs, int num_blobs,
 }
 
 /*
- * Refine pose operations on distortion correction UV image points,
+ * Refine pose operations on distortion corrected UV image points,
  * with values near the range [-1,1] (a bit bigger depending on the
  * lens distortion). The image_points paramater is double[num_matches][2]
  */
