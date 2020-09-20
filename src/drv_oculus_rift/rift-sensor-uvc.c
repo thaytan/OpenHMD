@@ -226,10 +226,21 @@ static void iso_transfer_cb(struct libusb_transfer *transfer)
 	}
 
 	/* Resubmit transfer */
-	ret = libusb_submit_transfer(transfer);
+	for (i = 0; i < 5; i++) {
+		/* Sometimes this fails, and we retry */
+		ret = libusb_submit_transfer(transfer);
+		if (ret >= 0)
+			break;
+	}
+
 	if (ret < 0) {
-		printf("failed to resubmit\n");
+		/* FIXME: Close and re-open this sensor */
+		printf("failed to resubmit after %d attempts\n", i);
+		stream->active_transfers--;
 		stream->completed = true;
+	}
+	else if (i > 0) {
+		printf("resubmitted xfer after %d attempts\n", i+1);
 	}
 }
 
