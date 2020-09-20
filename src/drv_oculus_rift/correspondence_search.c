@@ -157,6 +157,7 @@ static int compare_blobs_distance (const void *elem1, const void *elem2, void *a
   return 0;
 }
 
+#if DUMP_SCENE
 static void
 dump_pose (correspondence_search_t *cs, led_search_model_t *model, quatf *orient, vec3f *trans, cs_model_info_t *mi)
 {
@@ -192,6 +193,7 @@ dump_pose (correspondence_search_t *cs, led_search_model_t *model, quatf *orient
     }
     printf ("]\n");
 }
+#endif
 
 bool
 correspondence_search_project_pose (correspondence_search_t *cs, led_search_model_t *model,
@@ -298,6 +300,7 @@ oquatf_from_rotation_matrix (quatf* me, double R[9])
       me->z = -0.25f * s;
     }
   }
+
 }
 
 static void
@@ -336,7 +339,6 @@ check_led_against_model_subset (correspondence_search_t *cs, cs_model_info_t *mi
 
   /* FIXME: It would be better if this spat out quaternions,
    * then we wouldn't need to convert below */
-  /* NOTE: Modifies y1/y2/y3 */
   int valid = lambdatwist_p3p (y1, y2, y3, x[0], x[1], x[2],
           Rs, Ts);
 
@@ -594,7 +596,7 @@ search_pose_for_model (correspondence_search_t *cs, cs_model_info_t *mi)
   if (already_known_blobs > 3) {
     int num_matched_leds = 0, inliers = 0;
 
-    printf ("We have %u correspondences already for model %u\n", already_known_blobs, mi->id);
+    DEBUG("We have %u correspondences already for model %u\n", already_known_blobs, mi->id);
     /* FIXME: We should do this check for available correspondences and reproject before even giving these
      * blobs to the correspondence_search, and then set this model to be skipped */
     if (estimate_initial_pose(matched_blobs, already_known_blobs,
@@ -602,12 +604,12 @@ search_pose_for_model (correspondence_search_t *cs, cs_model_info_t *mi)
         &mi->best_orient, &mi->best_trans, &num_matched_leds, &inliers, true)) {
        if (correspondence_search_project_pose (cs, model, &mi->best_orient, &mi->best_trans, mi, true))
        {
-          printf ("%u existing correspondences for model %u matched %u with pose orient %f %f %f %f pos %f %f %f\n",
+          DEBUG("%u existing correspondences for model %u matched %u with pose orient %f %f %f %f pos %f %f %f\n",
                 already_known_blobs, mi->id, inliers,
                 mi->best_orient.x, mi->best_orient.y, mi->best_orient.z, mi->best_orient.w,
                 mi->best_trans.x, mi->best_trans.y, mi->best_trans.z);
 
-          printf ("# pose orient %f %f %f %f pos %f %f %f\n",
+          DEBUG("# pose orient %f %f %f %f pos %f %f %f\n",
                 mi->best_orient.x, mi->best_orient.y, mi->best_orient.z, mi->best_orient.w,
                 mi->best_trans.x, mi->best_trans.y, mi->best_trans.z);
           return true;
@@ -692,14 +694,16 @@ correspondence_search_find_pose (correspondence_search_t *cs)
 #endif
 
     for (m = 0; m < cs->num_models; m++) {
+#if DUMP_FULL_DEBUG
         cs_model_info_t *mi = &cs->models[m];
-        printf ("# Best match for model %d was %d points out of %d with error %f pixels^2\n", m, mi->best_score.matched_blobs,
+        DEBUG("# Best match for model %d was %d points out of %d with error %f pixels^2\n", m, mi->best_score.matched_blobs,
                 mi->best_score.visible_leds, mi->best_score.reprojection_error);
-        printf ("# pose orient %f %f %f %f pos %f %f %f\n",
+        DEBUG("# pose orient %f %f %f %f pos %f %f %f\n",
                       mi->best_orient.x, mi->best_orient.y, mi->best_orient.z, mi->best_orient.w,
                       mi->best_trans.x, mi->best_trans.y, mi->best_trans.z);
 #if DUMP_SCENE
         dump_pose (cs, mi->model, &mi->best_orient, &mi->best_trans, mi);
+#endif
 #endif
     }
 
@@ -746,11 +750,11 @@ correspondence_search_find_one_pose (correspondence_search_t *cs, int model_id, 
       *trans = mi->best_trans;
       *score = mi->best_score;
 
-      printf ("# Best match for model %d was %d points out of %d with error %f pixels^2\n", model_id, mi->best_score.matched_blobs,
+      DEBUG("# Best match for model %d was %d points out of %d with error %f pixels^2\n", model_id, mi->best_score.matched_blobs,
                 mi->best_score.visible_leds, mi->best_score.reprojection_error);
-      printf ("# pose orient %f %f %f %f pos %f %f %f\n",
-                    mi->best_orient.x, mi->best_orient.y, mi->best_orient.z, mi->best_orient.w,
-                    mi->best_trans.x, mi->best_trans.y, mi->best_trans.z);
+      DEBUG("# pose orient %f %f %f %f pos %f %f %f\n",
+                mi->best_orient.x, mi->best_orient.y, mi->best_orient.z, mi->best_orient.w,
+                mi->best_trans.x, mi->best_trans.y, mi->best_trans.z);
       return true;
     }
     return false;
