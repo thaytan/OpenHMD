@@ -270,7 +270,7 @@ void rift_mark_matching_blobs (quatf *orient, vec3f *trans,
 				int led_index = match_led - leds;
 				b->led_id = LED_MAKE_ID (device_id, led_index);
 				if (b->led_id != b->prev_led_id)
-					printf ("Marking LED %d/%d at %f,%f now %u (was %u)\n", device_id, led_index, b->x, b->y, b->led_id, b->prev_led_id);
+					LOGV("Marking LED %d/%d at %f,%f now %d (was %d)\n", device_id, led_index, b->x, b->y, b->led_id, b->prev_led_id);
 			}
 		}
 	}
