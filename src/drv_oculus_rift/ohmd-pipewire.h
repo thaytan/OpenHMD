@@ -32,12 +32,12 @@ void ohmd_pw_debug_stream_free (ohmd_pw_debug_stream *s);
 #else
 
 #define ohmd_pw_video_stream_new(streamid,f,w,h,fps_n,fps_d) NULL
-#define ohmd_pw_video_stream_connected(v) FALSE
+#define ohmd_pw_video_stream_connected(v) false
 #define ohmd_pw_video_stream_push(v,pts,pixels)
 #define ohmd_pw_video_stream_free(v)
 
 #define ohmd_pw_debug_stream_new(stream_id) NULL
-#define ohmd_pw_debuf_stream_connected(s) FALSE
+#define ohmd_pw_debuf_stream_connected(s) false
 #define ohmd_pw_debug_stream_push(s,pts,debug_str)
 #define ohmd_pw_debug_stream_free(s)
 #endif
