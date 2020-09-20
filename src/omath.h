@@ -36,6 +36,7 @@ void ovec3f_normalize_me(vec3f* me);
 float ovec3f_get_length(const vec3f* me);
 float ovec3f_get_angle(const vec3f* me, const vec3f* vec); 
 float ovec3f_get_dot(const vec3f* me, const vec3f* vec);
+void ovec3f_cross(const vec3f* a, const vec3f* b, vec3f *out);
 void ovec3f_subtract(const vec3f* a, const vec3f* b, vec3f* out);
 void ovec3f_add(const vec3f* a, const vec3f* b, vec3f* out);
 void ovec3f_inverse(vec3f *me);

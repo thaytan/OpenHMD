@@ -35,6 +35,13 @@ void ovec3f_normalize_me(vec3f* me)
 	me->z /= len;
 }
 
+void ovec3f_cross(const vec3f* a, const vec3f* b, vec3f *out)
+{
+	out->x = a->y * b->z - a->z * b->y;
+	out->y = a->z * b->x - a->x * b->z;
+	out->z = a->x * b->y - a->y * b->x;
+}
+
 void ovec3f_subtract(const vec3f* a, const vec3f* b, vec3f* out)
 {
 	for(int i = 0; i < 3; i++)
