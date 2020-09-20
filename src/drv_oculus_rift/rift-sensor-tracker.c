@@ -132,6 +132,7 @@ static int tracker_process_blobs(rift_sensor_ctx *ctx)
 				for (int index = 0; index < ctx->bwobs->num_blobs; index++) {
 					struct blob *b = ctx->bwobs->blobs + index;
 					if (LED_OBJECT_ID (b->led_id) == d) {
+						b->prev_led_id = b->led_id;
 						b->led_id = LED_INVALID_ID;
 					}
 				}

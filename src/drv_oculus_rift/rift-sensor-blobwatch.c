@@ -106,7 +106,7 @@ static inline void store_blob(struct extent *e, int index, int y, struct blob *b
 	b->pattern_age = 0;
 	b->pattern_prev_phase = -1;
 	memset (b->pattern_bits, 0, sizeof (b->pattern_bits));
-	b->led_id = -1;
+	b->prev_led_id = b->led_id = LED_INVALID_ID;
 }
 
 /*
