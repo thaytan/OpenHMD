@@ -175,6 +175,47 @@ void ohmd_unlock_mutex(ohmd_mutex* mutex)
 		pthread_mutex_unlock((pthread_mutex_t*)mutex);
 }
 
+ohmd_cond* ohmd_create_cond(ohmd_context* ctx)
+{
+	pthread_cond_t* cond = ohmd_alloc(ctx, sizeof(pthread_cond_t));
+	if(cond == NULL)
+		return NULL;
+
+	int ret = pthread_cond_init(cond, NULL);
+
+	if(ret != 0){
+		free(cond);
+		cond = NULL;
+	}
+
+	return (ohmd_cond*)cond;
+}
+
+void ohmd_destroy_cond(ohmd_cond* cond)
+{
+	pthread_cond_destroy((pthread_cond_t*)cond);
+	free(cond);
+}
+
+void ohmd_cond_wait(ohmd_cond* cond, ohmd_mutex* mutex)
+{
+	if (cond && mutex)
+		pthread_cond_wait((pthread_cond_t*)cond, (pthread_mutex_t*)mutex);
+}
+
+void ohmd_cond_signal(ohmd_cond* cond)
+{
+	if (cond)
+		pthread_cond_signal((pthread_cond_t*)cond);
+}
+
+void ohmd_cond_broadcast(ohmd_cond* cond)
+{
+	if (cond)
+		pthread_cond_broadcast((pthread_cond_t*)cond);
+}
+
+
 /// Handling ovr service
 void ohmd_toggle_ovr_service(int state) //State is 0 for Disable, 1 for Enable
 {

@@ -64,6 +64,10 @@ struct ohmd_mutex {
 	CRITICAL_SECTION lock;
 };
 
+struct ohmd_cond {
+	CONDITION_VARIABLE cond;
+};
+
 DWORD __stdcall ohmd_thread_wrapper(void* t)
 {
 	ohmd_thread* thread = (ohmd_thread*)t;
@@ -119,6 +123,39 @@ void ohmd_unlock_mutex(ohmd_mutex* mutex)
 {
 	if(mutex)
 		LeaveCriticalSection (&mutex->lock);
+}
+
+ohmd_cond* ohmd_create_cond(ohmd_context* ctx)
+{
+	ohmd_cond* cond = ohmd_alloc(ctx, sizeof(ohmd_cond));
+	if(!cond)
+		return NULL;
+	
+	InitializeConditionVariable (&cond->cond);
+}
+
+void ohmd_destroy_cond(ohmd_cond* cond)
+{
+	DeleteConditionVariable(&cond->cond);
+	free(cond);
+}
+
+void ohmd_cond_wait(ohmd_cond* cond, ohmd_mutex* mutex)
+{
+	if(cond && mutex)
+		SleepConditionVariableCS(&cond->cond, &mutex->lock, INFINITE);
+}
+
+void ohmd_cond_signal(ohmd_cond* cond)
+{
+	if (cond)
+		WakeConditionVariable(&cond->cond);
+}
+
+void ohmd_cond_broadcast(ohmd_cond* cond)
+{
+	if (cond)
+		WakeAllConditionVariable(&cond->cond);
 }
 
 int findEndPoint(char* path, int endpoint)
