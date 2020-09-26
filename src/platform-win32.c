@@ -61,7 +61,7 @@ struct ohmd_thread {
 };
 
 struct ohmd_mutex {
-	HANDLE handle;
+	CRITICAL_SECTION lock;
 };
 
 DWORD __stdcall ohmd_thread_wrapper(void* t)
@@ -98,27 +98,27 @@ ohmd_mutex* ohmd_create_mutex(ohmd_context* ctx)
 	if(!mutex)
 		return NULL;
 	
-	mutex->handle = CreateMutex(NULL, FALSE, NULL);
+	InitializeCriticalSection(&mutex->lock);
 
 	return mutex;
 }
 
 void ohmd_destroy_mutex(ohmd_mutex* mutex)
 {
-	CloseHandle(mutex->handle);
+	DeleteCriticalSection(&mutex->lock);
 	free(mutex);
 }
 
 void ohmd_lock_mutex(ohmd_mutex* mutex)
 {
 	if(mutex)
-		WaitForSingleObject(mutex->handle, INFINITE);
+		EnterCriticalSection(&mutex->lock);
 }
 
 void ohmd_unlock_mutex(ohmd_mutex* mutex)
 {
 	if(mutex)
-		ReleaseMutex(mutex->handle);
+		LeaveCriticalSection (&mutex->lock);
 }
 
 int findEndPoint(char* path, int endpoint)
