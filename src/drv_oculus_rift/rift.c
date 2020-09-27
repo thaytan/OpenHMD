@@ -20,7 +20,7 @@
 
 #include "rift.h"
 #include "rift-hmd-radio.h"
-#include "rift-sensor-tracker.h"
+#include "rift-tracker.h"
 #include "../hid.h"
 
 #define OHMD_GRAVITY_EARTH 9.80665 // m/s²

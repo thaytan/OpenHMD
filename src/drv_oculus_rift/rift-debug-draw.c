@@ -7,7 +7,6 @@
 
 #include "rift-debug-draw.h"
 #include "rift-sensor-pose-helper.h"
-#include "rift-sensor-tracker.h"
 #include "rift-sensor-opencv.h"
 
 /* This will draw RGB flipped on big-endian */

@@ -13,7 +13,7 @@
 #include <stdlib.h>
 #include <assert.h>
 
-#include "rift-sensor-tracker.h"
+#include "rift-tracker.h"
 
 #include "rift-sensor-blobwatch.h"
 #include "rift-sensor-ar0134.h"

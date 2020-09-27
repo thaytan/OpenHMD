@@ -9,7 +9,7 @@
 #define __RIFT_DEBUG_DRAW_H
 
 #include "rift-sensor-blobwatch.h"
-#include "rift-sensor-tracker.h"
+#include "rift-tracker.h"
 #include "rift-sensor-uvc.h"
 #include "correspondence_search.h"
 
