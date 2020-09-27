@@ -103,6 +103,7 @@ if _drivers.contains('rift')
 		'src/drv_oculus_rift/packet.c',
 		'src/drv_oculus_rift/kalman.cpp',
 		'src/drv_oculus_rift/rift-debug-draw.c',
+		'src/drv_oculus_rift/rift-sensor.c',
 		'src/drv_oculus_rift/rift-sensor-opencv.cpp',
 		'src/drv_oculus_rift/rift-sensor-maths.c',
 		'src/drv_oculus_rift/rift-sensor-ar0134.c',
