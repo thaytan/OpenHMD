@@ -18,13 +18,13 @@ typedef struct rift_tracked_device_s rift_tracked_device;
 
 struct rift_tracked_device_s
 {
-  int id;
-  rift_leds *leds;
-  led_search_model_t *led_search;
+	int id;
+	rift_leds *leds;
+	led_search_model_t *led_search;
 
 	fusion *fusion;
 
-  posef pose;
+	posef pose;
 };
 
 rift_tracker_ctx *rift_sensor_tracker_new (ohmd_context* ohmd_ctx,
