@@ -62,6 +62,13 @@ struct rift_sensor_ctx_s
 
 	vec3f led_out_points[MAX_OBJECT_LEDS];
 
+	ohmd_mutex *sensor_lock;
+	ohmd_cond *new_frame_cond;
+
+	int shutdown;
+	ohmd_thread* fast_analysis_thread;
+	ohmd_thread* long_analysis_thread;
+
   ohmd_pw_video_stream *debug_vid;
   uint8_t *debug_frame;
   ohmd_pw_debug_stream *debug_metadata;
@@ -490,6 +497,8 @@ static void new_frame_cb(struct rift_sensor_uvc_stream *stream)
 
 
 static void rift_sensor_free (rift_sensor_ctx *sensor_ctx);
+static unsigned int fast_analysis_thread(void *arg);
+static unsigned int long_analysis_thread(void *arg);
 
 static rift_sensor_ctx *
 rift_sensor_new (ohmd_context* ohmd_ctx, int id, const char *serial_no, libusb_device_handle *usb_devh,
@@ -550,6 +559,14 @@ rift_sensor_new (ohmd_context* ohmd_ctx, int id, const char *serial_no, libusb_d
 
   sensor_ctx->cs = correspondence_search_new (&sensor_ctx->camera_matrix, sensor_ctx->dist_coeffs, sensor_ctx->dist_fisheye);
 
+	/* Start analysis threads */
+	sensor_ctx->sensor_lock = ohmd_create_mutex(ohmd_ctx);
+	sensor_ctx->new_frame_cond = ohmd_create_cond(ohmd_ctx);
+
+	sensor_ctx->shutdown = false;
+	sensor_ctx->fast_analysis_thread = ohmd_create_thread (ohmd_ctx, fast_analysis_thread, sensor_ctx);
+	sensor_ctx->long_analysis_thread = ohmd_create_thread (ohmd_ctx, long_analysis_thread, sensor_ctx);
+
   LOGI("Sensor %d starting stream\n", id);
   ret = rift_sensor_uvc_stream_start (&sensor_ctx->stream);
   ASSERT_MSG(ret >= 0, fail, "could not start streaming\n");
@@ -607,6 +624,17 @@ rift_sensor_free (rift_sensor_ctx *sensor_ctx)
 	if (sensor_ctx->stream_started)
 		rift_sensor_uvc_stream_stop(&sensor_ctx->stream);
 
+	/* Shut down analysis threads */
+	ohmd_lock_mutex(sensor_ctx->sensor_lock);
+	ohmd_cond_broadcast(sensor_ctx->new_frame_cond);
+	ohmd_unlock_mutex(sensor_ctx->sensor_lock);
+
+	ohmd_destroy_thread(sensor_ctx->fast_analysis_thread);
+	ohmd_destroy_thread(sensor_ctx->long_analysis_thread);
+
+	ohmd_destroy_mutex(sensor_ctx->sensor_lock);
+	ohmd_destroy_cond(sensor_ctx->new_frame_cond);
+
 	if (sensor_ctx->debug_vid != NULL)
 		ohmd_pw_video_stream_free (sensor_ctx->debug_vid);
 	if (sensor_ctx->debug_frame != NULL)
@@ -629,6 +657,32 @@ static unsigned int uvc_handle_events(void *arg)
 
 	while (!tracker_ctx->usb_completed)
 		libusb_handle_events_completed(tracker_ctx->usb_ctx, &tracker_ctx->usb_completed);
+
+	return 0;
+}
+
+static unsigned int long_analysis_thread(void *arg)
+{
+	rift_sensor_ctx *ctx = arg;
+
+	ohmd_lock_mutex (ctx->sensor_lock);
+	while (!ctx->shutdown) {
+			ohmd_cond_wait(ctx->new_frame_cond, ctx->sensor_lock);
+  }
+	ohmd_unlock_mutex (ctx->sensor_lock);
+
+	return 0;
+}
+
+static unsigned int fast_analysis_thread(void *arg)
+{
+	rift_sensor_ctx *ctx = arg;
+
+	ohmd_lock_mutex (ctx->sensor_lock);
+	while (!ctx->shutdown) {
+			ohmd_cond_wait(ctx->new_frame_cond, ctx->sensor_lock);
+  }
+	ohmd_unlock_mutex (ctx->sensor_lock);
 
 	return 0;
 }
