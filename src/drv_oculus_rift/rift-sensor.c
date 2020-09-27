@@ -33,6 +33,20 @@
 
 #define ASSERT_MSG(_v, label, ...) if(!(_v)){ fprintf(stderr, __VA_ARGS__); goto label; }
 
+#define NUM_CAPTURE_BUFFERS 2
+
+typedef struct rift_sensor_capture_frame rift_sensor_capture_frame;
+
+struct rift_sensor_capture_frame {
+	rift_sensor_uvc_frame uvc;
+
+	/* Index of the frame in the frames array */
+	uint8_t id;
+
+	uint64_t led_pattern_sof_ts;
+	uint8_t led_pattern_phase;
+};
+
 struct rift_sensor_ctx_s
 {
 	ohmd_context* ohmd_ctx;
@@ -44,9 +58,20 @@ struct rift_sensor_ctx_s
 	libusb_device_handle *usb_devh;
 	int stream_started;
 	struct rift_sensor_uvc_stream stream;
-	uint64_t frame_sof_ts;
-	uint64_t led_pattern_sof_ts;
-	uint8_t led_pattern_phase;
+
+	rift_sensor_capture_frame *frames;
+
+	/* ID of the currently capturing frame */
+	int cur_capture_frame;
+	/* ID of the next frame to submit for capturing */
+	int next_capture_frame;
+	int dropped_frames;
+
+	/* FIXME: later this should be a ringbuffer to support
+	 * more outstanding frames, and a frames_ready_for_capture
+	 * ringbuffer to return them */
+	int frame_for_fast_analysis;
+
 	struct blobwatch* bw;
 	struct blobservation* bwobs;
 
@@ -76,9 +101,9 @@ struct rift_sensor_ctx_s
 };
 
 static void update_device_pose (rift_sensor_ctx *sensor_ctx, rift_tracked_device *dev,
-	rift_pose_metrics *score);
+	rift_pose_metrics *score, uint64_t frame_ts);
 
-static int tracker_process_blobs(rift_sensor_ctx *ctx)
+static int tracker_process_blobs(rift_sensor_ctx *ctx, uint64_t frame_ts)
 {
 	struct blobservation* bwobs = ctx->bwobs;
 	int ret = 0;
@@ -161,14 +186,14 @@ static int tracker_process_blobs(rift_sensor_ctx *ctx)
 					dist_coeffs, ctx->is_cv1,
 					&cam_pose.orient, &cam_pose.pos, NULL, NULL, true);
 
-				kalman_pose_update (ctx->pose_filter, ctx->frame_sof_ts, &cam_pose.pos, &cam_pose.orient);
+				kalman_pose_update (ctx->pose_filter, frame_ts, &cam_pose.pos, &cam_pose.orient);
 				kalman_pose_get_estimated (ctx->pose_filter, &dev->pose.pos, &dev->pose.orient);
 
 				LOGD ("sensor %d kalman filter for device %d yielded quat %f %f %f %f pos %f %f %f\n",
 					ctx->id, d, dev->pose.orient.x, dev->pose.orient.y, dev->pose.orient.z, dev->pose.orient.w,
 					dev->pose.pos.x, dev->pose.pos.y, dev->pose.pos.z);
 
-				update_device_pose (ctx, dev, &score);
+				update_device_pose (ctx, dev, &score, frame_ts);
 			}
 		}
 	}
@@ -282,26 +307,37 @@ static void dump_bin(const char* label, const unsigned char* data, int length)
 }
 #endif
 
-static void new_frame_start_cb(struct rift_sensor_uvc_stream *stream)
+static void new_frame_start_cb(struct rift_sensor_uvc_stream *stream, uint64_t start_time)
 {
-	rift_sensor_ctx *sensor_ctx = stream->user_data;
-
-	uint64_t now = ohmd_monotonic_get(sensor_ctx->ohmd_ctx);
+	rift_sensor_ctx *sensor = stream->user_data;
 	uint64_t phase_ts;
-	uint8_t led_pattern_phase = rift_tracker_get_led_pattern_phase (sensor_ctx->tracker, &phase_ts);
+	uint8_t led_pattern_phase = rift_tracker_get_led_pattern_phase (sensor->tracker, &phase_ts);
 
-	LOGD ("%f ms Sensor %d SOF phase %d\n",
-		(double) (ohmd_monotonic_get(sensor_ctx->ohmd_ctx)) / 1000000.0,
-		sensor_ctx->id, led_pattern_phase);
+	LOGD("%f ms Sensor %d SOF phase %d", (double) (start_time) / 1000000.0,
+			sensor->id, led_pattern_phase);
 
-	sensor_ctx->led_pattern_phase = led_pattern_phase;
-	sensor_ctx->led_pattern_sof_ts = phase_ts;
-	sensor_ctx->frame_sof_ts = now;
+	ohmd_lock_mutex(sensor->sensor_lock);
+	if (sensor->next_capture_frame != sensor->cur_capture_frame) {
+		rift_sensor_capture_frame *next_frame = sensor->frames + sensor->next_capture_frame;
+
+		sensor->cur_capture_frame = sensor->next_capture_frame;
+
+		next_frame->led_pattern_phase = led_pattern_phase;
+		next_frame->led_pattern_sof_ts = phase_ts;
+
+		if (sensor->dropped_frames) {
+				LOGW("Sensor %d dropped %d frames", sensor->id, sensor->dropped_frames);
+				sensor->dropped_frames = 0;
+		}
+
+		rift_sensor_uvc_stream_set_frame(stream, (rift_sensor_uvc_frame *)next_frame);
+	}
+	ohmd_unlock_mutex(sensor->sensor_lock);
 }
 
 static void
 update_device_pose (rift_sensor_ctx *sensor_ctx, rift_tracked_device *dev,
-		rift_pose_metrics *score)
+		rift_pose_metrics *score, uint64_t frame_ts)
 {
 	posef pose = dev->pose;
 
@@ -326,7 +362,7 @@ update_device_pose (rift_sensor_ctx *sensor_ctx, rift_tracked_device *dev,
 				dev->id, pose.orient.x, pose.orient.y, pose.orient.z, pose.orient.w,
 				pose.pos.x, pose.pos.y, pose.pos.z);
 
-			ofusion_tracker_update (dev->fusion, sensor_ctx->frame_sof_ts, &pose.pos, &pose.orient);
+			ofusion_tracker_update (dev->fusion, frame_ts, &pose.pos, &pose.orient);
 		}
 		else if (dev->id == 0) {
 			/* No camera pose yet. If this is the HMD, use it to initialise the camera (world->camera)
@@ -356,7 +392,7 @@ update_device_pose (rift_sensor_ctx *sensor_ctx, rift_tracked_device *dev,
 			LOGI("New camera xform took observed pose to world quat %f %f %f %f  pos %f %f %f",
 				pose.orient.x, pose.orient.y, pose.orient.z, pose.orient.w,
 				pose.pos.x, pose.pos.y, pose.pos.z);
-
+stream->frame_size
 			/* Double check the newly calculated camera pose can map from the fusion pose back into
 			 * our camera-relative pose */
 			oposef_inverse (&world_object_pose);
@@ -377,27 +413,21 @@ update_device_pose (rift_sensor_ctx *sensor_ctx, rift_tracked_device *dev,
 	}
 }
 
-static void new_frame_cb(struct rift_sensor_uvc_stream *stream)
+static void frame_captured_cb(rift_sensor_uvc_stream *stream, rift_sensor_uvc_frame *uvc_frame)
 {
-	int width = stream->width;
-	int height = stream->height;
+	rift_sensor_capture_frame *frame = (rift_sensor_capture_frame *)(uvc_frame);
 
-	if(stream->payload_size != width * height) {
-		LOGW("bad frame: %d\n", (int)stream->payload_size);
-	}
-
-	rift_sensor_ctx *sensor_ctx = stream->user_data;
-	assert (sensor_ctx);
+	rift_sensor_ctx *sensor = stream->user_data;
+	assert (sensor);
 
 	/* led pattern phase comes from sensor reports */
-	uint8_t led_pattern_phase = sensor_ctx->led_pattern_phase;
+	uint8_t led_pattern_phase = frame->led_pattern_phase;
 	uint64_t cur_phase_ts;
-	uint8_t cur_led_pattern_phase = rift_tracker_get_led_pattern_phase (sensor_ctx->tracker, &cur_phase_ts);
-
+	uint8_t cur_led_pattern_phase = rift_tracker_get_led_pattern_phase (sensor->tracker, &cur_phase_ts);
 	if (cur_led_pattern_phase != led_pattern_phase) {
 		/* The LED phase changed mid-frame. Choose which one to keep */
-		uint64_t now = ohmd_monotonic_get(sensor_ctx->ohmd_ctx);
-		uint64_t frame_midpoint = sensor_ctx->frame_sof_ts + (now - sensor_ctx->frame_sof_ts)/2;
+		uint64_t now = ohmd_monotonic_get(sensor->ohmd_ctx);
+		uint64_t frame_midpoint = uvc_frame->start_ts + (now - uvc_frame->start_ts)/2;
 		uint8_t chosen_phase;
 
 		if (cur_phase_ts < frame_midpoint) {
@@ -407,57 +437,77 @@ static void new_frame_cb(struct rift_sensor_uvc_stream *stream)
 		}
 
 		LOGD ("%f Sensor %d Frame (sof %f) phase mismatch old %d new %d (@ %f) chose %d\n",
-			(double) (now) / 1000000.0, sensor_ctx->id,
-			(double) (sensor_ctx->led_pattern_sof_ts) / 1000000.0,
+			(double) (now) / 1000000.0, sensor->id,
+			(double) (sensor->led_pattern_sof_ts) / 1000000.0,
 			led_pattern_phase, cur_led_pattern_phase,
 			(double) (cur_phase_ts) / 1000000.0,
 			chosen_phase);
-		led_pattern_phase = chosen_phase;
+		frame->led_pattern_phase = chosen_phase;
 	}
 
-	LOGV ("Sensor %d Handling frame phase %d\n", sensor_ctx->id, led_pattern_phase);
-	blobwatch_process(sensor_ctx->bw, stream->frame, width, height,
-		led_pattern_phase, NULL, 0, &sensor_ctx->bwobs);
+	LOGV ("Sensor %d captured frame %d phase %d\n", sensor->id, frame->id, frame->led_pattern_phase);
 
-	if (sensor_ctx->bwobs && sensor_ctx->bwobs->num_blobs > 0) {
-		tracker_process_blobs (sensor_ctx);
+	ohmd_lock_mutex(sensor->sensor_lock);
+	/* Send this frame to the analysis thread */
+	if (sensor->frame_for_fast_analysis == -1) {
+		sensor->frame_for_fast_analysis = frame->id;
+		sensor->next_capture_frame = (frame->id+1) % NUM_CAPTURE_BUFFERS;
+		sensor->cur_capture_frame = -1;
+		ohmd_cond_broadcast (sensor->new_frame_cond);
+	} else {
+		/* Analysis thread was still busy with the previous frame */
+		sensor->dropped_frames++;
+	}
+	ohmd_unlock_mutex(sensor->sensor_lock);
+}
+
+static void analyse_frame_fast(rift_sensor_ctx *sensor, rift_sensor_capture_frame *frame)
+{
+	int width = frame->uvc.width;
+	int height = frame->uvc.height;
+
+	blobwatch_process(sensor->bw, frame->uvc.data, width, height,
+		frame->led_pattern_phase, NULL, 0, &sensor->bwobs);
+
+	if (sensor->bwobs && sensor->bwobs->num_blobs > 0) {
+		tracker_process_blobs (sensor, frame->uvc.start_ts);
 #if 0
-		printf("Sensor %d phase %d Blobs: %d\n", sensor_ctx->id, led_pattern_phase, sensor_ctx->bwobs->num_blobs);
+		printf("Sensor %d phase %d Blobs: %d\n", sensor->id, led_pattern_phase, sensor->bwobs->num_blobs);
 
-		for (int index = 0; index < sensor_ctx->bwobs->num_blobs; index++)
+		for (int index = 0; index < sensor->bwobs->num_blobs; index++)
 		{
-			printf("Sensor %d Blob[%d]: %d,%d %dx%d id %d pattern %x age %u\n", sensor_ctx->id,
+			printf("Sensor %d Blob[%d]: %d,%d %dx%d id %d pattern %x age %u\n", sensor->id,
 				index,
-				sensor_ctx->bwobs->blobs[index].x,
-				sensor_ctx->bwobs->blobs[index].y,
-				sensor_ctx->bwobs->blobs[index].width,
-				sensor_ctx->bwobs->blobs[index].height,
-				sensor_ctx->bwobs->blobs[index].led_id,
-				sensor_ctx->bwobs->blobs[index].pattern,
-				sensor_ctx->bwobs->blobs[index].pattern_age);
+				sensor->bwobs->blobs[index].x,
+				sensor->bwobs->blobs[index].y,
+				sensor->bwobs->blobs[index].width,
+				sensor->bwobs->blobs[index].height,
+				sensor->bwobs->blobs[index].led_id,
+				sensor->bwobs->blobs[index].pattern,
+				sensor->bwobs->blobs[index].pattern_age);
 		}
 #endif
 	}
 
-	if (ohmd_pw_video_stream_connected(sensor_ctx->debug_vid)) {
-		rift_tracked_device *devices = rift_tracker_get_devices(sensor_ctx->tracker);
+	if (ohmd_pw_video_stream_connected(sensor->debug_vid)) {
+		rift_tracked_device *devices = rift_tracker_get_devices(sensor->tracker);
 
-		rift_debug_draw_frame (sensor_ctx->debug_frame, sensor_ctx->bwobs, sensor_ctx->cs, stream,
-			devices, sensor_ctx->is_cv1, sensor_ctx->camera_matrix,
-			sensor_ctx->dist_fisheye, sensor_ctx->dist_coeffs);
-		ohmd_pw_video_stream_push (sensor_ctx->debug_vid, sensor_ctx->frame_sof_ts, sensor_ctx->debug_frame);
+		rift_debug_draw_frame (sensor->debug_frame, sensor->bwobs, sensor->cs, (rift_sensor_uvc_frame *)frame,
+			devices, sensor->is_cv1, sensor->camera_matrix,
+			sensor->dist_fisheye, sensor->dist_coeffs);
+		ohmd_pw_video_stream_push (sensor->debug_vid, frame->uvc.start_ts, sensor->debug_frame);
 	}
 #if 0
-	if (ohmd_pw_debug_stream_connected(sensor_ctx->debug_metadata)) {
+	if (ohmd_pw_debug_stream_connected(sensor->debug_metadata)) {
 		char *debug_str;
 
 		asprintf (&debug_str, "{ ts: %llu, exposure_phase: %d, position: { %f, %f, %f }, orientation: { %f, %f, %f, %f } }",
-		  (unsigned long long) sensor_ctx->frame_sof_ts, led_pattern_phase,
-		  sensor_ctx->pose.pos.x, sensor_ctx->pose.pos.y, sensor_ctx->pose.pos.z,
-		  sensor_ctx->pose.orient.x, sensor_ctx->pose.orient.y,
-		  sensor_ctx->pose.orient.z, sensor_ctx->pose.orient.w);
+		  (unsigned long long) frame->uvc.start_ts, led_pattern_phase,
+		  sensor->pose.pos.x, sensor->pose.pos.y, sensor->pose.pos.z,
+		  sensor->pose.orient.x, sensor->pose.orient.y,
+		  sensor->pose.orient.z, sensor->pose.orient.w);
 
-		ohmd_pw_debug_stream_push (sensor_ctx->debug_metadata, sensor_ctx->frame_sof_ts, debug_str);
+		ohmd_pw_debug_stream_push (sensor->debug_metadata, frame->uvc.start_ts, debug_str);
 		free(debug_str);
   }
 #endif
@@ -472,7 +522,7 @@ rift_sensor_new(ohmd_context* ohmd_ctx, int id, const char *serial_no,
 {
 	rift_sensor_ctx *sensor_ctx = NULL;
 	char stream_id[64];
-	int ret;
+	int ret, i;
 
 	libusb_device *dev = libusb_get_device(usb_devh);
 	struct libusb_device_descriptor desc;
@@ -494,7 +544,7 @@ rift_sensor_new(ohmd_context* ohmd_ctx, int id, const char *serial_no,
 	sensor_ctx->pose_filter = kalman_pose_new (ohmd_ctx);
 
 	sensor_ctx->stream.sof_cb = new_frame_start_cb;
-	sensor_ctx->stream.frame_cb = new_frame_cb;
+	sensor_ctx->stream.frame_cb = frame_captured_cb;
 	sensor_ctx->stream.user_data = sensor_ctx;
 	
 	sensor_ctx->have_camera_pose = false;
@@ -504,6 +554,23 @@ rift_sensor_new(ohmd_context* ohmd_ctx, int id, const char *serial_no,
 
 	ret = rift_sensor_uvc_stream_setup (usb_ctx, sensor_ctx->usb_devh, &sensor_ctx->stream);
 	ASSERT_MSG(ret >= 0, fail, "could not prepare for streaming\n");
+
+	/* Allocate capture frame buffers */
+	int data_size = sensor_ctx->stream.frame_size;
+
+	sensor_ctx->frames = ohmd_alloc(ohmd_ctx, NUM_CAPTURE_BUFFERS * sizeof (rift_sensor_capture_frame));
+	for (i = 0; i < NUM_CAPTURE_BUFFERS; i++) {
+			rift_sensor_capture_frame *frame = sensor_ctx->frames + i;
+
+			frame->id = i;
+			frame->uvc.data = ohmd_alloc(ohmd_ctx, data_size);
+			frame->uvc.data_size = data_size;
+	}
+	/* Set up frame capture references */
+	sensor_ctx->next_capture_frame = 0;
+	sensor_ctx->cur_capture_frame = -1;
+	sensor_ctx->frame_for_fast_analysis = -1;
+	sensor_ctx->dropped_frames = 0;
 
 	snprintf(stream_id,64,"openhmd-rift-sensor-%s", sensor_ctx->serial_no);
 	stream_id[63] = 0;
@@ -582,6 +649,8 @@ fail:
 void
 rift_sensor_free (rift_sensor_ctx *sensor_ctx)
 {
+	int i;
+
 	if (sensor_ctx == NULL)
 		return;
 
@@ -615,6 +684,14 @@ rift_sensor_free (rift_sensor_ctx *sensor_ctx)
 		libusb_close (sensor_ctx->usb_devh);
 
 	kalman_pose_free (sensor_ctx->pose_filter);
+
+	for (i = 0; i < NUM_CAPTURE_BUFFERS; i++) {
+			rift_sensor_capture_frame *frame = sensor_ctx->frames + i;
+			if (frame->uvc.data)
+				free(frame->uvc.data);
+	}
+	free(sensor_ctx->frames);
+
 	free (sensor_ctx);
 }
 
@@ -637,7 +714,19 @@ static unsigned int fast_analysis_thread(void *arg)
 
 	ohmd_lock_mutex (ctx->sensor_lock);
 	while (!ctx->shutdown) {
-			ohmd_cond_wait(ctx->new_frame_cond, ctx->sensor_lock);
+			if (ctx->frame_for_fast_analysis != -1) {
+				rift_sensor_capture_frame *frame = ctx->frames + ctx->frame_for_fast_analysis;
+
+				ohmd_unlock_mutex (ctx->sensor_lock);
+				analyse_frame_fast(ctx, frame);
+				ohmd_lock_mutex (ctx->sensor_lock);
+
+				/* Done with this frame - clear the ref */
+				ctx->frame_for_fast_analysis = -1;
+			}
+			if (!ctx->shutdown) {
+				ohmd_cond_wait(ctx->new_frame_cond, ctx->sensor_lock);
+			}
 	}
 	ohmd_unlock_mutex (ctx->sensor_lock);
 

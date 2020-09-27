@@ -14,7 +14,7 @@
 #include "correspondence_search.h"
 
 void rift_debug_draw_frame (uint8_t *pixels, struct blobservation* bwobs,
-  correspondence_search_t *cs, struct rift_sensor_uvc_stream * stream,
+  correspondence_search_t *cs, struct rift_sensor_uvc_frame *frame,
 	rift_tracked_device *devs, bool is_cv1,
   dmat3 camera_matrix, bool dist_fisheye, double dist_coeffs[5]);
 

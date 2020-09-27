@@ -162,17 +162,17 @@ compare_blobs (const void *elem1, const void *elem2)
 }
 
 void rift_debug_draw_frame (uint8_t *pixels, struct blobservation* bwobs,
-  correspondence_search_t *cs, struct rift_sensor_uvc_stream * stream,
+  correspondence_search_t *cs, rift_sensor_uvc_frame *frame,
 	rift_tracked_device *devs, bool is_cv1,
   dmat3 camera_matrix, bool dist_fisheye, double dist_coeffs[5])
 {
-	uint8_t *src = stream->frame;
+	uint8_t *src = frame->data;
 	
 	int x, y;
-	int width = stream->width;
-	int height = stream->height;
-	int in_stride = stream->stride;
-	int out_stride = stream->width*3*2;
+	int width = frame->width;
+	int height = frame->height;
+	int in_stride = frame->stride;
+	int out_stride = frame->width*3*2;
 
 	uint8_t *dest = pixels;
   for (y = 0; y < height; y++) {
