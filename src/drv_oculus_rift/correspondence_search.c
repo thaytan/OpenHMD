@@ -389,10 +389,10 @@ check_led_against_model_subset (correspondence_search_t *cs, cs_model_info_t *mi
       ovec3f_subtract (&checkpos, &blob0, &tmp);
       l = ovec3f_get_length (&tmp);
       if (l > 0.0025) {
-	      printf ("pose candidate orient %f %f %f %f pos %f %f %f\n",
+	      printf ("Error pose candidate orient %f %f %f %f pos %f %f %f "
+            "Anchor LED %f %f %f projected to %f %f %f (err %f)\n",
             orient.x, orient.y, orient.z, orient.w,
-            trans.x, trans.y, trans.z);
-        printf ("Anchor LED %f %f %f projected to %f %f %f (err %f)\n",
+            trans.x, trans.y, trans.z,
             blob0.x, blob0.y, blob0.z,
             checkpos.x, checkpos.y, checkpos.z, l);
         continue; /* FIXME: Figure out why this happened */
