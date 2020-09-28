@@ -28,7 +28,6 @@
 #define ASSERT_MSG(_v, label, ...) if(!(_v)){ fprintf(stderr, __VA_ARGS__); goto label; }
 
 #define MAX_SENSORS 4
-#define MAX_DEVICES 3
 
 struct rift_tracker_ctx_s
 {
@@ -45,7 +44,7 @@ struct rift_tracker_ctx_s
 	rift_sensor_ctx *sensors[MAX_SENSORS];
 	uint8_t n_sensors;
 
-	rift_tracked_device devices[MAX_DEVICES];
+	rift_tracked_device devices[RIFT_MAX_TRACKED_DEVICES];
 };
 
 void
@@ -53,7 +52,7 @@ rift_tracker_add_device (rift_tracker_ctx *ctx, int device_id, fusion *f, rift_l
 {
 	int i;
 
-	assert (device_id < MAX_DEVICES);
+	assert (device_id < RIFT_MAX_TRACKED_DEVICES);
 	ctx->devices[device_id].id = device_id;
 	ctx->devices[device_id].fusion = f;
 	ctx->devices[device_id].leds = leds;
@@ -195,7 +194,7 @@ rift_tracker_free (rift_tracker_ctx *tracker_ctx)
 		rift_sensor_free (sensor_ctx);
 	}
 
-  for (i = 0; i < MAX_DEVICES; i++) {
+  for (i = 0; i < RIFT_MAX_TRACKED_DEVICES; i++) {
     if (tracker_ctx->devices[i].led_search)
       led_search_model_free (tracker_ctx->devices[i].led_search);
   }

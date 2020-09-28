@@ -45,8 +45,13 @@ struct rift_sensor_capture_frame {
 	/* Index of the frame in the frames array */
 	uint8_t id;
 
+	/* LED blink pattern info - in case we use
+	 * LED blinking again in the future? */
 	uint64_t led_pattern_sof_ts;
 	uint8_t led_pattern_phase;
+
+	/* Device poses at capture time */
+	posef capture_world_poses[RIFT_MAX_TRACKED_DEVICES];
 
 	/* Timestamp of complete frame arriving from USB */
 	uint64_t frame_delivered_ts;
@@ -119,9 +124,9 @@ struct rift_sensor_ctx_s
 };
 
 static void update_device_pose (rift_sensor_ctx *sensor_ctx, rift_tracked_device *dev,
-	rift_pose_metrics *score, uint64_t frame_ts);
+	rift_pose_metrics *score, uint64_t frame_ts, posef *capture_pose);
 
-static int tracker_process_blobs(rift_sensor_ctx *ctx, uint64_t frame_ts)
+static int tracker_process_blobs(rift_sensor_ctx *ctx, rift_sensor_capture_frame *frame)
 {
 	struct blobservation* bwobs = ctx->bwobs;
 	int ret = 0;
@@ -132,7 +137,7 @@ static int tracker_process_blobs(rift_sensor_ctx *ctx, uint64_t frame_ts)
 
 	correspondence_search_set_blobs (ctx->cs, bwobs->blobs, bwobs->num_blobs);
 
-	for (d = 0; d < 3; d++) {
+	for (d = 0; d < RIFT_MAX_TRACKED_DEVICES; d++) {
 		rift_tracked_device *dev = devices + d;
 		rift_pose_metrics score;
 		posef world_obj_pose, cam_pose;
@@ -141,9 +146,9 @@ static int tracker_process_blobs(rift_sensor_ctx *ctx, uint64_t frame_ts)
 		if (dev->fusion == NULL)
 			continue; /* No such device */
 
-		oposef_init (&world_obj_pose, &dev->fusion->world_position, &dev->fusion->orient);
+		world_obj_pose = frame->capture_world_poses[d];
 
-		LOGD ("Fusion provided pose for device %d, %f %f %f %f pos %f %f %f",
+		LOGV ("Fusion provided pose for device %d, %f %f %f %f pos %f %f %f",
 			d, world_obj_pose.orient.x, world_obj_pose.orient.y, world_obj_pose.orient.z, world_obj_pose.orient.w,
 			world_obj_pose.pos.x, world_obj_pose.pos.y, world_obj_pose.pos.z);
 
@@ -204,14 +209,14 @@ static int tracker_process_blobs(rift_sensor_ctx *ctx, uint64_t frame_ts)
 					dist_coeffs, ctx->is_cv1,
 					&cam_pose.orient, &cam_pose.pos, NULL, NULL, true);
 
-				kalman_pose_update (ctx->pose_filter, frame_ts, &cam_pose.pos, &cam_pose.orient);
+				kalman_pose_update (ctx->pose_filter, frame->uvc.start_ts, &cam_pose.pos, &cam_pose.orient);
 				kalman_pose_get_estimated (ctx->pose_filter, &dev->pose.pos, &dev->pose.orient);
 
 				LOGD ("sensor %d kalman filter for device %d yielded quat %f %f %f %f pos %f %f %f\n",
 					ctx->id, d, dev->pose.orient.x, dev->pose.orient.y, dev->pose.orient.z, dev->pose.orient.w,
 					dev->pose.pos.x, dev->pose.pos.y, dev->pose.pos.z);
 
-				update_device_pose (ctx, dev, &score, frame_ts);
+				update_device_pose (ctx, dev, &score, frame->uvc.start_ts, &frame->capture_world_poses[d]);
 			}
 		}
 	}
@@ -336,7 +341,9 @@ static void new_frame_start_cb(struct rift_sensor_uvc_stream *stream, uint64_t s
 
 	ohmd_lock_mutex(sensor->sensor_lock);
 	if (sensor->next_capture_frame != sensor->cur_capture_frame) {
+		int d;
 		rift_sensor_capture_frame *next_frame = sensor->frames + sensor->next_capture_frame;
+		rift_tracked_device *devices = rift_tracker_get_devices(sensor->tracker);
 
 		sensor->cur_capture_frame = sensor->next_capture_frame;
 
@@ -348,6 +355,17 @@ static void new_frame_start_cb(struct rift_sensor_uvc_stream *stream, uint64_t s
 				sensor->dropped_frames = 0;
 		}
 
+		for (d = 0; d < RIFT_MAX_TRACKED_DEVICES; d++) {
+			rift_tracked_device *dev = devices + d;
+
+			if (dev->fusion == NULL) {
+				/* FIXME: Should skip this frame */
+				continue;
+			}
+			oposef_init(&next_frame->capture_world_poses[d],
+					&dev->fusion->world_position, &dev->fusion->orient);
+		}
+
 		rift_sensor_uvc_stream_set_frame(stream, (rift_sensor_uvc_frame *)next_frame);
 	}
 	ohmd_unlock_mutex(sensor->sensor_lock);
@@ -355,7 +373,7 @@ static void new_frame_start_cb(struct rift_sensor_uvc_stream *stream, uint64_t s
 
 static void
 update_device_pose (rift_sensor_ctx *sensor_ctx, rift_tracked_device *dev,
-		rift_pose_metrics *score, uint64_t frame_ts)
+		rift_pose_metrics *score, uint64_t frame_ts, posef *capture_pose)
 {
 	posef pose = dev->pose;
 
@@ -387,10 +405,8 @@ update_device_pose (rift_sensor_ctx *sensor_ctx, rift_tracked_device *dev,
 			 * pose using the current headset pose. Calculate the xform from world->camera by applying
 			 * the fusion pose (from world->object) to our found pose (object->camera)
 			 */
-			posef world_object_pose;
+			posef world_object_pose = *capture_pose;
 
-			oposef_init(&world_object_pose, &dev->fusion->world_position,
-							&dev->fusion->orient);
 			oposef_apply(&pose, &world_object_pose, &sensor_ctx->camera_pose);
 
 			LOGI("Set sensor %d pose from device %d - tracker pose quat %f %f %f %f  pos %f %f %f"
@@ -439,7 +455,6 @@ static void frame_captured_cb(rift_sensor_uvc_stream *stream, rift_sensor_uvc_fr
 	assert (sensor);
 
 	uint64_t now = ohmd_monotonic_get(sensor->ohmd_ctx);
-
 
 	frame->frame_delivered_ts = now;
 
@@ -499,7 +514,7 @@ static void analyse_frame_fast(rift_sensor_ctx *sensor, rift_sensor_capture_fram
 #endif
 
 	if (sensor->bwobs && sensor->bwobs->num_blobs > 0) {
-		tracker_process_blobs (sensor, frame->uvc.start_ts);
+		tracker_process_blobs (sensor, frame);
 #if 0
 		printf("Sensor %d phase %d Blobs: %d\n", sensor->id, led_pattern_phase, sensor->bwobs->num_blobs);
 

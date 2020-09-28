@@ -15,6 +15,8 @@
 typedef struct rift_tracker_ctx_s rift_tracker_ctx;
 typedef struct rift_tracked_device_s rift_tracked_device;
 
+#define RIFT_MAX_TRACKED_DEVICES 3
+
 struct rift_tracked_device_s
 {
 	int id;
