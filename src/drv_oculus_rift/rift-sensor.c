@@ -6,12 +6,14 @@
  */
 
  #define _GNU_SOURCE
+#define __STDC_FORMAT_MACROS
 
 #include <libusb.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 #include <assert.h>
+#include <inttypes.h>
 
 #include "rift-sensor.h"
 
@@ -45,6 +47,15 @@ struct rift_sensor_capture_frame {
 
 	uint64_t led_pattern_sof_ts;
 	uint8_t led_pattern_phase;
+
+	/* Timestamp of complete frame arriving from USB */
+	uint64_t frame_delivered_ts;
+
+	/* Timestamp of fast/image analysis thread processing start */
+	uint64_t image_analysis_start_ts;
+
+	/* Timestamp of fast/image analysis thread processing finish */
+	uint64_t image_analysis_finish_ts;
 };
 
 struct rift_sensor_ctx_s
@@ -60,17 +71,6 @@ struct rift_sensor_ctx_s
 	struct rift_sensor_uvc_stream stream;
 
 	rift_sensor_capture_frame *frames;
-
-	/* ID of the currently capturing frame */
-	int cur_capture_frame;
-	/* ID of the next frame to submit for capturing */
-	int next_capture_frame;
-	int dropped_frames;
-
-	/* FIXME: later this should be a ringbuffer to support
-	 * more outstanding frames, and a frames_ready_for_capture
-	 * ringbuffer to return them */
-	int frame_for_fast_analysis;
 
 	struct blobwatch* bw;
 	struct blobservation* bwobs;
@@ -88,7 +88,22 @@ struct rift_sensor_ctx_s
 	ohmd_mutex *sensor_lock;
 	ohmd_cond *new_frame_cond;
 
+	/* Protected by sensor_lock */
+
+	/* ID of the currently capturing frame */
+	int cur_capture_frame;
+	/* ID of the next frame to submit for capturing */
+	int next_capture_frame;
+	int dropped_frames;
+
+	/* FIXME: later this should be a ringbuffer to support
+	 * more outstanding frames, and a frames_ready_for_capture
+	 * ringbuffer to return them */
+	int frame_for_fast_analysis;
+
 	int shutdown;
+	/* End protected by sensor_lock */
+
 	ohmd_thread* fast_analysis_thread;
 	ohmd_thread* long_analysis_thread;
 
@@ -96,8 +111,11 @@ struct rift_sensor_ctx_s
 	uint8_t *debug_frame;
 	ohmd_pw_debug_stream *debug_metadata;
 
+	/* Updated from fast_analysis_thread */
 	bool have_camera_pose;
 	posef camera_pose;
+
+	uint64_t prev_capture_ts;
 };
 
 static void update_device_pose (rift_sensor_ctx *sensor_ctx, rift_tracked_device *dev,
@@ -416,9 +434,14 @@ stream->frame_size
 static void frame_captured_cb(rift_sensor_uvc_stream *stream, rift_sensor_uvc_frame *uvc_frame)
 {
 	rift_sensor_capture_frame *frame = (rift_sensor_capture_frame *)(uvc_frame);
-
 	rift_sensor_ctx *sensor = stream->user_data;
+
 	assert (sensor);
+
+	uint64_t now = ohmd_monotonic_get(sensor->ohmd_ctx);
+
+
+	frame->frame_delivered_ts = now;
 
 	/* led pattern phase comes from sensor reports */
 	uint8_t led_pattern_phase = frame->led_pattern_phase;
@@ -426,7 +449,6 @@ static void frame_captured_cb(rift_sensor_uvc_stream *stream, rift_sensor_uvc_fr
 	uint8_t cur_led_pattern_phase = rift_tracker_get_led_pattern_phase (sensor->tracker, &cur_phase_ts);
 	if (cur_led_pattern_phase != led_pattern_phase) {
 		/* The LED phase changed mid-frame. Choose which one to keep */
-		uint64_t now = ohmd_monotonic_get(sensor->ohmd_ctx);
 		uint64_t frame_midpoint = uvc_frame->start_ts + (now - uvc_frame->start_ts)/2;
 		uint8_t chosen_phase;
 
@@ -438,7 +460,7 @@ static void frame_captured_cb(rift_sensor_uvc_stream *stream, rift_sensor_uvc_fr
 
 		LOGD ("%f Sensor %d Frame (sof %f) phase mismatch old %d new %d (@ %f) chose %d\n",
 			(double) (now) / 1000000.0, sensor->id,
-			(double) (sensor->led_pattern_sof_ts) / 1000000.0,
+			(double) (frame->led_pattern_sof_ts) / 1000000.0,
 			led_pattern_phase, cur_led_pattern_phase,
 			(double) (cur_phase_ts) / 1000000.0,
 			chosen_phase);
@@ -463,11 +485,18 @@ static void frame_captured_cb(rift_sensor_uvc_stream *stream, rift_sensor_uvc_fr
 
 static void analyse_frame_fast(rift_sensor_ctx *sensor, rift_sensor_capture_frame *frame)
 {
+	uint64_t now = ohmd_monotonic_get(sensor->ohmd_ctx);
 	int width = frame->uvc.width;
 	int height = frame->uvc.height;
 
+	frame->image_analysis_start_ts = now;
+
 	blobwatch_process(sensor->bw, frame->uvc.data, width, height,
 		frame->led_pattern_phase, NULL, 0, &sensor->bwobs);
+
+#if LOGLEVEL < 1
+	uint64_t blob_extract_end = ohmd_monotonic_get(sensor->ohmd_ctx);
+#endif
 
 	if (sensor->bwobs && sensor->bwobs->num_blobs > 0) {
 		tracker_process_blobs (sensor, frame->uvc.start_ts);
@@ -488,6 +517,9 @@ static void analyse_frame_fast(rift_sensor_ctx *sensor, rift_sensor_capture_fram
 		}
 #endif
 	}
+
+	now = ohmd_monotonic_get(sensor->ohmd_ctx);
+	frame->image_analysis_finish_ts = now;
 
 	if (ohmd_pw_video_stream_connected(sensor->debug_vid)) {
 		rift_tracked_device *devices = rift_tracker_get_devices(sensor->tracker);
@@ -511,6 +543,22 @@ static void analyse_frame_fast(rift_sensor_ctx *sensor, rift_sensor_capture_fram
 		free(debug_str);
   }
 #endif
+
+#if LOGLEVEL < 1
+	double time_since_last_capture = 0;
+	if (sensor->prev_capture_ts) {
+		time_since_last_capture = (double)(frame->uvc.start_ts - sensor->prev_capture_ts) / 1000000.0;
+	}
+	sensor->prev_capture_ts = frame->uvc.start_ts;
+#endif
+
+	LOGD("Sensor %d Frame analysis done after %u ms. Captured %" PRIu64 " (%.1fms between frames) USB delivery %u ms thread switch %u ns analysis %ums (%ums blob extraction)",
+		 sensor->id, (uint32_t) (frame->image_analysis_finish_ts - frame->uvc.start_ts) / 1000000,
+		 frame->uvc.start_ts, time_since_last_capture,
+		 (uint32_t) (frame->frame_delivered_ts - frame->uvc.start_ts) / 1000000,
+		 (uint32_t) (frame->image_analysis_start_ts - frame->frame_delivered_ts),
+		 (uint32_t) (frame->image_analysis_finish_ts - frame->image_analysis_start_ts) / 1000000,
+		 (uint32_t) (blob_extract_end - frame->image_analysis_start_ts) / 1000000);
 }
 
 static unsigned int fast_analysis_thread(void *arg);
