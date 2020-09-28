@@ -467,7 +467,7 @@ static void frame_captured_cb(rift_sensor_uvc_stream *stream, rift_sensor_uvc_fr
 		frame->led_pattern_phase = chosen_phase;
 	}
 
-	LOGV ("Sensor %d captured frame %d phase %d\n", sensor->id, frame->id, frame->led_pattern_phase);
+	LOGV ("Sensor %d captured frame %d phase %d", sensor->id, frame->id, frame->led_pattern_phase);
 
 	ohmd_lock_mutex(sensor->sensor_lock);
 	/* Send this frame to the analysis thread */

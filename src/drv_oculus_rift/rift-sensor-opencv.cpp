@@ -101,11 +101,9 @@ extern "C" bool estimate_initial_pose(struct blob *blobs, int num_blobs,
 		list_points2d[j].y = blobs[i].y;
 		j++;
 
-		LOGD ("LED %d at %f,%f (3D %f %f %f)\n",
+		LOGD ("LED %d at %f,%f (3D %f %f %f)",
 		    blobs[i].led_id, blobs[i].x, blobs[i].y,
-		    leds[led_id].pos.x,
-		    leds[led_id].pos.y,
-		    leds[led_id].pos.z);
+		    leds[led_id].pos.x, leds[led_id].pos.y, leds[led_id].pos.z);
 	}
 
 	num_leds = j;
@@ -151,7 +149,7 @@ extern "C" bool estimate_initial_pose(struct blob *blobs, int num_blobs,
 	for (i = 0; i < 3; i++)
 		trans->arr[i] = tvec.at<double>(i);
 
-	LOGV ("Got PnP pose quat %f %f %f %f  pos %f %f %f\n",
+	LOGV ("Got PnP pose quat %f %f %f %f  pos %f %f %f",
 	     rot->x, rot->y, rot->z, rot->w,
 	     trans->x, trans->y, trans->z);
 	return true;
