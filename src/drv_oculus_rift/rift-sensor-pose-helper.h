@@ -13,21 +13,29 @@
 #define MAX_OBJECT_LEDS 64
 
 typedef struct {
-  int matched_blobs;
-  int unmatched_blobs;
-  int visible_leds;
+ double left;
+ double top;
+ double right;
+ double bottom;
+} rift_rect_t;
 
-  double reprojection_error;
+typedef struct {
+	int matched_blobs;
+	int unmatched_blobs;
+	int visible_leds;
 
-  bool good_pose_match; /* TRUE if rift_evaluate_pose() considered this a good match */
+	double reprojection_error;
+
+	bool good_pose_match; /* TRUE if rift_evaluate_pose() considered this a good match */
 } rift_pose_metrics;
 
-void rift_evaluate_pose (rift_pose_metrics *score, quatf *orient, vec3f *trans,
-    struct blob *blobs, int num_blobs,
-		int device_id, rift_led *leds, int num_leds,
-		dmat3 *camera_matrix, double dist_coeffs[5], bool dist_fisheye);
+void rift_evaluate_pose (rift_pose_metrics *score, posef *pose,
+	struct blob *blobs, int num_blobs,
+	int device_id, rift_led *leds, int num_leds,
+	dmat3 *camera_matrix, double dist_coeffs[5], bool dist_fisheye,
+	rift_rect_t *out_bounds);
 
-void rift_mark_matching_blobs (quatf *orient, vec3f *trans,
+void rift_mark_matching_blobs (posef *pose,
 	struct blob *blobs, int num_blobs,
 	int device_id, rift_led *leds, int num_leds,
 	dmat3 *camera_matrix, double dist_coeffs[5], bool dist_fisheye);

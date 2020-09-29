@@ -9,14 +9,7 @@
 #include "rift-sensor-pose-helper.h"
 #include "rift-sensor-opencv.h"
 
-typedef struct {
- double left;
- double top;
- double right;
- double bottom;
-} rect_t;
-
-static void expand_rect(rect_t *bounds, double x, double y, double w, double h)
+static void expand_rect(rift_rect_t *bounds, double x, double y, double w, double h)
 {
 	if (x < bounds->left)
 		bounds->left = x;
@@ -53,10 +46,11 @@ static vec3f *find_best_matching_led (vec3f *led_points, int num_leds, struct bl
 	return best_led;
 }
 
-void rift_evaluate_pose (rift_pose_metrics *score, quatf *orient, vec3f *trans,
+void rift_evaluate_pose (rift_pose_metrics *score, posef *pose,
 	struct blob *blobs, int num_blobs,
 	int device_id, rift_led *leds, int num_leds,
-	dmat3 *camera_matrix, double dist_coeffs[5], bool dist_fisheye)
+	dmat3 *camera_matrix, double dist_coeffs[5], bool dist_fisheye,
+	rift_rect_t *out_bounds)
 {
 	/*
 	 * 1. Project the LED points with the provided pose
@@ -74,7 +68,7 @@ void rift_evaluate_pose (rift_pose_metrics *score, quatf *orient, vec3f *trans,
 	bool first_visible = true;
 	double led_radius;
 	bool good_pose_match = false;
-	rect_t bounds = { 0, };
+	rift_rect_t bounds = { 0, };
 	int i;
 	
 	assert (num_leds > 0);
@@ -83,7 +77,7 @@ void rift_evaluate_pose (rift_pose_metrics *score, quatf *orient, vec3f *trans,
 	/* Project HMD LEDs into the distorted image space */
 	rift_project_points(leds, num_leds,
 	    camera_matrix, dist_coeffs, dist_fisheye,
-	    orient, trans, led_out_points);
+	    pose, led_out_points);
 	
 	/* FIXME: Estimate LED size based on distance */
 	led_radius = 5;
@@ -98,11 +92,11 @@ void rift_evaluate_pose (rift_pose_metrics *score, quatf *orient, vec3f *trans,
 		
 		vec3f normal, position;
 		double facing_dot;
-		oquatf_get_rotated(orient, &leds[i].pos, &position);
-		ovec3f_add (trans, &position, &position);
+		oquatf_get_rotated(&pose->orient, &leds[i].pos, &position);
+		ovec3f_add (&pose->pos, &position, &position);
 		
 		ovec3f_normalize_me (&position);
-		oquatf_get_rotated(orient, &leds[i].dir, &normal);
+		oquatf_get_rotated(&pose->orient, &leds[i].dir, &normal);
 		facing_dot = ovec3f_get_dot (&position, &normal);
 		
 #if 0
@@ -176,9 +170,12 @@ void rift_evaluate_pose (rift_pose_metrics *score, quatf *orient, vec3f *trans,
 		score->reprojection_error = reprojection_error;
 		score->good_pose_match = good_pose_match;
 	}
+
+	if (out_bounds)
+		*out_bounds = bounds;
 }
 
-void rift_mark_matching_blobs (quatf *orient, vec3f *trans,
+void rift_mark_matching_blobs (posef *pose,
 	struct blob *blobs, int num_blobs,
 	int device_id, rift_led *leds, int num_leds,
 	dmat3 *camera_matrix, double dist_coeffs[5], bool dist_fisheye)
@@ -196,7 +193,7 @@ void rift_mark_matching_blobs (quatf *orient, vec3f *trans,
 	int num_visible_leds = 0;
 	bool first_visible = true;
 	double led_radius;
-	rect_t bounds = { 0, };
+	rift_rect_t bounds = { 0, };
 	int i;
 
 	assert (num_leds > 0);
@@ -205,7 +202,7 @@ void rift_mark_matching_blobs (quatf *orient, vec3f *trans,
 	/* Project HMD LEDs into the distorted image space */
 	rift_project_points(leds, num_leds,
 	    camera_matrix, dist_coeffs, dist_fisheye,
-	    orient, trans, led_out_points);
+	    pose, led_out_points);
 
 	/* FIXME: Estimate LED size based on distance */
 	led_radius = 5;
@@ -220,11 +217,11 @@ void rift_mark_matching_blobs (quatf *orient, vec3f *trans,
 
 		vec3f normal, position;
 		double facing_dot;
-		oquatf_get_rotated(orient, &leds[i].pos, &position);
-		ovec3f_add (trans, &position, &position);
+		oquatf_get_rotated(&pose->orient, &leds[i].pos, &position);
+		ovec3f_add (&pose->pos, &position, &position);
 
 		ovec3f_normalize_me (&position);
-		oquatf_get_rotated(orient, &leds[i].dir, &normal);
+		oquatf_get_rotated(&pose->orient, &leds[i].dir, &normal);
 		facing_dot = ovec3f_get_dot (&position, &normal);
 
 		if (facing_dot < -0.25) {

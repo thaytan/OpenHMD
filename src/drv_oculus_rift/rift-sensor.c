@@ -169,10 +169,10 @@ static int tracker_process_blobs(rift_sensor_ctx *ctx, rift_sensor_capture_frame
 			ctx->id, d, cam_pose.orient.x, cam_pose.orient.y, cam_pose.orient.z, cam_pose.orient.w,
 			cam_pose.pos.x, cam_pose.pos.y, cam_pose.pos.z);
 
-		rift_evaluate_pose (&score, &cam_pose.orient, &cam_pose.pos,
+		rift_evaluate_pose (&score, &cam_pose,
 			ctx->bwobs->blobs, ctx->bwobs->num_blobs,
 			dev->id, dev->leds->points, dev->leds->num_points,
-			&ctx->camera_matrix, ctx->dist_coeffs, ctx->dist_fisheye);
+			&ctx->camera_matrix, ctx->dist_coeffs, ctx->dist_fisheye, NULL);
 
 #if 0
 		if (score.good_pose_match)
@@ -183,7 +183,7 @@ static int tracker_process_blobs(rift_sensor_ctx *ctx, rift_sensor_capture_frame
 				ctx->id, d, score.matched_blobs, score.visible_leds);
 #endif
 
-		if (score.good_pose_match || correspondence_search_find_one_pose (ctx->cs, d, match_all_blobs, &cam_pose.orient, &cam_pose.pos, &score)) {
+		if (score.good_pose_match || correspondence_search_find_one_pose (ctx->cs, d, match_all_blobs, &cam_pose, &score)) {
 			if (score.good_pose_match) {
 				ret = 1;
 
@@ -198,8 +198,7 @@ static int tracker_process_blobs(rift_sensor_ctx *ctx, rift_sensor_capture_frame
 					}
 				}
 
-				rift_mark_matching_blobs (&cam_pose.orient, &cam_pose.pos,
-						bwobs->blobs, bwobs->num_blobs, d,
+				rift_mark_matching_blobs (&cam_pose, bwobs->blobs, bwobs->num_blobs, d,
 						dev->leds->points, dev->leds->num_points,
 						camera_matrix, dist_coeffs, ctx->is_cv1);
 
@@ -207,7 +206,7 @@ static int tracker_process_blobs(rift_sensor_ctx *ctx, rift_sensor_capture_frame
 				estimate_initial_pose (ctx->bwobs->blobs, ctx->bwobs->num_blobs,
 					d, dev->leds->points, dev->leds->num_points, camera_matrix,
 					dist_coeffs, ctx->is_cv1,
-					&cam_pose.orient, &cam_pose.pos, NULL, NULL, true);
+					&cam_pose, NULL, NULL, true);
 
 				kalman_pose_update (ctx->pose_filter, frame->uvc.start_ts, &cam_pose.pos, &cam_pose.orient);
 				kalman_pose_get_estimated (ctx->pose_filter, &dev->pose.pos, &dev->pose.orient);
@@ -377,10 +376,11 @@ update_device_pose (rift_sensor_ctx *sensor_ctx, rift_tracked_device *dev,
 {
 	posef pose = dev->pose;
 
-	rift_evaluate_pose (score, &pose.orient, &pose.pos,
+	rift_evaluate_pose (score, &pose,
 		sensor_ctx->bwobs->blobs, sensor_ctx->bwobs->num_blobs,
 		dev->id, dev->leds->points, dev->leds->num_points,
-		&sensor_ctx->camera_matrix, sensor_ctx->dist_coeffs, sensor_ctx->dist_fisheye);
+		&sensor_ctx->camera_matrix, sensor_ctx->dist_coeffs,
+		sensor_ctx->dist_fisheye, NULL);
 
 	if (score->good_pose_match) {
 		LOGV("Found good pose match - %u LEDs matched %u visible ones\n",
@@ -400,10 +400,14 @@ update_device_pose (rift_sensor_ctx *sensor_ctx, rift_tracked_device *dev,
 
 			ofusion_tracker_update (dev->fusion, frame_ts, &pose.pos, &pose.orient);
 		}
-		else if (dev->id == 0) {
-			/* No camera pose yet. If this is the HMD, use it to initialise the camera (world->camera)
-			 * pose using the current headset pose. Calculate the xform from world->camera by applying
+		else if (dev->id == 0 && oquatf_get_length (&capture_pose->orient) > 0.9 && dev->fusion->last_gravity_vector_time > 0) {
+			/* No camera pose yet. If this is the HMD, we had an IMU pose at capture time,
+			 * and the fusion has a gravity vector from the IMU, use it to
+			 * initialise the camera (world->camera) pose using the current headset pose. Calculate the
+			 * xform from world->camera by applying
 			 * the fusion pose (from world->object) to our found pose (object->camera)
+			 * 
+			 * FIXME: Store the gravity in the fusion and record it with the capture too 
 			 */
 			posef world_object_pose = *capture_pose;
 

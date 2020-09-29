@@ -225,12 +225,11 @@ void rift_debug_draw_frame (uint8_t *pixels, struct blobservation* bwobs,
     for (d = 0; d < 3; d++) {
       int i;
       rift_pose_metrics score;
-      vec3f pose_pos;
-      quatf pose_orient;
+      posef pose;
 			rift_tracked_device *dev = devs + d;
 
       if (!correspondence_search_have_pose (cs, d,
-              &pose_orient, &pose_pos, &score))
+              &pose, &score))
         continue;
 
       /* Draw a marker that says we think we saw this device */
@@ -245,8 +244,7 @@ void rift_debug_draw_frame (uint8_t *pixels, struct blobservation* bwobs,
       /* Project HMD LEDs into the image again doh */
       rift_project_points (dev->leds->points,
           dev->leds->num_points, &camera_matrix,
-          dist_coeffs, is_cv1, &pose_orient,
-          &pose_pos, led_out_points);
+          dist_coeffs, is_cv1, &pose, led_out_points);
 
       for (i = 0; i < dev->leds->num_points; i++) {
         vec3f *p = led_out_points + i;
@@ -254,7 +252,7 @@ void rift_debug_draw_frame (uint8_t *pixels, struct blobservation* bwobs,
         int x = round (p->x);
         int y = round (p->y);
 
-        oquatf_get_rotated (&pose_orient,
+        oquatf_get_rotated (&pose.orient,
             &dev->leds->points[i].dir, &facing);
 
         if (facing.z < -0.25) {

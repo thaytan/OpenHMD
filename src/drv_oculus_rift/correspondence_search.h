@@ -37,8 +37,7 @@ struct cs_model_info_s {
 
     led_search_model_t *model;
 
-    quatf best_orient;
-    vec3f best_trans;
+		posef best_pose;
     bool good_pose_match;
 
     bool match_all_blobs;
@@ -71,8 +70,8 @@ bool correspondence_search_set_model (correspondence_search_t *cs, int model_id,
 void correspondence_search_free (correspondence_search_t *cs);
 
 bool correspondence_search_project_pose (correspondence_search_t *cs, led_search_model_t *model,
-        quatf *orient, vec3f *trans, cs_model_info_t *mi, bool expected_match);
+        posef *pose, cs_model_info_t *mi, bool expected_match);
 int correspondence_search_find_pose (correspondence_search_t *cs);
-bool correspondence_search_find_one_pose (correspondence_search_t *cs, int model_id, bool match_all_blobs, quatf *orient, vec3f *trans, rift_pose_metrics *score);
-bool correspondence_search_have_pose (correspondence_search_t *cs, int model_id, quatf *orient, vec3f *trans, rift_pose_metrics *score);
+bool correspondence_search_find_one_pose (correspondence_search_t *cs, int model_id, bool match_all_blobs, posef *pose, rift_pose_metrics *score);
+bool correspondence_search_have_pose (correspondence_search_t *cs, int model_id, posef *pose, rift_pose_metrics *score);
 #endif

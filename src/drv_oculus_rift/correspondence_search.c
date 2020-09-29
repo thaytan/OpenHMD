@@ -159,7 +159,7 @@ static int compare_blobs_distance (const void *elem1, const void *elem2, void *a
 
 #if DUMP_SCENE
 static void
-dump_pose (correspondence_search_t *cs, led_search_model_t *model, quatf *orient, vec3f *trans, cs_model_info_t *mi)
+dump_pose (correspondence_search_t *cs, led_search_model_t *model, posef *pose, cs_model_info_t *mi)
 {
     int i;
 	  rift_leds *leds = model->leds;
@@ -170,7 +170,7 @@ dump_pose (correspondence_search_t *cs, led_search_model_t *model, quatf *orient
 
       /* Project HMD LED into the image (no distortion) */
       oquatf_get_rotated(orient, &leds->points[i].pos, &pos);
-      ovec3f_add (&pos, trans, &pos);
+      ovec3f_add (&pos, &pose->pos, &pos);
       if (pos.z < 0)
         continue; // Can't be behind the camera
 
@@ -181,7 +181,7 @@ dump_pose (correspondence_search_t *cs, led_search_model_t *model, quatf *orient
 
       ovec3f_normalize_me(&pos);
 
-      oquatf_get_rotated(orient, &leds->points[i].dir, &dir);
+      oquatf_get_rotated(&pose->orient, &leds->points[i].dir, &dir);
       ovec3f_normalize_me(&dir);
 
       double facing_dot;
@@ -197,7 +197,7 @@ dump_pose (correspondence_search_t *cs, led_search_model_t *model, quatf *orient
 
 bool
 correspondence_search_project_pose (correspondence_search_t *cs, led_search_model_t *model,
-        quatf *orient, vec3f *trans, cs_model_info_t *mi, bool expected_match)
+	posef *pose, cs_model_info_t *mi, bool expected_match)
 {
   /* Given a pose, project each 3D LED point back to 2D and assign correspondences to blobs */
   /* If enough match, print out the pose */
@@ -206,7 +206,7 @@ correspondence_search_project_pose (correspondence_search_t *cs, led_search_mode
   /* Incrememnt stats */
   cs->num_pose_checks++;
 
-  if (trans->z < 0.05 || trans->z > 15) /* Invalid position, out of range */
+  if (pose->pos.z < 0.05 || pose->pos.z > 15) /* Invalid position, out of range */
     return false;
 
   rift_pose_metrics score;
@@ -215,8 +215,8 @@ correspondence_search_project_pose (correspondence_search_t *cs, led_search_mode
    * if there's enough we have a good match */
   /* FIXME: It would be better to be able to pass a list of undistorted
    * blob points */
-  rift_evaluate_pose (&score, orient, trans, cs->blobs, cs->num_points,
-      mi->id, leds->points, leds->num_points, cs->camera_matrix, cs->dist_coeffs, cs->dist_fisheye);
+  rift_evaluate_pose (&score, pose, cs->blobs, cs->num_points,
+      mi->id, leds->points, leds->num_points, cs->camera_matrix, cs->dist_coeffs, cs->dist_fisheye, NULL);
 
   if (score.good_pose_match) {
     if (mi) {
@@ -237,22 +237,21 @@ correspondence_search_project_pose (correspondence_search_t *cs, led_search_mode
 
       if (is_new_best) {
           mi->best_score = score;
-          mi->best_orient = *orient;
-          mi->best_trans = *trans;
+          mi->best_pose = *pose;
           mi->good_pose_match = (mi->best_score.matched_blobs > 4) && (error_per_led < 3.0);
 
           DEBUG("model %d new best pose candidate orient %f %f %f %f pos %f %f %f has %u visible LEDs, error %f (%f / LED)\n",
-                 mi->id, orient->x, orient->y, orient->z, orient->w,
-                       trans->x, trans->y, trans->z, score.visible_leds, score.reprojection_error, error_per_led);
+                 mi->id, pose->orient.x, pose->orient.y, pose->orient.z, pose->orient.w,
+                       pose->pos.x, pose->pos.y, pose->pos.z, score.visible_leds, score.reprojection_error, error_per_led);
           DEBUG("model %d matched %u blobs of %u\n", mi->id, score.matched_blobs, score.visible_leds);
 #if DUMP_FULL_DEBUG
-            dump_pose (cs, model, orient, trans, mi);
+            dump_pose (cs, model, pose, mi);
 #endif
           return true;
       } else {
         DEBUG("pose candidate orient %f %f %f %f pos %f %f %f has %u visible LEDs, error %f (%f / LED)\n",
-                orient->x, orient->y, orient->z, orient->w,
-                trans->x, trans->y, trans->z, score.visible_leds, score.reprojection_error,
+                pose->orient.x, pose->orient.y, pose->orient.z, pose->orient.w,
+                pose->pos.x, pose->pos.y, pose->pos.z, score.visible_leds, score.reprojection_error,
                 error_per_led);
         DEBUG("matched %u blobs of %u\n", score.matched_blobs, score.visible_leds);
       }
@@ -344,38 +343,37 @@ check_led_against_model_subset (correspondence_search_t *cs, cs_model_info_t *mi
 
   if (valid) {
     for (i = 0; i < valid; i++) {
-      quatf orient;
-      vec3f trans;
+			posef pose;
       vec3f checkpos, checkdir;
       float l;
 
       /* Construct quat and trans for this pose */
-      oquatf_from_rotation_matrix (&orient, Rs[i]);
+      oquatf_from_rotation_matrix (&pose.orient, Rs[i]);
 
-      trans.x = Ts[i][0];
-      trans.y = Ts[i][1];
-      trans.z = Ts[i][2];
+      pose.pos.x = Ts[i][0];
+      pose.pos.y = Ts[i][1];
+      pose.pos.z = Ts[i][2];
 
-      if (trans.z < 0.05 || trans.z > 15) {
+      if (pose.pos.z < 0.05 || pose.pos.z > 15) {
           /* The object is unlikely to be < 5cm (50000µm) or > 15m from the camera */
           continue;
       }
 
       /* The quaternion produced should already be normalised, but sometimes it's not! */
 #if 1
-      oquatf_normalize_me (&orient);
+      oquatf_normalize_me (&pose.orient);
 #else
-      l = oquatf_get_length (&orient);
+      l = oquatf_get_length (&pose.orient);
       assert (l > 0.9999 && l < 1.0001);
 #endif
 
       /* This pose must yield a projection of the anchor
        * point, or something is really wrong */
-      oquatf_get_rotated (&orient, &model_leds[0]->pos, &checkpos);
-      ovec3f_add (&checkpos, &trans, &checkpos);
+      oquatf_get_rotated (&pose.orient, &model_leds[0]->pos, &checkpos);
+      ovec3f_add (&checkpos, &pose.pos, &checkpos);
 
       /* And should be camera facing in this pose */
-      oquatf_get_rotated (&orient, &model_leds[0]->dir, &checkdir);
+      oquatf_get_rotated (&pose.orient, &model_leds[0]->dir, &checkdir);
       ovec3f_normalize_me(&checkpos);
 
       double facing_dot = ovec3f_get_dot (&checkpos, &checkdir);
@@ -391,8 +389,8 @@ check_led_against_model_subset (correspondence_search_t *cs, cs_model_info_t *mi
       if (l > 0.0025) {
 	      printf ("Error pose candidate orient %f %f %f %f pos %f %f %f "
             "Anchor LED %f %f %f projected to %f %f %f (err %f)\n",
-            orient.x, orient.y, orient.z, orient.w,
-            trans.x, trans.y, trans.z,
+            pose.orient.x, pose.orient.y, pose.orient.z, pose.orient.w,
+            pose.pos.x, pose.pos.y, pose.pos.z,
             blob0.x, blob0.y, blob0.z,
             checkpos.x, checkpos.y, checkpos.z, l);
         continue; /* FIXME: Figure out why this happened */
@@ -400,8 +398,8 @@ check_led_against_model_subset (correspondence_search_t *cs, cs_model_info_t *mi
       assert (l < 0.0025);
 
       /* check against the 4th point to check the proposed P3P solution */
-      oquatf_get_rotated (&orient, xcheck, &checkpos);
-      ovec3f_add (&checkpos, &trans, &checkpos);
+      oquatf_get_rotated (&pose.orient, xcheck, &checkpos);
+      ovec3f_add (&checkpos, &pose.pos, &checkpos);
       ovec3f_multiply_scalar (&checkpos, 1.0/checkpos.z, &checkpos);
 
       /* Subtract projected point from reference point to check error */
@@ -415,12 +413,12 @@ check_led_against_model_subset (correspondence_search_t *cs, cs_model_info_t *mi
         ovec3f_multiply_scalar (&checkpos, cs->camera_matrix->m[0], &checkpos);
 
   	    printf ("model %u pose candidate orient %f %f %f %f pos %f %f %f\n",
-            mi->id, orient.x, orient.y, orient.z, orient.w,
-            trans.x, trans.y, trans.z);
+            mi->id, pose.orient.x, pose.orient.y, pose.orient.z, pose.orient.w,
+            pose.pos.x, pose.pos.y, pose.pos.z);
         printf ("4th point @ %f %f offset %f pixels\n",
             checkpos.x, checkpos.y, distance * cs->camera_matrix->m[0]);
 #endif
-        if (correspondence_search_project_pose (cs, model, &orient, &trans, mi, false)) {
+        if (correspondence_search_project_pose (cs, model, &pose, mi, false)) {
 #if 0
           printf ("  P4P points %f,%f,%f -> %f %f\n"
                   "         %f,%f,%f -> %f %f\n"
@@ -601,17 +599,17 @@ search_pose_for_model (correspondence_search_t *cs, cs_model_info_t *mi)
      * blobs to the correspondence_search, and then set this model to be skipped */
     if (estimate_initial_pose(matched_blobs, already_known_blobs,
         mi->id, model->leds->points, model->leds->num_points, cs->camera_matrix, cs->dist_coeffs, cs->dist_fisheye,
-        &mi->best_orient, &mi->best_trans, &num_matched_leds, &inliers, true)) {
-       if (correspondence_search_project_pose (cs, model, &mi->best_orient, &mi->best_trans, mi, true))
+        &mi->best_pose, &num_matched_leds, &inliers, true)) {
+       if (correspondence_search_project_pose (cs, model, &mi->best_pose, mi, true))
        {
           DEBUG("%u existing correspondences for model %u matched %u with pose orient %f %f %f %f pos %f %f %f\n",
                 already_known_blobs, mi->id, inliers,
-                mi->best_orient.x, mi->best_orient.y, mi->best_orient.z, mi->best_orient.w,
-                mi->best_trans.x, mi->best_trans.y, mi->best_trans.z);
+                mi->best_pose.orient.x, mi->best_pose.orient.y, mi->best_pose.orient.z, mi->best_pose.orient.w,
+                mi->best_pose.pos.x, mi->best_pose.pos.y, mi->best_pose.pos.z);
 
           DEBUG("# pose orient %f %f %f %f pos %f %f %f\n",
-                mi->best_orient.x, mi->best_orient.y, mi->best_orient.z, mi->best_orient.w,
-                mi->best_trans.x, mi->best_trans.y, mi->best_trans.z);
+                mi->best_pose.orient.x, mi->best_pose.orient.y, mi->best_pose.orient.z, mi->best_pose.orient.w,
+                mi->best_pose.pos.x, mi->best_pose.pos.y, mi->best_pose.pos.z);
           return true;
         }
         printf ("Pose from %u correspondences for model %u did not yield good pose\n", already_known_blobs, mi->id);
@@ -699,10 +697,10 @@ correspondence_search_find_pose (correspondence_search_t *cs)
         DEBUG("# Best match for model %d was %d points out of %d with error %f pixels^2\n", m, mi->best_score.matched_blobs,
                 mi->best_score.visible_leds, mi->best_score.reprojection_error);
         DEBUG("# pose orient %f %f %f %f pos %f %f %f\n",
-                      mi->best_orient.x, mi->best_orient.y, mi->best_orient.z, mi->best_orient.w,
-                      mi->best_trans.x, mi->best_trans.y, mi->best_trans.z);
+                      mi->best_pose.orient.x, mi->best_pose.orient.y, mi->best_pose.orient.z, mi->best_pose.orient.w,
+                      mi->best_pose.pos.x, mi->best_pose.pos.y, mi->best_pose.pos.z);
 #if DUMP_SCENE
-        dump_pose (cs, mi->model, &mi->best_orient, &mi->best_trans, mi);
+        dump_pose (cs, mi->model, &mi->best_pose, mi);
 #endif
 #endif
     }
@@ -711,7 +709,7 @@ correspondence_search_find_pose (correspondence_search_t *cs)
 }
 
 bool
-correspondence_search_have_pose (correspondence_search_t *cs, int model_id, quatf *orient, vec3f *trans,
+correspondence_search_have_pose (correspondence_search_t *cs, int model_id, posef *pose,
     rift_pose_metrics *score)
 {
   int i;
@@ -722,8 +720,7 @@ correspondence_search_have_pose (correspondence_search_t *cs, int model_id, quat
         continue;
 
     if (mi->good_pose_match) {
-      *orient = mi->best_orient;
-      *trans = mi->best_trans;
+			*pose = mi->best_pose;
       *score = mi->best_score;
       return true;
     }
@@ -733,7 +730,7 @@ correspondence_search_have_pose (correspondence_search_t *cs, int model_id, quat
 
 bool
 correspondence_search_find_one_pose (correspondence_search_t *cs, int model_id, bool match_all_blobs,
-    quatf *orient, vec3f *trans, rift_pose_metrics *score)
+	posef *pose, rift_pose_metrics *score)
 {
   int i;
 
@@ -746,15 +743,14 @@ correspondence_search_find_one_pose (correspondence_search_t *cs, int model_id, 
     mi->match_all_blobs = match_all_blobs;
 
     if (search_pose_for_model (cs, mi) && mi->good_pose_match) {
-      *orient = mi->best_orient;
-      *trans = mi->best_trans;
+			*pose = mi->best_pose;
       *score = mi->best_score;
 
       DEBUG("# Best match for model %d was %d points out of %d with error %f pixels^2\n", model_id, mi->best_score.matched_blobs,
                 mi->best_score.visible_leds, mi->best_score.reprojection_error);
       DEBUG("# pose orient %f %f %f %f pos %f %f %f\n",
-                mi->best_orient.x, mi->best_orient.y, mi->best_orient.z, mi->best_orient.w,
-                mi->best_trans.x, mi->best_trans.y, mi->best_trans.z);
+                mi->best_pose.orient.x, mi->best_pose.orient.y, mi->best_pose.orient.z, mi->best_pose.orient.w,
+                mi->best_pose.pos.x, mi->best_pose.pos.y, mi->best_pose.pos.z);
       return true;
     }
     return false;

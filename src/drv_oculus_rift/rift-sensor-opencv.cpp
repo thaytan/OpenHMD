@@ -37,7 +37,7 @@ quatf_to_3x3 (cv::Mat &mat, quatf *me) {
 extern "C" bool estimate_initial_pose(struct blob *blobs, int num_blobs,
     int device_id, rift_led *leds, int num_led_pos,
     dmat3 *camera_matrix, double dist_coeffs[5], bool dist_fisheye,
-    quatf *rot, vec3f *trans, int *num_leds_out,
+    posef *pose, int *num_leds_out,
     int *num_inliers, bool use_extrinsic_guess)
 {
 	int i, j;
@@ -56,9 +56,9 @@ extern "C" bool estimate_initial_pose(struct blob *blobs, int num_blobs,
 	cv::Mat R = cv::Mat::zeros(3, 3, CV_64FC1);
 
 	for (i = 0; i < 3; i++)
-		tvec.at<double>(i) = trans->arr[i];
+		tvec.at<double>(i) = pose->pos.arr[i];
 
-	quatf_to_3x3 (R, rot);
+	quatf_to_3x3 (R, &pose->orient);
 	cv::Rodrigues(R, rvec);
 
 	//cout << "R = " << R << ", rvec = " << rvec << endl;
@@ -144,20 +144,20 @@ extern "C" bool estimate_initial_pose(struct blob *blobs, int num_blobs,
 	v.x = rvec.at<double>(0) * inorm;
 	v.y = rvec.at<double>(1) * inorm;
 	v.z = rvec.at<double>(2) * inorm;
-	oquatf_init_axis (rot, &v, angle);
+	oquatf_init_axis (&pose->orient, &v, angle);
 
 	for (i = 0; i < 3; i++)
-		trans->arr[i] = tvec.at<double>(i);
+		pose->pos.arr[i] = tvec.at<double>(i);
 
 	LOGV ("Got PnP pose quat %f %f %f %f  pos %f %f %f",
-	     rot->x, rot->y, rot->z, rot->w,
-	     trans->x, trans->y, trans->z);
+	     pose->orient.x, pose->orient.y, pose->orient.z, pose->orient.w,
+	     pose->pos.x, pose->pos.y, pose->pos.z);
 	return true;
 }
 
 void rift_project_points(rift_led *leds, int num_led_pos,
 		dmat3 *camera_matrix, double dist_coeffs[5], bool dist_fisheye,
-		quatf *rot, vec3f *trans, vec3f *out_points)
+		posef *pose, vec3f *out_points)
 {
 	cv::Mat cameraK = cv::Mat(3, 3, CV_64FC1, camera_matrix->m);
 	cv::Mat distCoeffs;
@@ -168,9 +168,9 @@ void rift_project_points(rift_led *leds, int num_led_pos,
   int i;
 
 	for (i = 0; i < 3; i++)
-		tvec.at<double>(i) = trans->arr[i];
+		tvec.at<double>(i) = pose->pos.arr[i];
 
-	quatf_to_3x3 (R, rot);
+	quatf_to_3x3 (R, &pose->orient);
 	cv::Rodrigues(R, rvec);
 
 	std::vector<cv::Point3f> led_points3d(num_led_pos);
@@ -243,7 +243,7 @@ void undistort_points (struct blob *blobs, int num_blobs,
  */
 extern "C" void refine_pose(vec3f *image_points,
 		    rift_led **leds, int num_matches,
-		    quatf *rot, vec3f *trans, double *reprojection_error)
+		    posef *pose, double *reprojection_error)
 {
   int i;
 	cv::Mat dummyK = cv::Mat::eye(3, 3, CV_64FC1);
@@ -253,9 +253,9 @@ extern "C" void refine_pose(vec3f *image_points,
 	cv::Mat R = cv::Mat::zeros(3, 3, CV_64FC1);
 
 	for (i = 0; i < 3; i++)
-		tvec.at<double>(i) = trans->arr[i];
+		tvec.at<double>(i) = pose->pos.arr[i];
 
-	quatf_to_3x3 (R, rot);
+	quatf_to_3x3 (R, &pose->orient);
 	cv::Rodrigues(R, rvec);
 
 	std::vector<cv::Point3f> list_points3d(num_matches);
@@ -284,10 +284,10 @@ extern "C" void refine_pose(vec3f *image_points,
 	v.x = rvec.at<double>(0) * inorm;
 	v.y = rvec.at<double>(1) * inorm;
 	v.z = rvec.at<double>(2) * inorm;
-	oquatf_init_axis (rot, &v, angle);
+	oquatf_init_axis (&pose->orient, &v, angle);
 
 	for (i = 0; i < 3; i++)
-		trans->arr[i] = tvec.at<double>(i);
+		pose->pos.arr[i] = tvec.at<double>(i);
 
   /* Calculate reprojection error */
   if (reprojection_error) {
@@ -297,8 +297,8 @@ extern "C" void refine_pose(vec3f *image_points,
       vec3f pos;
       double dx, dy;
 
-      oquatf_get_rotated (rot, &leds[i]->pos, &pos);
-      ovec3f_add (&pos, trans, &pos);
+      oquatf_get_rotated (&pose->orient, &leds[i]->pos, &pos);
+      ovec3f_add (&pos, &pose->pos, &pos);
       ovec3f_multiply_scalar (&pos, 1.0/pos.z, &pos);
 
       dx = pos.x - image_points[i].x;
