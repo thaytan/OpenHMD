@@ -114,8 +114,6 @@ void oquatf_mult(const quatf* me, const quatf* q, quatf* out_q)
 	out_q->y = me->w * q->y - me->x * q->z + me->y * q->w + me->z * q->x;
 	out_q->z = me->w * q->z + me->x * q->y - me->y * q->x + me->z * q->w;
 	out_q->w = me->w * q->w - me->x * q->x - me->y * q->y - me->z * q->z;
-	/* Renormalise to avoid rounding issues */
-	oquatf_normalize_me(out_q);
 }
 
 void oquatf_mult_me(quatf* me, const quatf* q)
@@ -274,10 +272,9 @@ void oposef_inverse(posef *me)
 }
 
 /* Apply a transformation pose to the pose 'me'. This
- * has the effect of using xform as a reference frame, and
+ * has the effect of usine xform as a reference frame, and
  * 'me' as a pose relative to that reference, and calculating
- * the overall pose in the global frame (the one
- * 'xform' is relative to).
+ * the overall pose in the global frame.
  */
 void oposef_apply(const posef *me, const posef *xform, posef *dest)
 {
