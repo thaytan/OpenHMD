@@ -37,32 +37,6 @@
 
 #define NUM_CAPTURE_BUFFERS 2
 
-typedef struct rift_sensor_capture_frame rift_sensor_capture_frame;
-
-struct rift_sensor_capture_frame {
-	rift_sensor_uvc_frame uvc;
-
-	/* Index of the frame in the frames array */
-	uint8_t id;
-
-	/* LED blink pattern info - in case we use
-	 * LED blinking again in the future? */
-	uint64_t led_pattern_sof_ts;
-	uint8_t led_pattern_phase;
-
-	/* Device poses at capture time */
-	posef capture_world_poses[RIFT_MAX_TRACKED_DEVICES];
-
-	/* Timestamp of complete frame arriving from USB */
-	uint64_t frame_delivered_ts;
-
-	/* Timestamp of fast/image analysis thread processing start */
-	uint64_t image_analysis_start_ts;
-
-	/* Timestamp of fast/image analysis thread processing finish */
-	uint64_t image_analysis_finish_ts;
-};
-
 struct rift_sensor_ctx_s
 {
 	ohmd_context* ohmd_ctx;
@@ -152,11 +126,11 @@ static int tracker_process_blobs(rift_sensor_ctx *ctx, rift_sensor_capture_frame
 			d, world_obj_pose.orient.x, world_obj_pose.orient.y, world_obj_pose.orient.z, world_obj_pose.orient.w,
 			world_obj_pose.pos.x, world_obj_pose.pos.y, world_obj_pose.pos.z);
 
-		/* If we have a camera pose, get the object->camera pose by taking
+		/* If we have a camera pose, get the object's camera-relative pose by taking
 		 * our camera pose (world->camera) and applying to the inverse of
-		 * the fusion pose (world->object).
-		 * If not, the correspondence search will do a full search, so it doesn't
-		 * matter what we feed as the initial pose */
+		 * the fusion pose (world->object) - which goes object->world->camera.
+		 * If there's no camera pose, things won't match and the correspondence search
+		 * will do a full search, so it doesn't matter what we feed as the initial pose */
 		oposef_inverse (&world_obj_pose);
 		if (ctx->have_camera_pose) {
 			oposef_apply (&world_obj_pose, &ctx->camera_pose, &cam_pose);
@@ -174,14 +148,12 @@ static int tracker_process_blobs(rift_sensor_ctx *ctx, rift_sensor_capture_frame
 			dev->id, dev->leds->points, dev->leds->num_points,
 			&ctx->camera_matrix, ctx->dist_coeffs, ctx->dist_fisheye, NULL);
 
-#if 0
 		if (score.good_pose_match)
-			printf ("Sensor %d already had good pose match for device %d matched %u blobs of %u\n",
+			LOGD("Sensor %d already had good pose match for device %d matched %u blobs of %u",
 				ctx->id, d, score.matched_blobs, score.visible_leds);
 		else
-			printf ("Sensor %d needs correspondence search for device %d matched %u blobs of %u\n",
+			LOGD("Sensor %d needs correspondence search for device %d matched %u blobs of %u",
 				ctx->id, d, score.matched_blobs, score.visible_leds);
-#endif
 
 		if (score.good_pose_match || correspondence_search_find_one_pose (ctx->cs, d, match_all_blobs, &cam_pose, &score)) {
 			if (score.good_pose_match) {
@@ -358,7 +330,8 @@ static void new_frame_start_cb(struct rift_sensor_uvc_stream *stream, uint64_t s
 			rift_tracked_device *dev = devices + d;
 
 			if (dev->fusion == NULL) {
-				/* FIXME: Should skip this frame */
+				/* This device isn't available yet */
+				memset (&next_frame->capture_world_poses[d], 0, sizeof(posef));
 				continue;
 			}
 			oposef_init(&next_frame->capture_world_poses[d],
@@ -398,7 +371,14 @@ update_device_pose (rift_sensor_ctx *sensor_ctx, rift_tracked_device *dev,
 				dev->id, pose.orient.x, pose.orient.y, pose.orient.z, pose.orient.w,
 				pose.pos.x, pose.pos.y, pose.pos.z);
 
-			ofusion_tracker_update (dev->fusion, frame_ts, &pose.pos, &pose.orient);
+			ofusion_tracker_update (dev->fusion, (double)(frame_ts) / 1000000000.0, &pose.pos, &pose.orient);
+
+			oposef_init(&pose, &dev->fusion->world_position, &dev->fusion->orient);
+
+			LOGD("After update, fusion for device %d pose quat %f %f %f %f  pos %f %f %f\n",
+				dev->id, pose.orient.x, pose.orient.y, pose.orient.z, pose.orient.w,
+				pose.pos.x, pose.pos.y, pose.pos.z);
+
 		}
 		else if (dev->id == 0 && oquatf_get_length (&capture_pose->orient) > 0.9 && dev->fusion->last_gravity_vector_time > 0) {
 			/* No camera pose yet. If this is the HMD, we had an IMU pose at capture time,
@@ -477,7 +457,7 @@ static void frame_captured_cb(rift_sensor_uvc_stream *stream, rift_sensor_uvc_fr
 			chosen_phase = led_pattern_phase;
 		}
 
-		LOGD ("%f Sensor %d Frame (sof %f) phase mismatch old %d new %d (@ %f) chose %d\n",
+		LOGV ("%f Sensor %d Frame (sof %f) phase mismatch old %d new %d (@ %f) chose %d\n",
 			(double) (now) / 1000000.0, sensor->id,
 			(double) (frame->led_pattern_sof_ts) / 1000000.0,
 			led_pattern_phase, cur_led_pattern_phase,
@@ -486,7 +466,7 @@ static void frame_captured_cb(rift_sensor_uvc_stream *stream, rift_sensor_uvc_fr
 		frame->led_pattern_phase = chosen_phase;
 	}
 
-	LOGV ("Sensor %d captured frame %d phase %d", sensor->id, frame->id, frame->led_pattern_phase);
+	LOGD ("Sensor %d captured frame %d phase %d", sensor->id, frame->id, frame->led_pattern_phase);
 
 	ohmd_lock_mutex(sensor->sensor_lock);
 	/* Send this frame to the analysis thread */
@@ -543,9 +523,9 @@ static void analyse_frame_fast(rift_sensor_ctx *sensor, rift_sensor_capture_fram
 	if (ohmd_pw_video_stream_connected(sensor->debug_vid)) {
 		rift_tracked_device *devices = rift_tracker_get_devices(sensor->tracker);
 
-		rift_debug_draw_frame (sensor->debug_frame, sensor->bwobs, sensor->cs, (rift_sensor_uvc_frame *)frame,
+		rift_debug_draw_frame (sensor->debug_frame, sensor->bwobs, sensor->cs, frame,
 			devices, sensor->is_cv1, sensor->camera_matrix,
-			sensor->dist_fisheye, sensor->dist_coeffs);
+			sensor->dist_fisheye, sensor->dist_coeffs, &sensor->camera_pose);
 		ohmd_pw_video_stream_push (sensor->debug_vid, frame->uvc.start_ts, sensor->debug_frame);
 	}
 #if 0

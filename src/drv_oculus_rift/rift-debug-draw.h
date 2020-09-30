@@ -10,12 +10,13 @@
 
 #include "rift-sensor-blobwatch.h"
 #include "rift-tracker.h"
-#include "rift-sensor-uvc.h"
+#include "rift-sensor.h"
 #include "correspondence_search.h"
 
 void rift_debug_draw_frame (uint8_t *pixels, struct blobservation* bwobs,
-  correspondence_search_t *cs, struct rift_sensor_uvc_frame *frame,
+  correspondence_search_t *cs, struct rift_sensor_capture_frame *frame,
 	rift_tracked_device *devs, bool is_cv1,
-  dmat3 camera_matrix, bool dist_fisheye, double dist_coeffs[5]);
+  dmat3 camera_matrix, bool dist_fisheye, double dist_coeffs[5],
+	posef *camera_pose);
 
 #endif

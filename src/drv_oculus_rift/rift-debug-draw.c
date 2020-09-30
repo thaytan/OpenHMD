@@ -162,17 +162,18 @@ compare_blobs (const void *elem1, const void *elem2)
 }
 
 void rift_debug_draw_frame (uint8_t *pixels, struct blobservation* bwobs,
-  correspondence_search_t *cs, rift_sensor_uvc_frame *frame,
+  correspondence_search_t *cs, struct rift_sensor_capture_frame *frame,
 	rift_tracked_device *devs, bool is_cv1,
-  dmat3 camera_matrix, bool dist_fisheye, double dist_coeffs[5])
+  dmat3 camera_matrix, bool dist_fisheye, double dist_coeffs[5],
+  posef *camera_pose)
 {
-	uint8_t *src = frame->data;
+	uint8_t *src = frame->uvc.data;
 	
 	int x, y;
-	int width = frame->width;
-	int height = frame->height;
-	int in_stride = frame->stride;
-	int out_stride = frame->width*3*2;
+	int width = frame->uvc.width;
+	int height = frame->uvc.height;
+	int in_stride = frame->uvc.stride;
+	int out_stride = frame->uvc.width*3*2;
 
 	uint8_t *dest = pixels;
   for (y = 0; y < height; y++) {
@@ -219,15 +220,47 @@ void rift_debug_draw_frame (uint8_t *pixels, struct blobservation* bwobs,
 			}
     }
 
-    int d;
+		int d;
 		vec3f led_out_points[MAX_OBJECT_LEDS];
 
-    for (d = 0; d < 3; d++) {
-      int i;
-      rift_pose_metrics score;
-      posef pose;
+		for (d = 0; d < 3; d++) {
+			int i;
+			rift_pose_metrics score;
+			posef pose;
 			rift_tracked_device *dev = devs + d;
 
+			if (dev->leds == NULL)
+				continue;
+
+			/* Draw the capture pose blobs in yellow */
+			pose = frame->capture_world_poses[d];
+			oposef_inverse (&pose);
+			oposef_apply (&pose, camera_pose, &pose);
+
+			rift_project_points (dev->leds->points,
+				dev->leds->num_points, &camera_matrix,
+				dist_coeffs, is_cv1, &pose, led_out_points);
+
+			for (i = 0; i < dev->leds->num_points; i++) {
+				vec3f *p = led_out_points + i;
+				vec3f facing;
+				int x = round (p->x);
+				int y = round (p->y);
+
+				oquatf_get_rotated (&pose.orient,
+					&dev->leds->points[i].dir, &facing);
+
+				if (facing.z < -0.25) {
+					/* Camera facing */
+					draw_rgb_marker (pixels + 3*width, width, out_stride, height, x,
+						y, 6, 6, 0x008080);
+				} else {
+					draw_rgb_marker (pixels + 3*width, width, out_stride, height, x,
+						y, 4, 4, 0x404040);
+				}
+			}
+
+      /* Get the tracker's idea of the pose */
       if (!correspondence_search_have_pose (cs, d,
               &pose, &score))
         continue;
