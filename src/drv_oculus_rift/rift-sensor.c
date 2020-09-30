@@ -367,7 +367,7 @@ update_device_pose (rift_sensor_ctx *sensor_ctx, rift_tracked_device *dev,
 			 * to the world->camera pose - ie, apply the inverse of object->camera. */
 			oposef_apply_inverse (&sensor_ctx->camera_pose, &pose, &pose);
 
-			LOGD("Updating fusion for device %d pose quat %f %f %f %f  pos %f %f %f\n",
+			LOGD("Updating fusion for device %d pose quat %f %f %f %f  pos %f %f %f",
 				dev->id, pose.orient.x, pose.orient.y, pose.orient.z, pose.orient.w,
 				pose.pos.x, pose.pos.y, pose.pos.z);
 
@@ -375,7 +375,7 @@ update_device_pose (rift_sensor_ctx *sensor_ctx, rift_tracked_device *dev,
 
 			oposef_init(&pose, &dev->fusion->world_position, &dev->fusion->orient);
 
-			LOGD("After update, fusion for device %d pose quat %f %f %f %f  pos %f %f %f\n",
+			LOGD("After update, fusion for device %d pose quat %f %f %f %f  pos %f %f %f",
 				dev->id, pose.orient.x, pose.orient.y, pose.orient.z, pose.orient.w,
 				pose.pos.x, pose.pos.y, pose.pos.z);
 
@@ -426,7 +426,7 @@ stream->frame_size
 
 	}
 	else {
-		LOGV("Failed pose match - only %u LEDs matched %u visible ones\n",
+		LOGV("Failed pose match - only %u LEDs matched %u visible ones",
 			score->matched_blobs, score->visible_leds);
 	}
 }
@@ -457,7 +457,7 @@ static void frame_captured_cb(rift_sensor_uvc_stream *stream, rift_sensor_uvc_fr
 			chosen_phase = led_pattern_phase;
 		}
 
-		LOGV ("%f Sensor %d Frame (sof %f) phase mismatch old %d new %d (@ %f) chose %d\n",
+		LOGV ("%f Sensor %d Frame (sof %f) phase mismatch old %d new %d (@ %f) chose %d",
 			(double) (now) / 1000000.0, sensor->id,
 			(double) (frame->led_pattern_sof_ts) / 1000000.0,
 			led_pattern_phase, cur_led_pattern_phase,
