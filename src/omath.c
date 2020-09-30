@@ -7,7 +7,7 @@
 
 /* Math Code Implementation */
 
-
+#include <assert.h>
 #include <string.h>
 #include "openhmdi.h"
 
@@ -110,6 +110,9 @@ void oquatf_get_rotated(const quatf* me, const vec3f* vec, vec3f* out_vec)
 
 void oquatf_mult(const quatf* me, const quatf* q, quatf* out_q)
 {
+	assert (out_q != me);
+	assert (out_q != q);
+
 	out_q->x = me->w * q->x + me->x * q->w + me->y * q->z - me->z * q->y;
 	out_q->y = me->w * q->y - me->x * q->z + me->y * q->w + me->z * q->x;
 	out_q->z = me->w * q->z + me->x * q->y - me->y * q->x + me->z * q->w;
@@ -278,12 +281,21 @@ void oposef_inverse(posef *me)
  */
 void oposef_apply(const posef *me, const posef *xform, posef *dest)
 {
-	/* Use a temporary, in case dest == me */
 	vec3f tmp;
-	quatf tmp_orient = xform->orient;
+	posef tmp_me, tmp_xform;
+
+	/* Use a temporary, in the case dest == me or xform */
+	if (dest == me) {
+			tmp_me = *me;
+			me = &tmp_me;
+	}
+	if (dest == xform) {
+			tmp_xform = *xform;
+			xform = &tmp_xform;
+	}
 
 	/* rotate into the global frame, then offset */
-	oquatf_get_rotated(&tmp_orient, &me->pos, &tmp);
+	oquatf_get_rotated(&xform->orient, &me->pos, &tmp);
 	ovec3f_add(&tmp, &xform->pos, &dest->pos);
 
 	oquatf_mult(&me->orient, &xform->orient, &dest->orient);
@@ -297,19 +309,20 @@ void oposef_apply(const posef *me, const posef *xform, posef *dest)
 void oposef_apply_inverse(const posef *me, const posef *xform, posef *dest)
 {
 	vec3f tmp;
-	quatf tmp_orient = xform->orient;
+	quatf tmp_orient = me->orient;
+	quatf xform_orient = xform->orient;
 
-	oquatf_inverse(&tmp_orient);
+	oquatf_inverse(&xform_orient);
 
 	/* Get the target position relative to the
 	 * new reference pose and rotate it into this
 	 * pose */
 	ovec3f_subtract(&me->pos, &xform->pos, &tmp);
-	oquatf_get_rotated(&tmp_orient, &tmp, &dest->pos);
+	oquatf_get_rotated(&xform_orient, &tmp, &dest->pos);
 
 	/* Get the rotation of the new pose relative to the
 	 * reference frame by rotating it backward */
-	oquatf_mult(&me->orient, &tmp_orient, &dest->orient);
+	oquatf_mult(&tmp_orient, &xform_orient, &dest->orient);
 }
 
 /*
