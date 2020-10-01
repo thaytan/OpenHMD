@@ -228,12 +228,27 @@ void ofusion_tracker_update(fusion* me, float time, const vec3f* pos, const quat
 	vec3f up = {{0.0, 1.0, 0.0 }};
 	vec3f cur_yaw, new_yaw;
 
-	oquatf_get_rotated (&me->orient, &forward, &cur_yaw);
-	oquatf_get_rotated (orient, &forward, &new_yaw);
+	oquatf_get_rotated(&me->orient, &forward, &cur_yaw);
+	oquatf_get_rotated(orient, &forward, &new_yaw);
 
-	ovec3f_cross (&cur_yaw, &new_yaw, &up);
+	/* We're only interested in the XZ plane rotation */
+	cur_yaw.y = 0.0; new_yaw.y = 0.0;
 
 	float yaw_angle_error = ovec3f_get_angle(&cur_yaw, &new_yaw);
+
+	/* Check if the angle needs reversing. This is a simplified cross product
+	 * to check the direction, based on knowing the normal is the Y axis */
+	if (cur_yaw.z*new_yaw.x - cur_yaw.x*new_yaw.z < 0.0)
+		yaw_angle_error = -yaw_angle_error;
+
+	LOGD("fusion prior orient %f %f %f %f forward %f %f %f yaw error %f deg",
+		me->orient.x, me->orient.y, me->orient.z, me->orient.w,
+		cur_yaw.x, cur_yaw.y, cur_yaw.z, RAD_TO_DEG(yaw_angle_error));
+	LOGD("fusion new orient %f %f %f %f forward %f %f %f",
+		orient->x, orient->y, orient->z, orient->w,
+		new_yaw.x, new_yaw.y, new_yaw.z);
+
+	/* Apply a small correction to yaw, to push it toward the forward direction */
 	float correction_angle = 0.05 * yaw_angle_error;
 
 	quatf corr_quat, old_orient;
