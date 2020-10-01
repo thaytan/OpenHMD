@@ -73,7 +73,12 @@ float ovec3f_get_angle(const vec3f* me, const vec3f* vec)
 	if(lengths == 0)
 		return 0;
 
-	return acosf(dot / lengths);
+	dot /= lengths;
+
+	if (dot >= 1.0 || dot <= -1.0)
+		return 0.0;
+
+	return acosf(dot);
 }
 
 void ovec3f_multiply_scalar (const vec3f* a, const float s, vec3f* out)
