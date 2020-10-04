@@ -45,43 +45,39 @@ struct rift_tracker_ctx_s
 	uint8_t n_sensors;
 
 	rift_tracked_device devices[RIFT_MAX_TRACKED_DEVICES];
+	uint8_t n_devices;
 };
 
 void
-rift_tracker_add_device (rift_tracker_ctx *ctx, int device_id, fusion *f, rift_leds *leds)
+rift_tracker_add_device (rift_tracker_ctx *ctx, int device_id, fusion *f, posef *imu_pose, rift_leds *leds)
 {
 	int i;
-	quatf imu_orient = {{ 0.0, 0.0, 0.0, 1.0 }};
-	/* FIXME: Pass in the real IMU offset */
-	vec3f imu_offset = {{ 0.0, 0.0, 0.0 }};
+	rift_tracked_device *next_dev;
 
-	assert (device_id < RIFT_MAX_TRACKED_DEVICES);
+	assert (ctx->n_devices < RIFT_MAX_TRACKED_DEVICES);
 
 	ohmd_lock_mutex (ctx->tracker_lock);
-	ctx->devices[device_id].id = device_id;
-	ctx->devices[device_id].fusion = f;
+	next_dev = ctx->devices + ctx->n_devices;
 
-	oposef_init(&ctx->devices[device_id].fusion_to_model, &imu_offset, &imu_orient);
+	next_dev->id = device_id;
+	next_dev->fusion = f;
 
-	ctx->devices[device_id].leds = leds;
-	ctx->devices[device_id].led_search = led_search_model_new (leds);
+	ctx->devices[device_id].fusion_to_model = *imu_pose;
 
+	next_dev->leds = leds;
+	next_dev->led_search = led_search_model_new (leds);
+	ctx->n_devices++;
+	ohmd_unlock_mutex (ctx->tracker_lock);
+
+	/* Tell the sensors about the new device */
 	for (i = 0; i < ctx->n_sensors; i++) {
 		rift_sensor_ctx *sensor_ctx = ctx->sensors[i];
-		if (!rift_sensor_set_model (sensor_ctx, device_id, ctx->devices[device_id].led_search)) {
+		if (!rift_sensor_add_device (sensor_ctx, next_dev)) {
 			LOGE("Failed to configure object tracking for device %d\n", device_id);
 		}
 	}
-	ohmd_unlock_mutex (ctx->tracker_lock);
 
 	printf("device %d online. Now tracking.\n", device_id);
-}
-
-/* FIXME: This interface isn't great and not thread-safe */
-rift_tracked_device *
-rift_tracker_get_devices(rift_tracker_ctx *tracker_ctx)
-{
-	return tracker_ctx->devices;
 }
 
 static unsigned int uvc_handle_events(void *arg)
@@ -203,7 +199,7 @@ rift_tracker_free (rift_tracker_ctx *tracker_ctx)
 		rift_sensor_free (sensor_ctx);
 	}
 
-  for (i = 0; i < RIFT_MAX_TRACKED_DEVICES; i++) {
+  for (i = 0; i < tracker_ctx->n_devices; i++) {
     if (tracker_ctx->devices[i].led_search)
       led_search_model_free (tracker_ctx->devices[i].led_search);
   }

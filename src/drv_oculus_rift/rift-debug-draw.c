@@ -163,7 +163,7 @@ compare_blobs (const void *elem1, const void *elem2)
 
 void rift_debug_draw_frame (uint8_t *pixels, struct blobservation* bwobs,
   correspondence_search_t *cs, struct rift_sensor_capture_frame *frame,
-	rift_tracked_device *devs, bool is_cv1,
+	uint8_t n_devs, rift_tracked_device **devs, bool is_cv1,
   dmat3 camera_matrix, bool dist_fisheye, double dist_coeffs[5],
   posef *camera_pose)
 {
@@ -223,14 +223,13 @@ void rift_debug_draw_frame (uint8_t *pixels, struct blobservation* bwobs,
 		int d;
 		vec3f led_out_points[MAX_OBJECT_LEDS];
 
-		for (d = 0; d < 3; d++) {
+		for (d = 0; d < n_devs; d++) {
 			int i;
 			rift_pose_metrics score;
 			posef pose;
-			rift_tracked_device *dev = devs + d;
+			rift_tracked_device *dev = devs[d];
 
-			if (dev->leds == NULL)
-				continue;
+			assert(dev->leds != NULL);
 
 			/* Draw the capture pose blobs in yellow */
 			oposef_apply_inverse(&frame->capture_world_poses[d], camera_pose, &pose);
@@ -259,14 +258,14 @@ void rift_debug_draw_frame (uint8_t *pixels, struct blobservation* bwobs,
 			}
 
       /* Get the tracker's idea of the pose */
-      if (!correspondence_search_have_pose (cs, d,
+      if (!correspondence_search_have_pose (cs, dev->id,
               &pose, &score))
         continue;
 
       /* Draw a marker that says we think we saw this device */
 			if (score.good_pose_match) {
 				draw_rgb_filled_rect (pixels, width, out_stride, height,
-						16 * d, 0, 16, 16, colours[d]);
+						16 * dev->id, 0, 16, 16, colours[dev->id]);
 			}
 
       /* Loop over the LED points a final time and draw markers
@@ -289,7 +288,7 @@ void rift_debug_draw_frame (uint8_t *pixels, struct blobservation* bwobs,
         if (facing.z < -0.25) {
           /* Camera facing */
           draw_rgb_marker (pixels, width, out_stride, height, x,
-              y, 6, 6, colours[d]);
+              y, 6, 6, colours[dev->id]);
         } else {
           draw_rgb_marker (pixels, width, out_stride, height, x,
               y, 4, 4, 0x202000);

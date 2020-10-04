@@ -31,6 +31,7 @@ struct rift_sensor_capture_frame {
 
 	/* Device poses at capture time */
 	posef capture_world_poses[RIFT_MAX_TRACKED_DEVICES];
+	uint8_t n_devices;
 
 	/* Timestamp of complete frame arriving from USB */
 	uint64_t frame_delivered_ts;
@@ -45,6 +46,6 @@ struct rift_sensor_capture_frame {
 rift_sensor_ctx *rift_sensor_new (ohmd_context* ohmd_ctx, int id, const char *serial_no,
 	libusb_context *usb_ctx, libusb_device_handle *usb_devh, rift_tracker_ctx *tracker, const uint8_t radio_id[5]);
 void rift_sensor_free (rift_sensor_ctx *sensor_ctx);
-bool rift_sensor_set_model (rift_sensor_ctx *sensor_ctx, int model_id, led_search_model_t *model);
+bool rift_sensor_add_device (rift_sensor_ctx *ctx, rift_tracked_device *device);
 
 #endif

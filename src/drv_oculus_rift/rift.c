@@ -299,7 +299,12 @@ static void handle_touch_controller_message(rift_hmd_t *hmd,
 		if (rift_touch_get_calibration (hmd->radio_handle, touch->device_num,
 				&touch->calibration) < 0)
 			return;
-		rift_tracker_add_device (hmd->tracker_ctx, touch->base.id, &touch->imu_fusion, &touch->calibration.leds);
+
+		quatf imu_orient = {{ 0.0, 0.0, 0.0, 1.0 }};
+		posef imu_pose;
+		oposef_init(&imu_pose, &touch->calibration.imu_position, &imu_orient);
+
+		rift_tracker_add_device (hmd->tracker_ctx, touch->base.id, &touch->imu_fusion, &imu_pose, &touch->calibration.leds);
 		touch->have_calibration = true;
 	}
 
@@ -1060,7 +1065,12 @@ static rift_hmd_t *open_hmd(ohmd_driver* driver, ohmd_device_desc* desc)
 	// initialize sensor fusion
 	ofusion_init(&priv->sensor_fusion);
 
-	rift_tracker_add_device (priv->tracker_ctx, 0, &priv->sensor_fusion, &priv->leds);
+	/* Configure the rift device in the tracker */
+	quatf imu_orient = {{ 0.0, 0.0, 0.0, 1.0 }};
+	posef imu_pose;
+	oposef_init(&imu_pose, &priv->imu.pos, &imu_orient);
+
+	rift_tracker_add_device (priv->tracker_ctx, 0, &priv->sensor_fusion, &imu_pose, &priv->leds);
 
 	return priv;
 

@@ -15,7 +15,7 @@
 
 void rift_debug_draw_frame (uint8_t *pixels, struct blobservation* bwobs,
   correspondence_search_t *cs, struct rift_sensor_capture_frame *frame,
-	rift_tracked_device *devs, bool is_cv1,
+	uint8_t n_devs, rift_tracked_device **devs, bool is_cv1,
   dmat3 camera_matrix, bool dist_fisheye, double dist_coeffs[5],
 	posef *camera_pose);
 
