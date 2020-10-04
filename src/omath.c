@@ -303,7 +303,7 @@ void oposef_apply(const posef *me, const posef *xform, posef *dest)
 	oquatf_get_rotated(&xform->orient, &me->pos, &tmp);
 	ovec3f_add(&tmp, &xform->pos, &dest->pos);
 
-	oquatf_mult(&me->orient, &xform->orient, &dest->orient);
+	oquatf_mult(&xform->orient, &me->orient, &dest->orient);
 }
 
 /* Apply the inverse of 'xform' to the pose 'me'.
@@ -319,15 +319,15 @@ void oposef_apply_inverse(const posef *me, const posef *xform, posef *dest)
 
 	oquatf_inverse(&xform_orient);
 
+	/* Get the rotation of the new pose relative to the
+	 * reference frame by rotating it backward */
+	oquatf_mult(&xform_orient, &tmp_orient, &dest->orient);
+
 	/* Get the target position relative to the
 	 * new reference pose and rotate it into this
 	 * pose */
 	ovec3f_subtract(&me->pos, &xform->pos, &tmp);
 	oquatf_get_rotated(&xform_orient, &tmp, &dest->pos);
-
-	/* Get the rotation of the new pose relative to the
-	 * reference frame by rotating it backward */
-	oquatf_mult(&tmp_orient, &xform_orient, &dest->orient);
 }
 
 /*
