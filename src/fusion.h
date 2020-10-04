@@ -25,7 +25,7 @@ typedef struct {
 	vec3f raw_mag;  // raw magnetometer values
 
 	int iterations;
-	float time;
+	double time;
 
 	int flags;
 
@@ -43,15 +43,15 @@ typedef struct {
 	vec3f world_position;
 	float accel_mean;
 
-	float last_output_time;
-	float last_tracker_obs_time;
+	double last_output_time;
+	double last_tracker_obs_time;
 	vec3f last_tracker_position;
-	float last_gravity_vector_time;
+	double last_gravity_vector_time;
 } fusion;
 
 void ofusion_init(fusion* me);
 void ofusion_update(fusion* me, float dt, const vec3f* ang_vel, const vec3f* accel, const vec3f* mag_field);
-void ofusion_update_at (fusion* me, float time, const vec3f* ang_vel, const vec3f* accel, const vec3f* mag_field);
-void ofusion_tracker_update(fusion* me, float time, const vec3f* pos, const quatf *orient);
+void ofusion_update_at (fusion* me, double time, const vec3f* ang_vel, const vec3f* accel, const vec3f* mag_field);
+void ofusion_tracker_update(fusion* me, double time, const vec3f* pos, const quatf *orient);
 
 #endif

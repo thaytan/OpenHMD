@@ -199,13 +199,13 @@ void ofusion_update(fusion* me, float dt, const vec3f* ang_vel, const vec3f* acc
 	ofusion_update_dt (me, dt, ang_vel, accel, mag);
 }
 
-void ofusion_update_at (fusion* me, float time, const vec3f* ang_vel, const vec3f* accel, const vec3f* mag)
+void ofusion_update_at (fusion* me, double time, const vec3f* ang_vel, const vec3f* accel, const vec3f* mag)
 {
 	float dt = time - me->time;
 	ofusion_update_dt (me, dt, ang_vel, accel, mag);
 }
 
-void ofusion_tracker_update(fusion* me, float time, const vec3f* pos, const quatf *orient)
+void ofusion_tracker_update(fusion* me, double time, const vec3f* pos, const quatf *orient)
 {
 	double now = ohmd_get_tick();
 
