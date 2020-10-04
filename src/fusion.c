@@ -207,7 +207,8 @@ void ofusion_update_at (fusion* me, double time, const vec3f* ang_vel, const vec
 
 void ofusion_tracker_update(fusion* me, double time, const vec3f* pos, const quatf *orient)
 {
-	double now = ohmd_get_tick();
+	double now = time;
+	double dt = now - me->last_tracker_obs_time;
 
 	// TODO: Use Kalman filtering
 	// For now, directly update the time, pose and position for now, and calculate
@@ -218,8 +219,18 @@ void ofusion_tracker_update(fusion* me, double time, const vec3f* pos, const qua
 	//
 	// For the pose, only use it to update the yaw, and take the gravity
 	// vector from the IMU
-	me->world_position = *pos;
-	ovec3f_set(&me->world_vel, 0, 0, 0);
+	if (me->last_tracker_obs_time != 0 && dt > 0 && dt < 0.3) {
+		vec3f dist;
+		ovec3f_subtract(pos, &me->last_tracker_position, &dist);
+		ovec3f_multiply_scalar(&dist, 1.0/dt, &me->world_vel);
+		LOGD("Calculated velocity time %f (%f,%f,%f)/%f = (%f,%f,%f) m/s",
+				time, dist.x, dist.y, dist.z, dt,
+				me->world_vel.x, me->world_vel.y, me->world_vel.z);
+	}	else {
+		ovec3f_set(&me->world_vel, 0, 0, 0);
+	}
+
+	me->last_tracker_position = me->world_position = *pos;
 
 	// Calculate a correction quat between what the fusion
 	// thinks is forward and what the tracker thinks is
