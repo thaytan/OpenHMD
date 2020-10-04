@@ -150,10 +150,38 @@ static int tracker_process_blobs(rift_sensor_ctx *ctx, rift_sensor_capture_frame
 
 		if (dev_state->score.good_pose_match)
 			LOGD("Sensor %d already had good pose match for device %d matched %u blobs of %u",
-				ctx->id, dev->id, score.matched_blobs, score.visible_leds);
-		else
-			LOGD("Sensor %d needs correspondence search for device %d matched %u blobs of %u",
-				ctx->id, dev->id, score.matched_blobs, score.visible_leds);
+				ctx->id, dev->id, dev_state->score.matched_blobs, dev_state->score.visible_leds);
+		else {
+			int num_blobs = 0;
+
+			LOGD("Sensor %d needs search for device %d matched %u blobs of %u",
+				ctx->id, dev->id, dev_state->score.matched_blobs, dev_state->score.visible_leds);
+
+			/* See if we still have enough labelled blobs to try to re-acquire the pose without a
+			 * full search */
+			for (int index = 0; index < ctx->bwobs->num_blobs; index++) {
+				struct blob *b = ctx->bwobs->blobs + index;
+				if (LED_OBJECT_ID (b->led_id) == dev->id) {
+						num_blobs++;
+				}
+			}
+
+			if (num_blobs > 4) {
+				estimate_initial_pose (ctx->bwobs->blobs, ctx->bwobs->num_blobs,
+					dev->id, dev->leds->points, dev->leds->num_points, camera_matrix,
+					dist_coeffs, ctx->is_cv1,
+					&obj_cam_pose, NULL, NULL, true);
+				rift_evaluate_pose (&dev_state->score, &obj_cam_pose,
+					ctx->bwobs->blobs, ctx->bwobs->num_blobs,
+					dev->id, dev->leds->points, dev->leds->num_points,
+					&ctx->camera_matrix, ctx->dist_coeffs, ctx->dist_fisheye, NULL);
+			}
+
+			if (dev_state->score.good_pose_match) {
+				LOGV("Sensor %d re-acquired match for device %d matched %u blobs of %u",
+					ctx->id, dev->id, dev_state->score.matched_blobs, dev_state->score.visible_leds);
+			}
+		}
 
 		if (dev_state->score.good_pose_match || correspondence_search_find_one_pose (ctx->cs, dev->id, match_all_blobs, &obj_cam_pose, &dev_state->score)) {
 			if (dev_state->score.good_pose_match) {
@@ -164,7 +192,7 @@ static int tracker_process_blobs(rift_sensor_ctx *ctx, rift_sensor_capture_frame
 				 * shows them pointing strongly to the camera */
 				for (int index = 0; index < ctx->bwobs->num_blobs; index++) {
 					struct blob *b = ctx->bwobs->blobs + index;
-					if (LED_OBJECT_ID (b->led_id) == d) {
+					if (LED_OBJECT_ID (b->led_id) == dev->id) {
 						b->prev_led_id = b->led_id;
 						b->led_id = LED_INVALID_ID;
 					}
