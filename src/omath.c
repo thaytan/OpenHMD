@@ -170,7 +170,7 @@ void oquatf_diff(const quatf* me, const quatf* q, quatf* out_q)
 
 void oquatf_slerp (float fT, const quatf* rkP, const quatf* rkQ, bool shortestPath, quatf* out_q)
 {
-	float fCos =  oquatf_get_dot(rkP, rkQ);
+	float fCos = oquatf_get_dot(rkP, rkQ);
 	quatf rkT;
 
 	// Do we need to invert rotation?
@@ -275,12 +275,12 @@ void oposef_inverse(posef *me)
 	 * pose position, rotated by the inverse pose orientation
 	 * to make it relative to this new coordinate system */
 	tmp = me->pos;
-	ovec3f_inverse(&tmp);
 	oquatf_get_rotated(&me->orient, &tmp, &me->pos);
+	ovec3f_inverse(&me->pos);
 }
 
 /* Apply a transformation pose to the pose 'me'. This
- * has the effect of usine xform as a reference frame, and
+ * has the effect of using xform as a reference frame, and
  * 'me' as a pose relative to that reference, and calculating
  * the overall pose in the global frame.
  */
@@ -335,7 +335,7 @@ void oposef_apply_inverse(const posef *me, const posef *xform, posef *dest)
  * equivalent to the pose */
 void oposef_get_mat4x4(const posef* me, float mat[4][4])
 {
-  oquatf_get_mat4x4(&me->orient, &me->pos, mat);
+	oquatf_get_mat4x4(&me->orient, &me->pos, mat);
 }
 
 // matrix
@@ -387,13 +387,13 @@ void omat4x4f_init_perspective(mat4x4f* me, float fovy_rad, float aspect, float 
 
 void omat4x4f_init_frustum(mat4x4f* me, float left, float right, float bottom, float top, float znear, float zfar)
 {
-    omat4x4f_init_ident(me);
+	omat4x4f_init_ident(me);
 
-    float delta_x = right - left;
-    float delta_y = top - bottom;
+	float delta_x = right - left;
+	float delta_y = top - bottom;
 	float delta_z = zfar - znear;
 	if ((delta_x == 0.0f) || (delta_y == 0.0f) || (delta_z == 0.0f)) {
-        /* can't divide by zero, so just give back identity */
+		/* can't divide by zero, so just give back identity */
 		return;
 	}
 
