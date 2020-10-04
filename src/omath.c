@@ -279,6 +279,19 @@ void oposef_inverse(posef *me)
 	ovec3f_inverse(&me->pos);
 }
 
+/* Mirror the pose on the XZ axes. This is needed
+ * specifically for conversion from fusion to device axes,
+ * as the fusion tracks the view plane orientation, not the
+ * device
+ */
+void oposef_mirror_XZ(posef *me)
+{
+	me->pos.x = -me->pos.x;
+	me->pos.z = -me->pos.z;
+	me->orient.x = -me->orient.x;
+	me->orient.z = -me->orient.z;
+}
+
 /* Apply a transformation pose to the pose 'me'. This
  * has the effect of using xform as a reference frame, and
  * 'me' as a pose relative to that reference, and calculating

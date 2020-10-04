@@ -73,6 +73,7 @@ typedef struct {
 
 void oposef_init(posef* p, const vec3f *pos, const quatf *orient);
 void oposef_inverse(posef *me);
+void oposef_mirror_XZ(posef *me);
 void oposef_apply(const posef *me, const posef *xform, posef *dest);
 void oposef_apply_inverse(const posef *me, const posef *xform, posef *dest);
 void oposef_get_mat4x4(const posef* me, float mat[4][4]);
