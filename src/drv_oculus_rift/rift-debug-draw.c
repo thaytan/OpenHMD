@@ -225,14 +225,14 @@ void rift_debug_draw_frame (uint8_t *pixels, struct blobservation* bwobs,
 
 		for (d = 0; d < n_devs; d++) {
 			int i;
-			rift_pose_metrics score;
 			posef pose;
 			rift_tracked_device *dev = devs[d];
+			rift_sensor_device_state *dev_state = frame->device_state + d;
 
 			assert(dev->leds != NULL);
 
 			/* Draw the capture pose blobs in yellow */
-			oposef_apply_inverse(&frame->capture_world_poses[d], camera_pose, &pose);
+			oposef_apply_inverse(&frame->device_state[d].capture_world_pose, camera_pose, &pose);
 
 			rift_project_points (dev->leds->points,
 				dev->leds->num_points, &camera_matrix,
@@ -257,24 +257,20 @@ void rift_debug_draw_frame (uint8_t *pixels, struct blobservation* bwobs,
 				}
 			}
 
-      /* Get the tracker's idea of the pose */
-      if (!correspondence_search_have_pose (cs, dev->id,
-              &pose, &score))
-        continue;
-
-      /* Draw a marker that says we think we saw this device */
-			if (score.good_pose_match) {
+			/* Draw a marker that says we think we saw this device */
+			if (dev_state->score.good_pose_match) {
 				draw_rgb_filled_rect (pixels, width, out_stride, height,
 						16 * dev->id, 0, 16, 16, colours[dev->id]);
 			}
 
-      /* Loop over the LED points a final time and draw markers
-       * into the video over the top */
+			/* Loop over the LED points a final time and draw markers
+			 * into the video over the top */
 
-      /* Project HMD LEDs into the image again doh */
-      rift_project_points (dev->leds->points,
-          dev->leds->num_points, &camera_matrix,
-          dist_coeffs, is_cv1, &pose, led_out_points);
+			/* Project HMD LEDs into the image again doh */
+			pose = dev_state->final_cam_pose;
+			rift_project_points (dev->leds->points,
+					dev->leds->num_points, &camera_matrix,
+					dist_coeffs, is_cv1, &pose, led_out_points);
 
       for (i = 0; i < dev->leds->num_points; i++) {
         vec3f *p = led_out_points + i;

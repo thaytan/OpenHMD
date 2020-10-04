@@ -100,7 +100,7 @@ struct rift_sensor_ctx_s
 };
 
 static void update_device_pose (rift_sensor_ctx *sensor_ctx, rift_tracked_device *dev,
-	rift_pose_metrics *score, uint64_t frame_ts, posef *capture_pose);
+	uint64_t frame_ts, rift_sensor_device_state *dev_state);
 
 static int tracker_process_blobs(rift_sensor_ctx *ctx, rift_sensor_capture_frame *frame)
 {
@@ -115,11 +115,11 @@ static int tracker_process_blobs(rift_sensor_ctx *ctx, rift_sensor_capture_frame
 	/* Only process the devices that were available when this frame was captured */
 	for (d = 0; d < frame->n_devices; d++) {
 		rift_tracked_device *dev = ctx->devices[d];
-		rift_pose_metrics score;
+		rift_sensor_device_state *dev_state = frame->device_state + d;
 		posef obj_world_pose, obj_cam_pose;
 		bool match_all_blobs = (dev->id == 0); /* Let the HMD match whatever it can */
 
-		obj_world_pose = frame->capture_world_poses[d];
+		obj_world_pose = dev_state->capture_world_pose;
 
 		LOGV ("Fusion provided pose for device %d, %f %f %f %f pos %f %f %f",
 			dev->id, obj_world_pose.orient.x, obj_world_pose.orient.y, obj_world_pose.orient.z, obj_world_pose.orient.w,
@@ -141,20 +141,22 @@ static int tracker_process_blobs(rift_sensor_ctx *ctx, rift_sensor_capture_frame
 			ctx->id, dev->id, obj_cam_pose.orient.x, obj_cam_pose.orient.y, obj_cam_pose.orient.z, obj_cam_pose.orient.w,
 			obj_cam_pose.pos.x, obj_cam_pose.pos.y, obj_cam_pose.pos.z);
 
-		rift_evaluate_pose (&score, &obj_cam_pose,
+		dev_state->final_cam_pose = obj_cam_pose;
+
+		rift_evaluate_pose (&dev_state->score, &obj_cam_pose,
 			ctx->bwobs->blobs, ctx->bwobs->num_blobs,
 			dev->id, dev->leds->points, dev->leds->num_points,
 			&ctx->camera_matrix, ctx->dist_coeffs, ctx->dist_fisheye, NULL);
 
-		if (score.good_pose_match)
+		if (dev_state->score.good_pose_match)
 			LOGD("Sensor %d already had good pose match for device %d matched %u blobs of %u",
 				ctx->id, dev->id, score.matched_blobs, score.visible_leds);
 		else
 			LOGD("Sensor %d needs correspondence search for device %d matched %u blobs of %u",
 				ctx->id, dev->id, score.matched_blobs, score.visible_leds);
 
-		if (score.good_pose_match || correspondence_search_find_one_pose (ctx->cs, dev->id, match_all_blobs, &obj_cam_pose, &score)) {
-			if (score.good_pose_match) {
+		if (dev_state->score.good_pose_match || correspondence_search_find_one_pose (ctx->cs, dev->id, match_all_blobs, &obj_cam_pose, &dev_state->score)) {
+			if (dev_state->score.good_pose_match) {
 				ret = 1;
 
 				/* Clear existing blob IDs for this device, then
@@ -179,13 +181,13 @@ static int tracker_process_blobs(rift_sensor_ctx *ctx, rift_sensor_capture_frame
 					&obj_cam_pose, NULL, NULL, true);
 
 				kalman_pose_update (ctx->pose_filter, frame->uvc.start_ts, &obj_cam_pose.pos, &obj_cam_pose.orient);
-				kalman_pose_get_estimated (ctx->pose_filter, &dev->pose.pos, &dev->pose.orient);
+				kalman_pose_get_estimated (ctx->pose_filter, &dev_state->final_cam_pose.pos, &dev_state->final_cam_pose.orient);
 
 				LOGD ("sensor %d kalman filter for device %d yielded quat %f %f %f %f pos %f %f %f",
-					ctx->id, dev->id, dev->pose.orient.x, dev->pose.orient.y, dev->pose.orient.z, dev->pose.orient.w,
-					dev->pose.pos.x, dev->pose.pos.y, dev->pose.pos.z);
+					ctx->id, dev->id, dev_state->final_cam_pose.orient.x, dev_state->final_cam_pose.orient.y, dev_state->final_cam_pose.orient.z, dev_state->final_cam_pose.orient.w,
+					dev_state->final_cam_pose.pos.x, dev_state->final_cam_pose.pos.y, dev_state->final_cam_pose.pos.z);
 
-				update_device_pose (ctx, dev, &score, frame->uvc.start_ts, &frame->capture_world_poses[d]);
+				update_device_pose (ctx, dev, frame->uvc.start_ts, &frame->device_state[d]);
 			}
 		}
 	}
@@ -339,19 +341,21 @@ static void new_frame_start_cb(struct rift_sensor_uvc_stream *stream, uint64_t s
 
 		for (d = 0; d < sensor->n_devices; d++) {
 			rift_tracked_device *dev = sensor->devices[d];
+			rift_sensor_device_state *dev_state = next_frame->device_state + d;
 
 			/* FIXME: Thread safety around the fusion */
 			posef tmp;
 			oposef_init(&tmp, &dev->fusion->world_position, &dev->fusion->orient);
 
 			if (dev->id == 0) {
-				/* Mirror the pose in XZ to go from view-plane to device axes */
+				/* Mirror the pose in XZ to go from view-plane to device axes for the HMD */
 				oposef_mirror_XZ(&tmp);
 			}
 
 			/* Apply any needed global pose change */
-			oposef_apply(&tmp, &dev->fusion_to_model, &tmp);
-			next_frame->capture_world_poses[d] = tmp;
+			oposef_apply(&tmp, &dev->fusion_to_model, &dev_state->capture_world_pose);
+			/* Mark the score as un-evaluated to start */
+			dev_state->score.good_pose_match = false;
 		}
 		next_frame->n_devices = sensor->n_devices;
 
@@ -362,9 +366,11 @@ static void new_frame_start_cb(struct rift_sensor_uvc_stream *stream, uint64_t s
 
 static void
 update_device_pose (rift_sensor_ctx *sensor_ctx, rift_tracked_device *dev,
-		rift_pose_metrics *score, uint64_t frame_ts, posef *capture_pose)
+		uint64_t frame_ts, rift_sensor_device_state *dev_state)
 {
-	posef pose = dev->pose;
+	posef pose = dev_state->final_cam_pose;
+	posef *capture_pose = &dev_state->capture_world_pose;
+	rift_pose_metrics *score = &dev_state->score;
 
 	rift_evaluate_pose (score, &pose,
 		sensor_ctx->bwobs->blobs, sensor_ctx->bwobs->num_blobs,

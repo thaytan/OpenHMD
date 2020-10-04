@@ -16,7 +16,14 @@
 #include "rift-sensor-uvc.h"
 
 typedef struct rift_sensor_ctx_s rift_sensor_ctx;
+typedef struct rift_sensor_device_state rift_sensor_device_state;
 typedef struct rift_sensor_capture_frame rift_sensor_capture_frame;
+
+struct rift_sensor_device_state {
+	posef capture_world_pose;
+	posef final_cam_pose;
+	rift_pose_metrics score;
+};
 
 struct rift_sensor_capture_frame {
 	rift_sensor_uvc_frame uvc;
@@ -30,7 +37,7 @@ struct rift_sensor_capture_frame {
 	uint8_t led_pattern_phase;
 
 	/* Device poses at capture time */
-	posef capture_world_poses[RIFT_MAX_TRACKED_DEVICES];
+	rift_sensor_device_state device_state[RIFT_MAX_TRACKED_DEVICES];
 	uint8_t n_devices;
 
 	/* Timestamp of complete frame arriving from USB */
