@@ -12,7 +12,7 @@
 #include "openhmdi.h"
 
 #define GRAVITY_CONSTANT (9.82f)
-#define GRAVITY_TOLERANCE (0.1f) // Hack for rift for now
+#define GRAVITY_TOLERANCE (0.4f) // Hack for rift for now
 
 void ofusion_init(fusion* me)
 {
