@@ -45,6 +45,7 @@ typedef struct {
 
 	float last_output_time;
 	float last_tracker_obs_time;
+	vec3f last_tracker_position;
 	float last_gravity_vector_time;
 } fusion;
 

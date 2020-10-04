@@ -114,36 +114,35 @@ static int tracker_process_blobs(rift_sensor_ctx *ctx, rift_sensor_capture_frame
 	for (d = 0; d < RIFT_MAX_TRACKED_DEVICES; d++) {
 		rift_tracked_device *dev = devices + d;
 		rift_pose_metrics score;
-		posef world_obj_pose, cam_pose;
+		posef obj_world_pose, obj_cam_pose;
 		bool match_all_blobs = (d == 0); /* Let the HMD match whatever it can */
 
 		if (dev->fusion == NULL)
 			continue; /* No such device */
 
-		world_obj_pose = frame->capture_world_poses[d];
+		obj_world_pose = frame->capture_world_poses[d];
 
 		LOGV ("Fusion provided pose for device %d, %f %f %f %f pos %f %f %f",
-			d, world_obj_pose.orient.x, world_obj_pose.orient.y, world_obj_pose.orient.z, world_obj_pose.orient.w,
-			world_obj_pose.pos.x, world_obj_pose.pos.y, world_obj_pose.pos.z);
+			d, obj_world_pose.orient.x, obj_world_pose.orient.y, obj_world_pose.orient.z, obj_world_pose.orient.w,
+			obj_world_pose.pos.x, obj_world_pose.pos.y, obj_world_pose.pos.z);
 
 		/* If we have a camera pose, get the object's camera-relative pose by taking
-		 * our camera pose (world->camera) and applying to the inverse of
-		 * the fusion pose (world->object) - which goes object->world->camera.
+		 * our camera pose (camera->world) and applying inverted to the
+		 * the fusion pose (object->world) - which goes object->world->camera.
 		 * If there's no camera pose, things won't match and the correspondence search
 		 * will do a full search, so it doesn't matter what we feed as the initial pose */
-		oposef_inverse (&world_obj_pose);
 		if (ctx->have_camera_pose) {
-			oposef_apply (&world_obj_pose, &ctx->camera_pose, &cam_pose);
+			oposef_apply_inverse(&obj_world_pose, &ctx->camera_pose, &obj_cam_pose);
 		}
 		else {
-			cam_pose = world_obj_pose;
+			obj_cam_pose = obj_world_pose;
 		}
 
 		LOGD ("Sensor %d searching for matching pose for device %d, initial quat %f %f %f %f pos %f %f %f",
-			ctx->id, d, cam_pose.orient.x, cam_pose.orient.y, cam_pose.orient.z, cam_pose.orient.w,
-			cam_pose.pos.x, cam_pose.pos.y, cam_pose.pos.z);
+			ctx->id, d, obj_cam_pose.orient.x, obj_cam_pose.orient.y, obj_cam_pose.orient.z, obj_cam_pose.orient.w,
+			obj_cam_pose.pos.x, obj_cam_pose.pos.y, obj_cam_pose.pos.z);
 
-		rift_evaluate_pose (&score, &cam_pose,
+		rift_evaluate_pose (&score, &obj_cam_pose,
 			ctx->bwobs->blobs, ctx->bwobs->num_blobs,
 			dev->id, dev->leds->points, dev->leds->num_points,
 			&ctx->camera_matrix, ctx->dist_coeffs, ctx->dist_fisheye, NULL);
@@ -155,7 +154,7 @@ static int tracker_process_blobs(rift_sensor_ctx *ctx, rift_sensor_capture_frame
 			LOGD("Sensor %d needs correspondence search for device %d matched %u blobs of %u",
 				ctx->id, d, score.matched_blobs, score.visible_leds);
 
-		if (score.good_pose_match || correspondence_search_find_one_pose (ctx->cs, d, match_all_blobs, &cam_pose, &score)) {
+		if (score.good_pose_match || correspondence_search_find_one_pose (ctx->cs, d, match_all_blobs, &obj_cam_pose, &score)) {
 			if (score.good_pose_match) {
 				ret = 1;
 
@@ -170,7 +169,7 @@ static int tracker_process_blobs(rift_sensor_ctx *ctx, rift_sensor_capture_frame
 					}
 				}
 
-				rift_mark_matching_blobs (&cam_pose, bwobs->blobs, bwobs->num_blobs, d,
+				rift_mark_matching_blobs (&obj_cam_pose, bwobs->blobs, bwobs->num_blobs, d,
 						dev->leds->points, dev->leds->num_points,
 						camera_matrix, dist_coeffs, ctx->is_cv1);
 
@@ -178,12 +177,12 @@ static int tracker_process_blobs(rift_sensor_ctx *ctx, rift_sensor_capture_frame
 				estimate_initial_pose (ctx->bwobs->blobs, ctx->bwobs->num_blobs,
 					d, dev->leds->points, dev->leds->num_points, camera_matrix,
 					dist_coeffs, ctx->is_cv1,
-					&cam_pose, NULL, NULL, true);
+					&obj_cam_pose, NULL, NULL, true);
 
-				kalman_pose_update (ctx->pose_filter, frame->uvc.start_ts, &cam_pose.pos, &cam_pose.orient);
+				kalman_pose_update (ctx->pose_filter, frame->uvc.start_ts, &obj_cam_pose.pos, &obj_cam_pose.orient);
 				kalman_pose_get_estimated (ctx->pose_filter, &dev->pose.pos, &dev->pose.orient);
 
-				LOGD ("sensor %d kalman filter for device %d yielded quat %f %f %f %f pos %f %f %f\n",
+				LOGD ("sensor %d kalman filter for device %d yielded quat %f %f %f %f pos %f %f %f",
 					ctx->id, d, dev->pose.orient.x, dev->pose.orient.y, dev->pose.orient.z, dev->pose.orient.w,
 					dev->pose.pos.x, dev->pose.pos.y, dev->pose.pos.z);
 
@@ -334,8 +333,18 @@ static void new_frame_start_cb(struct rift_sensor_uvc_stream *stream, uint64_t s
 				memset (&next_frame->capture_world_poses[d], 0, sizeof(posef));
 				continue;
 			}
-			oposef_init(&next_frame->capture_world_poses[d],
-					&dev->fusion->world_position, &dev->fusion->orient);
+
+			posef tmp;
+			oposef_init(&tmp, &dev->fusion->world_position, &dev->fusion->orient);
+
+			if (d == 0) {
+				/* Mirror the pose in XZ to go from view-plane to device axes */
+				oposef_mirror_XZ(&tmp);
+			}
+
+			/* Apply any needed global pose change */
+			oposef_apply(&tmp, &dev->fusion_to_model, &tmp);
+			next_frame->capture_world_poses[d] = tmp;
 		}
 
 		rift_sensor_uvc_stream_set_frame(stream, (rift_sensor_uvc_frame *)next_frame);
@@ -359,62 +368,78 @@ update_device_pose (rift_sensor_ctx *sensor_ctx, rift_tracked_device *dev,
 		LOGV("Found good pose match - %u LEDs matched %u visible ones\n",
 			score->matched_blobs, score->visible_leds);
 		if (sensor_ctx->have_camera_pose) {
-			/* The input pose is the transform from object coords to camera frame.
+			/* The pose we found is the transform from object coords to camera-relative coords.
 			 * Our camera pose stores the transform from camera to world, and what we
-			 * need to give the fusion is transform from world to object.
+			 * need to give the fusion is transform from object->world.
 			 *
-			 * To get the transform from world->object, take camera->object, and apply it
-			 * to the world->camera pose - ie, apply the inverse of object->camera. */
-			oposef_apply_inverse (&sensor_ctx->camera_pose, &pose, &pose);
+			 * To get the transform from object->world, take object->camera pose, and apply
+			 * the camera->world pose. */
+			oposef_apply(&pose, &sensor_ctx->camera_pose, &pose);
 
 			LOGD("Updating fusion for device %d pose quat %f %f %f %f  pos %f %f %f",
 				dev->id, pose.orient.x, pose.orient.y, pose.orient.z, pose.orient.w,
 				pose.pos.x, pose.pos.y, pose.pos.z);
 
+			/* Undo any IMU to device conversion */
+			oposef_apply_inverse(&pose, &dev->fusion_to_model, &pose);
+
+			if (dev->id == 0) {
+				/* Mirror the pose in XZ to go from device axes to view-plane */
+				oposef_mirror_XZ(&pose);
+			}
+
 			ofusion_tracker_update (dev->fusion, (double)(frame_ts) / 1000000000.0, &pose.pos, &pose.orient);
 
+#if 0
 			oposef_init(&pose, &dev->fusion->world_position, &dev->fusion->orient);
 
 			LOGD("After update, fusion for device %d pose quat %f %f %f %f  pos %f %f %f",
 				dev->id, pose.orient.x, pose.orient.y, pose.orient.z, pose.orient.w,
 				pose.pos.x, pose.pos.y, pose.pos.z);
 
+			oposef_apply_inverse(&pose, &sensor_ctx->camera_pose, &pose);
+
+			LOGD("Reversing the pose for device %d pose quat %f %f %f %f  pos %f %f %f",
+				dev->id, pose.orient.x, pose.orient.y, pose.orient.z, pose.orient.w,
+				pose.pos.x, pose.pos.y, pose.pos.z);
+#endif
 		}
 		else if (dev->id == 0 && oquatf_get_length (&capture_pose->orient) > 0.9 && dev->fusion->last_gravity_vector_time > 0) {
 			/* No camera pose yet. If this is the HMD, we had an IMU pose at capture time,
 			 * and the fusion has a gravity vector from the IMU, use it to
-			 * initialise the camera (world->camera) pose using the current headset pose. Calculate the
-			 * xform from world->camera by applying
-			 * the fusion pose (from world->object) to our found pose (object->camera)
-			 * 
-			 * FIXME: Store the gravity in the fusion and record it with the capture too 
+			 * initialise the camera (world->camera) pose using the current headset pose.
+			 * Calculate the xform from camera->world by applying
+			 * the observed pose (object->camera), inverted (so camera->object) to our found
+			 * fusion pose (object->world) to yield camera->world xform
+			 *
+			 * FIXME: Store the gravity vector in the fusion and record it with the capture too
+			 * so we only do this calculation if the IMU had acquired a gravity vector
 			 */
-			posef world_object_pose = *capture_pose;
+			posef camera_object_pose = pose;
+			oposef_inverse(&camera_object_pose);
 
-			oposef_apply(&pose, &world_object_pose, &sensor_ctx->camera_pose);
+			oposef_apply(&camera_object_pose, capture_pose, &sensor_ctx->camera_pose);
 
 			LOGI("Set sensor %d pose from device %d - tracker pose quat %f %f %f %f  pos %f %f %f"
 					" fusion pose quat %f %f %f %f  pos %f %f %f yielded"
 					" world->camera pose quat %f %f %f %f  pos %f %f %f",
 				sensor_ctx->id, dev->id,
 				pose.orient.x, pose.orient.y, pose.orient.z, pose.orient.w, pose.pos.x, pose.pos.y, pose.pos.z,
-				world_object_pose.orient.x, world_object_pose.orient.y, world_object_pose.orient.z, world_object_pose.orient.w,
-				world_object_pose.pos.x, world_object_pose.pos.y, world_object_pose.pos.z,
+				capture_pose->orient.x, capture_pose->orient.y, capture_pose->orient.z, capture_pose->orient.w,
+				capture_pose->pos.x, capture_pose->pos.y, capture_pose->pos.z,
 				sensor_ctx->camera_pose.orient.x, sensor_ctx->camera_pose.orient.y, sensor_ctx->camera_pose.orient.z, sensor_ctx->camera_pose.orient.w,
 				sensor_ctx->camera_pose.pos.x, sensor_ctx->camera_pose.pos.y, sensor_ctx->camera_pose.pos.z);
 
 #if 0
-			/* Double check the newly calculated camera pose can map from our observed camera-relative
-			 * pose to the world (fusion) pose */
-			oposef_apply_inverse (&sensor_ctx->camera_pose, &pose, &pose);
+			/* Double check the newly calculated camera pose can take the object->camera pose
+			 * back to object->world pose */
+			oposef_apply(&pose, &sensor_ctx->camera_pose, &pose);
 			LOGI("New camera xform took observed pose to world quat %f %f %f %f  pos %f %f %f",
 				pose.orient.x, pose.orient.y, pose.orient.z, pose.orient.w,
 				pose.pos.x, pose.pos.y, pose.pos.z);
-stream->frame_size
-			/* Double check the newly calculated camera pose can map from the fusion pose back into
-			 * our camera-relative pose */
-			oposef_inverse (&world_object_pose);
-			oposef_apply (&world_object_pose, &sensor_ctx->camera_pose, &pose);
+			/* Also double check the newly calculated camera->world pose can map from the fusion
+			 * pose back to our object->camera pose */
+			oposef_apply_inverse(&camera_object_pose, &sensor_ctx->camera_pose, &pose);
 
 			LOGI("new camera xform took fusion pose back to %f %f %f %f  pos %f %f %f",
 				pose.orient.x, pose.orient.y, pose.orient.z, pose.orient.w,

@@ -24,7 +24,11 @@ struct rift_tracked_device_s
 	led_search_model_t *led_search;
 
 	fusion *fusion;
+	/* Transform from the fusion pose (which tracks the IMU, oriented to the screens/view)
+	 * to the model the camera will see, which is offset and rotated 180 degrees */
+	posef fusion_to_model;
 
+	/* The model (HMD/controller) pose -> world transform */
 	posef pose;
 };
 

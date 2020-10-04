@@ -233,9 +233,7 @@ void rift_debug_draw_frame (uint8_t *pixels, struct blobservation* bwobs,
 				continue;
 
 			/* Draw the capture pose blobs in yellow */
-			pose = frame->capture_world_poses[d];
-			oposef_inverse (&pose);
-			oposef_apply (&pose, camera_pose, &pose);
+			oposef_apply_inverse(&frame->capture_world_poses[d], camera_pose, &pose);
 
 			rift_project_points (dev->leds->points,
 				dev->leds->num_points, &camera_matrix,
