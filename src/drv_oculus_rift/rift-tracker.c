@@ -61,8 +61,7 @@ rift_tracker_add_device (rift_tracker_ctx *ctx, int device_id, fusion *f, posef 
 
 	next_dev->id = device_id;
 	next_dev->fusion = f;
-
-	ctx->devices[device_id].fusion_to_model = *imu_pose;
+	next_dev->fusion_to_model = *imu_pose;
 
 	next_dev->leds = leds;
 	next_dev->led_search = led_search_model_new (leds);
