@@ -702,6 +702,7 @@ static int rift_get_led_info(rift_hmd_t *priv)
 			priv->imu.pos.y = (float)pos.pos_y;
 			priv->imu.pos.z = (float)pos.pos_z;
 			LOGV ("IMU index %d pos x/y/x %d/%d/%d\n", pos.index, pos.pos_x, pos.pos_y, pos.pos_z);
+			ovec3f_multiply_scalar(&priv->imu.pos, 1.0/1000000.0, &priv->imu.pos); /* convert to metres */
 		} else if (pos.flags == 2) {
 			rift_led *led = &priv->leds.points[pos.index];
 			led->pos.x = (float)pos.pos_x;
