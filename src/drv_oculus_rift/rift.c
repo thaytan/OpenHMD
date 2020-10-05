@@ -300,7 +300,8 @@ static void handle_touch_controller_message(rift_hmd_t *hmd,
 				&touch->calibration) < 0)
 			return;
 
-		quatf imu_orient = {{ 0.0, 0.0, 0.0, 1.0 }};
+		/* Touch controller models are rotated 180 degrees */
+		quatf imu_orient = {{ 0.0, 1.0, 0.0, 0.0 }};
 		posef imu_pose;
 		oposef_init(&imu_pose, &touch->calibration.imu_position, &imu_orient);
 
@@ -594,7 +595,7 @@ static int getf_touch_controller(rift_device_priv* dev_priv, ohmd_float_value ty
 			break;
 		}
 	case OHMD_POSITION_VECTOR:
-		out[0] = out[1] = out[2] = 0;
+		*(vec3f*)out = touch->imu_fusion.world_position;
 		break;
 	case OHMD_DISTORTION_K:
 		return -1;
