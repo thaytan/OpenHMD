@@ -5,7 +5,7 @@
  * SPDX-License-Identifier: BSL-1.0
  */
 
- #define _GNU_SOURCE
+#define _GNU_SOURCE
 #define __STDC_FORMAT_MACROS
 
 #include <libusb.h>
@@ -644,7 +644,7 @@ static void analyse_frame_fast(rift_sensor_ctx *sensor, rift_sensor_capture_fram
 
 		ohmd_pw_debug_stream_push (sensor->debug_metadata, frame->uvc.start_ts, debug_str);
 		free(debug_str);
-  }
+	}
 #endif
 
 #if LOGLEVEL < 1
