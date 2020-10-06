@@ -35,7 +35,51 @@
 
 #define ASSERT_MSG(_v, label, ...) if(!(_v)){ fprintf(stderr, __VA_ARGS__); goto label; }
 
-#define NUM_CAPTURE_BUFFERS 2
+#define NUM_CAPTURE_BUFFERS 3
+
+typedef struct rift_sensor_frame_queue rift_sensor_frame_queue;
+
+struct rift_sensor_frame_queue {
+	rift_sensor_capture_frame *data[NUM_CAPTURE_BUFFERS+1];
+	unsigned int head, tail;
+};
+
+#define INIT_QUEUE(q) \
+		(q)->head = (q)->tail = 0;
+
+#define PUSH_QUEUE(q,f) do { \
+	unsigned int next = ((q)->tail+1) % (NUM_CAPTURE_BUFFERS+1); \
+	assert(next != (q)->head); /* Check there's room */ \
+	assert ((f) != NULL); \
+	(q)->data[(q)->tail] = (f); \
+	(q)->tail = next; \
+} while(0)
+
+static rift_sensor_capture_frame *POP_QUEUE(rift_sensor_frame_queue *q) {
+	rift_sensor_capture_frame *f;
+	unsigned int next_head = (q->head+1) % (NUM_CAPTURE_BUFFERS+1);
+
+	if ((q)->tail == (q)->head) /* Check there's something in the queue */
+		return NULL;
+
+	f = q->data[q->head];
+	q->head = next_head;
+
+	return f;
+}
+
+/* Rewind the queue and un-push the last element */
+static rift_sensor_capture_frame *REWIND_QUEUE(rift_sensor_frame_queue *q) {
+	rift_sensor_capture_frame *f;
+	unsigned int prev_tail = (q->tail-1) % (NUM_CAPTURE_BUFFERS+1);
+	if ((q)->tail == (q)->head) /* Check there's something in the queue */
+		return NULL;
+
+	f = q->data[prev_tail];
+	q->tail = prev_tail;
+
+	return f;
+}
 
 struct rift_sensor_ctx_s
 {
@@ -71,16 +115,13 @@ struct rift_sensor_ctx_s
 	rift_tracked_device *devices[RIFT_MAX_TRACKED_DEVICES];
 	uint8_t n_devices;
 
-	/* ID of the currently capturing frame */
-	int cur_capture_frame;
-	/* ID of the next frame to submit for capturing */
-	int next_capture_frame;
+	/* Queue of frames being returned to the capture thread */
+	rift_sensor_frame_queue capture_frame_q;
 	int dropped_frames;
-
-	/* FIXME: later this should be a ringbuffer to support
-	 * more outstanding frames, and a frames_ready_for_capture
-	 * ringbuffer to return them */
-	int frame_for_fast_analysis;
+	/* queue of frames awaiting fast analysis */
+	rift_sensor_frame_queue fast_analysis_q;
+	/* queue of frames awaiting long analysis */
+	rift_sensor_frame_queue long_analysis_q;
 
 	int shutdown;
 	/* End protected by sensor_lock */
@@ -348,47 +389,53 @@ static void new_frame_start_cb(struct rift_sensor_uvc_stream *stream, uint64_t s
 	rift_sensor_ctx *sensor = stream->user_data;
 	uint64_t phase_ts;
 	uint8_t led_pattern_phase = rift_tracker_get_led_pattern_phase (sensor->tracker, &phase_ts);
+	rift_sensor_capture_frame *next_frame;
+	int d;
 
 	LOGD("%f ms Sensor %d SOF phase %d", (double) (start_time) / 1000000.0,
 			sensor->id, led_pattern_phase);
 
 	ohmd_lock_mutex(sensor->sensor_lock);
-	if (sensor->next_capture_frame != sensor->cur_capture_frame) {
-		int d;
-		rift_sensor_capture_frame *next_frame = sensor->frames + sensor->next_capture_frame;
-
-		sensor->cur_capture_frame = sensor->next_capture_frame;
-
-		next_frame->led_pattern_phase = led_pattern_phase;
-		next_frame->led_pattern_sof_ts = phase_ts;
-
+	next_frame = POP_QUEUE(&sensor->capture_frame_q);
+	if (next_frame != NULL) {
 		if (sensor->dropped_frames) {
 				LOGW("Sensor %d dropped %d frames", sensor->id, sensor->dropped_frames);
 				sensor->dropped_frames = 0;
 		}
-
-		for (d = 0; d < sensor->n_devices; d++) {
-			rift_tracked_device *dev = sensor->devices[d];
-			rift_sensor_device_state *dev_state = next_frame->device_state + d;
-
-			/* FIXME: Thread safety around the fusion */
-			posef tmp;
-			oposef_init(&tmp, &dev->fusion->world_position, &dev->fusion->orient);
-
-			if (dev->id == 0) {
-				/* Mirror the pose in XZ to go from view-plane to device axes for the HMD */
-				oposef_mirror_XZ(&tmp);
-			}
-
-			/* Apply any needed global pose change */
-			oposef_apply(&tmp, &dev->fusion_to_model, &dev_state->capture_world_pose);
-			/* Mark the score as un-evaluated to start */
-			dev_state->score.good_pose_match = false;
-		}
-		next_frame->n_devices = sensor->n_devices;
-
-		rift_sensor_uvc_stream_set_frame(stream, (rift_sensor_uvc_frame *)next_frame);
 	}
+	else {
+		/* No frames available from the analysis threads yet - try
+		 * to recover the most recent one we sent and reuse it. This must
+		 * succeed, or else there's not enough capture frames in circulation */
+		next_frame = REWIND_QUEUE(&sensor->fast_analysis_q);
+		assert (next_frame != NULL);
+		sensor->dropped_frames++;
+	}
+
+	next_frame->led_pattern_phase = led_pattern_phase;
+	next_frame->led_pattern_sof_ts = phase_ts;
+
+	for (d = 0; d < sensor->n_devices; d++) {
+		rift_tracked_device *dev = sensor->devices[d];
+		rift_sensor_device_state *dev_state = next_frame->device_state + d;
+
+		/* FIXME: Thread safety around the fusion */
+		posef tmp;
+		oposef_init(&tmp, &dev->fusion->world_position, &dev->fusion->orient);
+
+		if (dev->id == 0) {
+			/* Mirror the pose in XZ to go from view-plane to device axes for the HMD */
+			oposef_mirror_XZ(&tmp);
+		}
+
+		/* Apply any needed global pose change */
+		oposef_apply(&tmp, &dev->fusion_to_model, &dev_state->capture_world_pose);
+		/* Mark the score as un-evaluated to start */
+		dev_state->score.good_pose_match = false;
+	}
+	next_frame->n_devices = sensor->n_devices;
+
+	rift_sensor_uvc_stream_set_frame(stream, (rift_sensor_uvc_frame *)next_frame);
 	ohmd_unlock_mutex(sensor->sensor_lock);
 }
 
@@ -536,16 +583,8 @@ static void frame_captured_cb(rift_sensor_uvc_stream *stream, rift_sensor_uvc_fr
 	LOGD ("Sensor %d captured frame %d phase %d", sensor->id, frame->id, frame->led_pattern_phase);
 
 	ohmd_lock_mutex(sensor->sensor_lock);
-	/* Send this frame to the analysis thread */
-	if (sensor->frame_for_fast_analysis == -1) {
-		sensor->frame_for_fast_analysis = frame->id;
-		sensor->next_capture_frame = (frame->id+1) % NUM_CAPTURE_BUFFERS;
-		sensor->cur_capture_frame = -1;
-		ohmd_cond_broadcast (sensor->new_frame_cond);
-	} else {
-		/* Analysis thread was still busy with the previous frame */
-		sensor->dropped_frames++;
-	}
+	PUSH_QUEUE(&sensor->fast_analysis_q, frame);
+	ohmd_cond_broadcast (sensor->new_frame_cond);
 	ohmd_unlock_mutex(sensor->sensor_lock);
 }
 
@@ -667,6 +706,11 @@ rift_sensor_new(ohmd_context* ohmd_ctx, int id, const char *serial_no,
 	ret = rift_sensor_uvc_stream_setup (usb_ctx, sensor_ctx->usb_devh, &sensor_ctx->stream);
 	ASSERT_MSG(ret >= 0, fail, "could not prepare for streaming\n");
 
+	/* Initialise frame queues */
+	INIT_QUEUE(&sensor_ctx->capture_frame_q);
+	INIT_QUEUE(&sensor_ctx->fast_analysis_q);
+	INIT_QUEUE(&sensor_ctx->long_analysis_q);
+
 	/* Allocate capture frame buffers */
 	int data_size = sensor_ctx->stream.frame_size;
 
@@ -677,11 +721,10 @@ rift_sensor_new(ohmd_context* ohmd_ctx, int id, const char *serial_no,
 			frame->id = i;
 			frame->uvc.data = ohmd_alloc(ohmd_ctx, data_size);
 			frame->uvc.data_size = data_size;
+
+			/* Send all frames to the capture thread to start */
+			PUSH_QUEUE(&sensor_ctx->capture_frame_q, frame);
 	}
-	/* Set up frame capture references */
-	sensor_ctx->next_capture_frame = 0;
-	sensor_ctx->cur_capture_frame = -1;
-	sensor_ctx->frame_for_fast_analysis = -1;
 	sensor_ctx->dropped_frames = 0;
 
 	snprintf(stream_id,64,"openhmd-rift-sensor-%s", sensor_ctx->serial_no);
@@ -826,15 +869,16 @@ static unsigned int fast_analysis_thread(void *arg)
 
 	ohmd_lock_mutex (ctx->sensor_lock);
 	while (!ctx->shutdown) {
-			if (ctx->frame_for_fast_analysis != -1) {
-				rift_sensor_capture_frame *frame = ctx->frames + ctx->frame_for_fast_analysis;
+			rift_sensor_capture_frame *frame = POP_QUEUE(&ctx->fast_analysis_q);
+			if (frame != NULL) {
 
 				ohmd_unlock_mutex (ctx->sensor_lock);
 				analyse_frame_fast(ctx, frame);
 				ohmd_lock_mutex (ctx->sensor_lock);
 
-				/* Done with this frame - clear the ref */
-				ctx->frame_for_fast_analysis = -1;
+				/* Done with this frame - send it back to the capture thread. FIXME:
+				 * This may need to be sent to the long analysis thread */
+				PUSH_QUEUE(&ctx->capture_frame_q, frame);
 			}
 			if (!ctx->shutdown) {
 				ohmd_cond_wait(ctx->new_frame_cond, ctx->sensor_lock);
