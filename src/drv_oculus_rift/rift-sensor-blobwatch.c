@@ -3,6 +3,7 @@
  * Copyright 2014-2015 Philipp Zabel
  * SPDX-License-Identifier:	LGPL-2.0+ or BSL-1.0
  */
+#include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -16,8 +17,13 @@ struct leds;
 
 #include <stdio.h>
 
-#define NUM_FRAMES_HISTORY	2
+/* Keep enough history frames that the caller can keep hold
+ * of a previous blobservation and pass it to the long term
+ * tracker while we still have 2 left to ping-pong between */
+#define NUM_FRAMES_HISTORY	3
 #define MAX_EXTENTS_PER_LINE	30
+
+#define QUEUE_ENTRIES (NUM_FRAMES_HISTORY+1)
 
 #define abs(x) ((x) >= 0 ? (x) : -(x))
 #define min(x, y) ((x) < (y) ? (x) : (y))
@@ -39,6 +45,36 @@ struct extent_line {
 	uint16_t padding[3];
 };
 
+typedef struct blobservation_queue blobservation_queue;
+
+struct blobservation_queue {
+	blobservation *data[QUEUE_ENTRIES];
+	unsigned int head, tail;
+};
+
+#define INIT_QUEUE(q) \
+		(q)->head = (q)->tail = 0;
+
+#define PUSH_QUEUE(q,b) do { \
+	unsigned int next = ((q)->tail+1) % QUEUE_ENTRIES; \
+	assert(next != (q)->head); /* Check there's room */ \
+	assert ((b) != NULL); \
+	(q)->data[(q)->tail] = (b); \
+	(q)->tail = next; \
+} while(0)
+
+static blobservation *POP_QUEUE(blobservation_queue *q) {
+	blobservation *b;
+	unsigned int next_head = (q->head+1) % QUEUE_ENTRIES;
+
+	if ((q)->tail == (q)->head) /* Check there's something in the queue */
+		return NULL;
+
+	b = q->data[q->head];
+	q->head = next_head;
+
+	return b;
+}
 
 /*
  * Blob detector internal state
@@ -47,13 +83,17 @@ struct blobwatch {
 	uint8_t threshold;
 	int width;
 	int height;
-	int last_observation;
-	struct blobservation history[NUM_FRAMES_HISTORY];
 	bool debug;
 	bool flicker_enable;
+
+	blobservation observations[NUM_FRAMES_HISTORY];
+
+	blobservation_queue observation_q;
+
+	blobservation *last_observation;
 };
 
-void blobwatch_set_flicker(struct blobwatch *bw, bool enable)
+void blobwatch_set_flicker(blobwatch *bw, bool enable)
 {
 	bw->flicker_enable = enable;
 }
@@ -63,9 +103,10 @@ void blobwatch_set_flicker(struct blobwatch *bw, bool enable)
  *
  * Returns the newly allocated blobwatch structure.
  */
-struct blobwatch *blobwatch_new(uint8_t threshold, int width, int height)
+blobwatch *blobwatch_new(uint8_t threshold, int width, int height)
 {
-	struct blobwatch *bw = malloc(sizeof(*bw));
+	blobwatch *bw = malloc(sizeof(*bw));
+	int i;
 
 	if (!bw)
 		return NULL;
@@ -74,14 +115,19 @@ struct blobwatch *blobwatch_new(uint8_t threshold, int width, int height)
 	bw->threshold = threshold;
 	bw->width = width;
 	bw->height = height;
-	bw->last_observation = -1;
+	bw->last_observation = NULL;
 	bw->debug = true;
 	bw->flicker_enable = false;
+
+	INIT_QUEUE(&bw->observation_q);
+	/* Push all observations into the available queue */
+	for (i = 0; i < NUM_FRAMES_HISTORY; i++)
+		PUSH_QUEUE(&bw->observation_q, bw->observations + i);
 
 	return bw;
 }
 
-void blobwatch_free (struct blobwatch *bw)
+void blobwatch_free (blobwatch *bw)
 {
 	free (bw);
 }
@@ -118,9 +164,9 @@ static inline void store_blob(struct extent *e, int index, int y, struct blob *b
  *
  * Returns the number of extents found.
  */
-static void process_scanline(uint8_t *line, struct blobwatch *bw, int y,
+static void process_scanline(uint8_t *line, blobwatch *bw, int y,
 			    struct extent_line *el, struct extent_line *prev_el,
-			    struct blobservation *ob)
+			    blobservation *ob)
 {
 	struct extent *le_end = prev_el->extents;
 	struct extent *le = prev_el->extents;
@@ -233,7 +279,7 @@ static void process_scanline(uint8_t *line, struct blobwatch *bw, int y,
  * Processes extents from all scanlines in a frame and stores the
  * resulting blobs in ob->blobs.
  */
-static void process_frame(uint8_t *lines, struct blobwatch *bw, struct blobservation *ob)
+static void process_frame(uint8_t *lines, blobwatch *bw, blobservation *ob)
 {
 	struct extent_line el1;
 	struct extent_line el2;
@@ -278,17 +324,16 @@ void copy_matching_blob(struct blob *to, struct blob* from) {
 
 /*
  * Detects blobs in the current frame and compares them with the observation
- * history.
+ * history. The returned blobservation in the `output` variable must be returned
+ * to the blobwatch via blobwatch_release_observation()
  */
-void blobwatch_process(struct blobwatch *bw, uint8_t *frame,
+void blobwatch_process(blobwatch *bw, uint8_t *frame,
 		       int width, int height, uint8_t led_pattern_phase,
 		       rift_led *leds, uint8_t num_leds,
-		       struct blobservation **output)
+		       blobservation **output)
 {
-	int last = bw->last_observation;
-	int current = (last + 1) % NUM_FRAMES_HISTORY;
-	struct blobservation *ob = &bw->history[current];
-	struct blobservation *last_ob = &bw->history[last];
+	blobservation *ob;
+	blobservation *last_ob = bw->last_observation;
 	int closest_ob[MAX_BLOBS_PER_FRAME]; // index of last_ob that is closest to each ob
 	int closest_last_ob[MAX_BLOBS_PER_FRAME]; // index of ob that is closest to each last_ob
 	int closest_last_ob_distsq[MAX_BLOBS_PER_FRAME]; // distsq of ob that is closest to each last_ob
@@ -297,11 +342,14 @@ void blobwatch_process(struct blobwatch *bw, uint8_t *frame,
 	bw->width = width;
 	bw->height = height;
 
+	ob = POP_QUEUE(&bw->observation_q);
+	assert(ob != NULL);
+
 	process_frame(frame, bw, ob);
 
 	/* If there is no previous observation, our work is done here */
-	if (bw->last_observation == -1) {
-		bw->last_observation = current;
+	if (bw->last_observation == NULL) {
+		bw->last_observation = ob;
 		if (output)
 			*output = ob;
 		return;
@@ -433,22 +481,19 @@ void blobwatch_process(struct blobwatch *bw, uint8_t *frame,
 	/* Return observed blobs */
 	if (output)
 		*output = ob;
-
-	bw->last_observation = current;
+	bw->last_observation = ob;
 }
 
-struct blob *blobwatch_find_blob_at(struct blobwatch *bw, int x, int y)
+struct blob *blobwatch_find_blob_at(blobwatch *bw, int x, int y)
 {
-	int last = bw->last_observation;
-	struct blobservation *ob;
+	blobservation *ob = bw->last_observation;
 	int i;
 
-	if (last == -1) {
+	if (ob == NULL) {
 			/* No blobs to match against yet */
 			return NULL;
 	}
 
-	ob = &bw->history[last];
 	for (i = 0; i < ob->num_blobs; i++) {
 		struct blob *b = ob->blobs + i;
 		int dx = abs(x - b->x);
@@ -462,4 +507,9 @@ struct blob *blobwatch_find_blob_at(struct blobwatch *bw, int x, int y)
 	}
 
 	return NULL;
+}
+
+void blobwatch_release_observation(blobwatch *bw, blobservation *ob)
+{
+	PUSH_QUEUE(&bw->observation_q, ob);
 }

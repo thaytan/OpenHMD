@@ -35,6 +35,7 @@ struct rift_sensor_capture_frame {
 	 * LED blinking again in the future? */
 	uint64_t led_pattern_sof_ts;
 	uint8_t led_pattern_phase;
+	blobservation* bwobs;
 
 	/* Device poses at capture time */
 	rift_sensor_device_state device_state[RIFT_MAX_TRACKED_DEVICES];

@@ -55,15 +55,17 @@ struct blobservation {
 	uint8_t tracked[MAX_BLOBS_PER_FRAME];
 };
 
-struct blobwatch;
+typedef struct blobwatch blobwatch;
+typedef struct blobservation blobservation;
 
-struct blobwatch *blobwatch_new(uint8_t threshold, int width, int height);
-void blobwatch_free (struct blobwatch *bw);
-void blobwatch_process(struct blobwatch *bw, uint8_t *frame,
+blobwatch *blobwatch_new(uint8_t threshold, int width, int height);
+void blobwatch_free (blobwatch *bw);
+void blobwatch_process(blobwatch *bw, uint8_t *frame,
 		       int width, int height, uint8_t led_pattern_phase,
 		       rift_led *leds, uint8_t num_leds,
-		       struct blobservation **output);
-struct blob *blobwatch_find_blob_at(struct blobwatch *bw, int x, int y);
-void blobwatch_set_flicker(struct blobwatch *bw, bool enable);
+		       blobservation **output);
+void blobwatch_release_observation(blobwatch *bw, blobservation *ob);
+struct blob *blobwatch_find_blob_at(blobwatch *bw, int x, int y);
+void blobwatch_set_flicker(blobwatch *bw, bool enable);
 
 #endif /* __BLOBWATCH_H__*/

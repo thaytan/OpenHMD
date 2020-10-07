@@ -95,8 +95,7 @@ struct rift_sensor_ctx_s
 
 	rift_sensor_capture_frame *frames;
 
-	struct blobwatch* bw;
-	struct blobservation* bwobs;
+	blobwatch* bw;
 
 	dmat3 camera_matrix;
 	bool dist_fisheye;
@@ -141,11 +140,11 @@ struct rift_sensor_ctx_s
 };
 
 static void update_device_pose (rift_sensor_ctx *sensor_ctx, rift_tracked_device *dev,
-	uint64_t frame_ts, rift_sensor_device_state *dev_state);
+	rift_sensor_capture_frame *frame, rift_sensor_device_state *dev_state);
 
 static int tracker_process_blobs(rift_sensor_ctx *ctx, rift_sensor_capture_frame *frame)
 {
-	struct blobservation* bwobs = ctx->bwobs;
+	blobservation* bwobs = frame->bwobs;
 	int ret = 0;
 	dmat3 *camera_matrix = &ctx->camera_matrix;
 	double *dist_coeffs = ctx->dist_coeffs;
@@ -185,7 +184,7 @@ static int tracker_process_blobs(rift_sensor_ctx *ctx, rift_sensor_capture_frame
 		dev_state->final_cam_pose = obj_cam_pose;
 
 		rift_evaluate_pose (&dev_state->score, &obj_cam_pose,
-			ctx->bwobs->blobs, ctx->bwobs->num_blobs,
+			frame->bwobs->blobs, frame->bwobs->num_blobs,
 			dev->id, dev->leds->points, dev->leds->num_points,
 			&ctx->camera_matrix, ctx->dist_coeffs, ctx->dist_fisheye, NULL);
 
@@ -197,20 +196,20 @@ static int tracker_process_blobs(rift_sensor_ctx *ctx, rift_sensor_capture_frame
 
 			/* See if we still have enough labelled blobs to try to re-acquire the pose without a
 			 * full search */
-			for (int index = 0; index < ctx->bwobs->num_blobs; index++) {
-				struct blob *b = ctx->bwobs->blobs + index;
+			for (int index = 0; index < bwobs->num_blobs; index++) {
+				struct blob *b = bwobs->blobs + index;
 				if (LED_OBJECT_ID (b->led_id) == dev->id) {
 						num_blobs++;
 				}
 			}
 
 			if (num_blobs > 4) {
-				estimate_initial_pose (ctx->bwobs->blobs, ctx->bwobs->num_blobs,
+				estimate_initial_pose (bwobs->blobs, bwobs->num_blobs,
 					dev->id, dev->leds->points, dev->leds->num_points, camera_matrix,
 					dist_coeffs, ctx->is_cv1,
 					&obj_cam_pose, NULL, NULL, true);
 				rift_evaluate_pose (&dev_state->score, &obj_cam_pose,
-					ctx->bwobs->blobs, ctx->bwobs->num_blobs,
+					bwobs->blobs, bwobs->num_blobs,
 					dev->id, dev->leds->points, dev->leds->num_points,
 					&ctx->camera_matrix, ctx->dist_coeffs, ctx->dist_fisheye, NULL);
 			}
@@ -233,8 +232,8 @@ static int tracker_process_blobs(rift_sensor_ctx *ctx, rift_sensor_capture_frame
 			/* Clear existing blob IDs for this device, then
 			 * back project LED ids into blobs if we find them and the dot product
 			 * shows them pointing strongly to the camera */
-			for (int index = 0; index < ctx->bwobs->num_blobs; index++) {
-				struct blob *b = ctx->bwobs->blobs + index;
+			for (int index = 0; index < bwobs->num_blobs; index++) {
+				struct blob *b = bwobs->blobs + index;
 				if (LED_OBJECT_ID (b->led_id) == dev->id) {
 					b->prev_led_id = b->led_id;
 					b->led_id = LED_INVALID_ID;
@@ -246,7 +245,7 @@ static int tracker_process_blobs(rift_sensor_ctx *ctx, rift_sensor_capture_frame
 					camera_matrix, dist_coeffs, ctx->is_cv1);
 
 			/* Refine the pose with PnP now that we've labelled the blobs */
-			estimate_initial_pose (ctx->bwobs->blobs, ctx->bwobs->num_blobs,
+			estimate_initial_pose (bwobs->blobs, bwobs->num_blobs,
 				dev->id, dev->leds->points, dev->leds->num_points, camera_matrix,
 				dist_coeffs, ctx->is_cv1,
 				&obj_cam_pose, NULL, NULL, true);
@@ -258,7 +257,7 @@ static int tracker_process_blobs(rift_sensor_ctx *ctx, rift_sensor_capture_frame
 				ctx->id, dev->id, dev_state->final_cam_pose.orient.x, dev_state->final_cam_pose.orient.y, dev_state->final_cam_pose.orient.z, dev_state->final_cam_pose.orient.w,
 				dev_state->final_cam_pose.pos.x, dev_state->final_cam_pose.pos.y, dev_state->final_cam_pose.pos.z);
 
-			update_device_pose (ctx, dev, frame->uvc.start_ts, &frame->device_state[d]);
+			update_device_pose (ctx, dev, frame, &frame->device_state[d]);
 		}
 		else {
 			/* Didn't find this device - send for long analysis */
@@ -389,6 +388,16 @@ static void dump_bin(const char* label, const unsigned char* data, int length)
 }
 #endif
 
+/* Called with sensor_lock held. Releases a frame back to the capture thread */
+static void
+release_capture_frame(rift_sensor_ctx *sensor, rift_sensor_capture_frame *frame) {
+	if (frame->bwobs) {
+		blobwatch_release_observation(sensor->bw, frame->bwobs);
+		frame->bwobs = NULL;
+	}
+	PUSH_QUEUE(&sensor->capture_frame_q, frame);
+}
+
 static void new_frame_start_cb(struct rift_sensor_uvc_stream *stream, uint64_t start_time)
 {
 	rift_sensor_ctx *sensor = stream->user_data;
@@ -446,14 +455,15 @@ static void new_frame_start_cb(struct rift_sensor_uvc_stream *stream, uint64_t s
 
 static void
 update_device_pose (rift_sensor_ctx *sensor_ctx, rift_tracked_device *dev,
-		uint64_t frame_ts, rift_sensor_device_state *dev_state)
+	rift_sensor_capture_frame *frame, rift_sensor_device_state *dev_state)
 {
 	posef pose = dev_state->final_cam_pose;
 	posef *capture_pose = &dev_state->capture_world_pose;
 	rift_pose_metrics *score = &dev_state->score;
+	uint64_t frame_ts = frame->uvc.start_ts;
 
 	rift_evaluate_pose (score, &pose,
-		sensor_ctx->bwobs->blobs, sensor_ctx->bwobs->num_blobs,
+		frame->bwobs->blobs, frame->bwobs->num_blobs,
 		dev->id, dev->leds->points, dev->leds->num_points,
 		&sensor_ctx->camera_matrix, sensor_ctx->dist_coeffs,
 		sensor_ctx->dist_fisheye, NULL);
@@ -603,13 +613,13 @@ static void analyse_frame_fast(rift_sensor_ctx *sensor, rift_sensor_capture_fram
 	frame->image_analysis_start_ts = now;
 
 	blobwatch_process(sensor->bw, frame->uvc.data, width, height,
-		frame->led_pattern_phase, NULL, 0, &sensor->bwobs);
+		frame->led_pattern_phase, NULL, 0, &frame->bwobs);
 
 #if LOGLEVEL < 1
 	uint64_t blob_extract_end = ohmd_monotonic_get(sensor->ohmd_ctx);
 #endif
 
-	if (sensor->bwobs && sensor->bwobs->num_blobs > 0) {
+	if (frame->bwobs && frame->bwobs->num_blobs > 0) {
 		tracker_process_blobs (sensor, frame);
 #if 0
 		printf("Sensor %d phase %d Blobs: %d\n", sensor->id, led_pattern_phase, sensor->bwobs->num_blobs);
@@ -633,7 +643,7 @@ static void analyse_frame_fast(rift_sensor_ctx *sensor, rift_sensor_capture_fram
 	frame->image_analysis_finish_ts = now;
 
 	if (ohmd_pw_video_stream_connected(sensor->debug_vid)) {
-		rift_debug_draw_frame (sensor->debug_frame, sensor->bwobs, sensor->cs, frame,
+		rift_debug_draw_frame (sensor->debug_frame, frame->bwobs, sensor->cs, frame,
 			frame->n_devices, sensor->devices, sensor->is_cv1, sensor->camera_matrix,
 			sensor->dist_fisheye, sensor->dist_coeffs, &sensor->camera_pose);
 		ohmd_pw_video_stream_push (sensor->debug_vid, frame->uvc.start_ts, sensor->debug_frame);
@@ -878,7 +888,7 @@ static unsigned int long_analysis_thread(void *arg)
 				ohmd_lock_mutex (ctx->sensor_lock);
 
 				/* Done with this frame - send it back to the capture thread */
-				PUSH_QUEUE(&ctx->capture_frame_q, frame);
+				release_capture_frame(ctx, frame);
 			}
 			if (!ctx->shutdown) {
 				ohmd_cond_wait(ctx->new_frame_cond, ctx->sensor_lock);
@@ -909,11 +919,11 @@ static unsigned int fast_analysis_thread(void *arg)
 					 * then replace it with the new one */
 					rift_sensor_capture_frame *old_frame = REWIND_QUEUE(&ctx->long_analysis_q);
 					if (old_frame)
-						PUSH_QUEUE(&ctx->capture_frame_q, old_frame);
+						release_capture_frame(ctx, old_frame);
 
 					PUSH_QUEUE(&ctx->long_analysis_q, frame);
 				} else {
-					PUSH_QUEUE(&ctx->capture_frame_q, frame);
+					release_capture_frame(ctx, frame);
 				}
 			}
 			if (!ctx->shutdown) {
