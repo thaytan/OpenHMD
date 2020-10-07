@@ -195,9 +195,6 @@ static int tracker_process_blobs(rift_sensor_ctx *ctx, rift_sensor_capture_frame
 		else {
 			int num_blobs = 0;
 
-			LOGD("Sensor %d needs search for device %d matched %u blobs of %u",
-				ctx->id, dev->id, dev_state->score.matched_blobs, dev_state->score.visible_leds);
-
 			/* See if we still have enough labelled blobs to try to re-acquire the pose without a
 			 * full search */
 			for (int index = 0; index < ctx->bwobs->num_blobs; index++) {
@@ -224,40 +221,48 @@ static int tracker_process_blobs(rift_sensor_ctx *ctx, rift_sensor_capture_frame
 			}
 		}
 
-		if (dev_state->score.good_pose_match || correspondence_search_find_one_pose (ctx->cs, dev->id, match_all_blobs, &obj_cam_pose, &dev_state->score)) {
-			if (dev_state->score.good_pose_match) {
-				ret = 1;
+		if (!dev_state->score.good_pose_match) {
+			LOGD("Sensor %d needs search for device %d matched %u blobs of %u",
+				ctx->id, dev->id, dev_state->score.matched_blobs, dev_state->score.visible_leds);
+			correspondence_search_find_one_pose (ctx->cs, dev->id, match_all_blobs, &obj_cam_pose, &dev_state->score);
+		}
 
-				/* Clear existing blob IDs for this device, then
-				 * back project LED ids into blobs if we find them and the dot product
-				 * shows them pointing strongly to the camera */
-				for (int index = 0; index < ctx->bwobs->num_blobs; index++) {
-					struct blob *b = ctx->bwobs->blobs + index;
-					if (LED_OBJECT_ID (b->led_id) == dev->id) {
-						b->prev_led_id = b->led_id;
-						b->led_id = LED_INVALID_ID;
-					}
+		if (dev_state->score.good_pose_match) {
+			ret = 1;
+
+			/* Clear existing blob IDs for this device, then
+			 * back project LED ids into blobs if we find them and the dot product
+			 * shows them pointing strongly to the camera */
+			for (int index = 0; index < ctx->bwobs->num_blobs; index++) {
+				struct blob *b = ctx->bwobs->blobs + index;
+				if (LED_OBJECT_ID (b->led_id) == dev->id) {
+					b->prev_led_id = b->led_id;
+					b->led_id = LED_INVALID_ID;
 				}
-
-				rift_mark_matching_blobs (&obj_cam_pose, bwobs->blobs, bwobs->num_blobs, dev->id,
-						dev->leds->points, dev->leds->num_points,
-						camera_matrix, dist_coeffs, ctx->is_cv1);
-
-				/* Refine the pose with PnP now that we've labelled the blobs */
-				estimate_initial_pose (ctx->bwobs->blobs, ctx->bwobs->num_blobs,
-					dev->id, dev->leds->points, dev->leds->num_points, camera_matrix,
-					dist_coeffs, ctx->is_cv1,
-					&obj_cam_pose, NULL, NULL, true);
-
-				kalman_pose_update (ctx->pose_filter, frame->uvc.start_ts, &obj_cam_pose.pos, &obj_cam_pose.orient);
-				kalman_pose_get_estimated (ctx->pose_filter, &dev_state->final_cam_pose.pos, &dev_state->final_cam_pose.orient);
-
-				LOGD ("sensor %d kalman filter for device %d yielded quat %f %f %f %f pos %f %f %f",
-					ctx->id, dev->id, dev_state->final_cam_pose.orient.x, dev_state->final_cam_pose.orient.y, dev_state->final_cam_pose.orient.z, dev_state->final_cam_pose.orient.w,
-					dev_state->final_cam_pose.pos.x, dev_state->final_cam_pose.pos.y, dev_state->final_cam_pose.pos.z);
-
-				update_device_pose (ctx, dev, frame->uvc.start_ts, &frame->device_state[d]);
 			}
+
+			rift_mark_matching_blobs (&obj_cam_pose, bwobs->blobs, bwobs->num_blobs, dev->id,
+					dev->leds->points, dev->leds->num_points,
+					camera_matrix, dist_coeffs, ctx->is_cv1);
+
+			/* Refine the pose with PnP now that we've labelled the blobs */
+			estimate_initial_pose (ctx->bwobs->blobs, ctx->bwobs->num_blobs,
+				dev->id, dev->leds->points, dev->leds->num_points, camera_matrix,
+				dist_coeffs, ctx->is_cv1,
+				&obj_cam_pose, NULL, NULL, true);
+
+			kalman_pose_update (ctx->pose_filter, frame->uvc.start_ts, &obj_cam_pose.pos, &obj_cam_pose.orient);
+			kalman_pose_get_estimated (ctx->pose_filter, &dev_state->final_cam_pose.pos, &dev_state->final_cam_pose.orient);
+
+			LOGD ("sensor %d kalman filter for device %d yielded quat %f %f %f %f pos %f %f %f",
+				ctx->id, dev->id, dev_state->final_cam_pose.orient.x, dev_state->final_cam_pose.orient.y, dev_state->final_cam_pose.orient.z, dev_state->final_cam_pose.orient.w,
+				dev_state->final_cam_pose.pos.x, dev_state->final_cam_pose.pos.y, dev_state->final_cam_pose.pos.z);
+
+			update_device_pose (ctx, dev, frame->uvc.start_ts, &frame->device_state[d]);
+		}
+		else {
+			/* Didn't find this device - send for long analysis */
+			frame->need_long_analysis = true;
 		}
 	}
 
@@ -594,6 +599,7 @@ static void analyse_frame_fast(rift_sensor_ctx *sensor, rift_sensor_capture_fram
 	int width = frame->uvc.width;
 	int height = frame->uvc.height;
 
+	frame->need_long_analysis = false;
 	frame->image_analysis_start_ts = now;
 
 	blobwatch_process(sensor->bw, frame->uvc.data, width, height,
@@ -662,6 +668,15 @@ static void analyse_frame_fast(rift_sensor_ctx *sensor, rift_sensor_capture_fram
 		 (uint32_t) (frame->image_analysis_start_ts - frame->frame_delivered_ts),
 		 (uint32_t) (frame->image_analysis_finish_ts - frame->image_analysis_start_ts) / 1000000,
 		 (uint32_t) (blob_extract_end - frame->image_analysis_start_ts) / 1000000);
+}
+
+static void analyse_frame_long(rift_sensor_ctx *sensor, rift_sensor_capture_frame *frame)
+{
+	uint64_t now = ohmd_monotonic_get(sensor->ohmd_ctx);
+	frame->long_analysis_start_ts = now;
+
+	now = ohmd_monotonic_get(sensor->ohmd_ctx);
+	frame->long_analysis_finish_ts = now;
 }
 
 static unsigned int fast_analysis_thread(void *arg);
@@ -856,7 +871,18 @@ static unsigned int long_analysis_thread(void *arg)
 
 	ohmd_lock_mutex (ctx->sensor_lock);
 	while (!ctx->shutdown) {
-			ohmd_cond_wait(ctx->new_frame_cond, ctx->sensor_lock);
+			rift_sensor_capture_frame *frame = POP_QUEUE(&ctx->long_analysis_q);
+			if (frame != NULL) {
+				ohmd_unlock_mutex (ctx->sensor_lock);
+				analyse_frame_long(ctx, frame);
+				ohmd_lock_mutex (ctx->sensor_lock);
+
+				/* Done with this frame - send it back to the capture thread */
+				PUSH_QUEUE(&ctx->capture_frame_q, frame);
+			}
+			if (!ctx->shutdown) {
+				ohmd_cond_wait(ctx->new_frame_cond, ctx->sensor_lock);
+			}
 	}
 	ohmd_unlock_mutex (ctx->sensor_lock);
 
@@ -871,14 +897,24 @@ static unsigned int fast_analysis_thread(void *arg)
 	while (!ctx->shutdown) {
 			rift_sensor_capture_frame *frame = POP_QUEUE(&ctx->fast_analysis_q);
 			if (frame != NULL) {
-
 				ohmd_unlock_mutex (ctx->sensor_lock);
 				analyse_frame_fast(ctx, frame);
 				ohmd_lock_mutex (ctx->sensor_lock);
 
-				/* Done with this frame - send it back to the capture thread. FIXME:
-				 * This may need to be sent to the long analysis thread */
-				PUSH_QUEUE(&ctx->capture_frame_q, frame);
+				/* Done with this frame - either send it back to the capture thread,
+				 * or to the long analysis thread */
+				if (frame->need_long_analysis) {
+					/* If there is an un-fetched frame in the long analysis
+					 * queue, steal it back and return that to the capture thread,
+					 * then replace it with the new one */
+					rift_sensor_capture_frame *old_frame = REWIND_QUEUE(&ctx->long_analysis_q);
+					if (old_frame)
+						PUSH_QUEUE(&ctx->capture_frame_q, old_frame);
+
+					PUSH_QUEUE(&ctx->long_analysis_q, frame);
+				} else {
+					PUSH_QUEUE(&ctx->capture_frame_q, frame);
+				}
 			}
 			if (!ctx->shutdown) {
 				ohmd_cond_wait(ctx->new_frame_cond, ctx->sensor_lock);

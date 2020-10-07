@@ -48,6 +48,14 @@ struct rift_sensor_capture_frame {
 
 	/* Timestamp of fast/image analysis thread processing finish */
 	uint64_t image_analysis_finish_ts;
+
+	bool need_long_analysis;
+
+	/* Timestamp of long/image analysis thread processing start */
+	uint64_t long_analysis_start_ts;
+
+	/* Timestamp of long/image analysis thread processing end */
+	uint64_t long_analysis_finish_ts;
 };
 
 rift_sensor_ctx *rift_sensor_new (ohmd_context* ohmd_ctx, int id, const char *serial_no,
