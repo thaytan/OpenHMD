@@ -47,6 +47,8 @@ struct rift_sensor_capture_frame {
 	/* Timestamp of fast/image analysis thread processing start */
 	uint64_t image_analysis_start_ts;
 
+	uint64_t blob_extract_finish_ts;
+
 	/* Timestamp of fast/image analysis thread processing finish */
 	uint64_t image_analysis_finish_ts;
 

@@ -35,12 +35,20 @@
 
 #define ASSERT_MSG(_v, label, ...) if(!(_v)){ fprintf(stderr, __VA_ARGS__); goto label; }
 
-#define NUM_CAPTURE_BUFFERS 3
+/* We need 4 capture buffers:
+ * 	1 to be capturing into
+ * 	1 captured, in the fast analysis thread
+ * 	1 possibly undergoing long analysis
+ * 	1 pending long analysis
+ */
+#define NUM_CAPTURE_BUFFERS 4
+
+#define QUEUE_SIZE (NUM_CAPTURE_BUFFERS+1)
 
 typedef struct rift_sensor_frame_queue rift_sensor_frame_queue;
 
 struct rift_sensor_frame_queue {
-	rift_sensor_capture_frame *data[NUM_CAPTURE_BUFFERS+1];
+	rift_sensor_capture_frame *data[QUEUE_SIZE];
 	unsigned int head, tail;
 };
 
@@ -48,7 +56,7 @@ struct rift_sensor_frame_queue {
 		(q)->head = (q)->tail = 0;
 
 #define PUSH_QUEUE(q,f) do { \
-	unsigned int next = ((q)->tail+1) % (NUM_CAPTURE_BUFFERS+1); \
+	unsigned int next = ((q)->tail+1) % QUEUE_SIZE; \
 	assert(next != (q)->head); /* Check there's room */ \
 	assert ((f) != NULL); \
 	(q)->data[(q)->tail] = (f); \
@@ -57,7 +65,7 @@ struct rift_sensor_frame_queue {
 
 static rift_sensor_capture_frame *POP_QUEUE(rift_sensor_frame_queue *q) {
 	rift_sensor_capture_frame *f;
-	unsigned int next_head = (q->head+1) % (NUM_CAPTURE_BUFFERS+1);
+	unsigned int next_head = (q->head+1) % QUEUE_SIZE;
 
 	if ((q)->tail == (q)->head) /* Check there's something in the queue */
 		return NULL;
@@ -71,8 +79,12 @@ static rift_sensor_capture_frame *POP_QUEUE(rift_sensor_frame_queue *q) {
 /* Rewind the queue and un-push the last element */
 static rift_sensor_capture_frame *REWIND_QUEUE(rift_sensor_frame_queue *q) {
 	rift_sensor_capture_frame *f;
-	unsigned int prev_tail = (q->tail-1) % (NUM_CAPTURE_BUFFERS+1);
-	if ((q)->tail == (q)->head) /* Check there's something in the queue */
+	unsigned int prev_tail = (q->tail-1);
+
+	if (prev_tail >= QUEUE_SIZE)
+		prev_tail = QUEUE_SIZE-1;
+
+	if (q->tail == q->head) /* Check there's something in the queue */
 		return NULL;
 
 	f = q->data[prev_tail];
@@ -114,6 +126,8 @@ struct rift_sensor_ctx_s
 	rift_tracked_device *devices[RIFT_MAX_TRACKED_DEVICES];
 	uint8_t n_devices;
 
+	rift_sensor_capture_frame *cur_capture_frame;
+
 	/* Queue of frames being returned to the capture thread */
 	rift_sensor_frame_queue capture_frame_q;
 	int dropped_frames;
@@ -141,23 +155,21 @@ struct rift_sensor_ctx_s
 
 static void update_device_pose (rift_sensor_ctx *sensor_ctx, rift_tracked_device *dev,
 	rift_sensor_capture_frame *frame, rift_sensor_device_state *dev_state);
+static void update_device_and_blobs (rift_sensor_ctx *ctx, rift_sensor_capture_frame *frame,
+	rift_tracked_device *dev, rift_sensor_device_state *dev_state, posef *obj_cam_pose);
 
-static int tracker_process_blobs(rift_sensor_ctx *ctx, rift_sensor_capture_frame *frame)
+static void tracker_process_blobs_fast(rift_sensor_ctx *ctx, rift_sensor_capture_frame *frame)
 {
 	blobservation* bwobs = frame->bwobs;
-	int ret = 0;
 	dmat3 *camera_matrix = &ctx->camera_matrix;
 	double *dist_coeffs = ctx->dist_coeffs;
 	int d;
-
-	correspondence_search_set_blobs (ctx->cs, bwobs->blobs, bwobs->num_blobs);
 
 	/* Only process the devices that were available when this frame was captured */
 	for (d = 0; d < frame->n_devices; d++) {
 		rift_tracked_device *dev = ctx->devices[d];
 		rift_sensor_device_state *dev_state = frame->device_state + d;
 		posef obj_world_pose, obj_cam_pose;
-		bool match_all_blobs = (dev->id == 0); /* Let the HMD match whatever it can */
 
 		obj_world_pose = dev_state->capture_world_pose;
 
@@ -177,8 +189,9 @@ static int tracker_process_blobs(rift_sensor_ctx *ctx, rift_sensor_capture_frame
 			obj_cam_pose = obj_world_pose;
 		}
 
-		LOGD ("Sensor %d searching for matching pose for device %d, initial quat %f %f %f %f pos %f %f %f",
-			ctx->id, dev->id, obj_cam_pose.orient.x, obj_cam_pose.orient.y, obj_cam_pose.orient.z, obj_cam_pose.orient.w,
+		LOGD ("Sensor %d Frame %d searching for matching pose for device %d, initial quat %f %f %f %f pos %f %f %f",
+			ctx->id, frame->id, dev->id,
+			obj_cam_pose.orient.x, obj_cam_pose.orient.y, obj_cam_pose.orient.z, obj_cam_pose.orient.w,
 			obj_cam_pose.pos.x, obj_cam_pose.pos.y, obj_cam_pose.pos.z);
 
 		dev_state->final_cam_pose = obj_cam_pose;
@@ -221,51 +234,49 @@ static int tracker_process_blobs(rift_sensor_ctx *ctx, rift_sensor_capture_frame
 		}
 
 		if (!dev_state->score.good_pose_match) {
-			LOGD("Sensor %d needs search for device %d matched %u blobs of %u",
-				ctx->id, dev->id, dev_state->score.matched_blobs, dev_state->score.visible_leds);
-			correspondence_search_find_one_pose (ctx->cs, dev->id, match_all_blobs, &obj_cam_pose, &dev_state->score);
-		}
-
-		if (dev_state->score.good_pose_match) {
-			ret = 1;
-
-			/* Clear existing blob IDs for this device, then
-			 * back project LED ids into blobs if we find them and the dot product
-			 * shows them pointing strongly to the camera */
-			for (int index = 0; index < bwobs->num_blobs; index++) {
-				struct blob *b = bwobs->blobs + index;
-				if (LED_OBJECT_ID (b->led_id) == dev->id) {
-					b->prev_led_id = b->led_id;
-					b->led_id = LED_INVALID_ID;
-				}
-			}
-
-			rift_mark_matching_blobs (&obj_cam_pose, bwobs->blobs, bwobs->num_blobs, dev->id,
-					dev->leds->points, dev->leds->num_points,
-					camera_matrix, dist_coeffs, ctx->is_cv1);
-
-			/* Refine the pose with PnP now that we've labelled the blobs */
-			estimate_initial_pose (bwobs->blobs, bwobs->num_blobs,
-				dev->id, dev->leds->points, dev->leds->num_points, camera_matrix,
-				dist_coeffs, ctx->is_cv1,
-				&obj_cam_pose, NULL, NULL, true);
-
-			kalman_pose_update (ctx->pose_filter, frame->uvc.start_ts, &obj_cam_pose.pos, &obj_cam_pose.orient);
-			kalman_pose_get_estimated (ctx->pose_filter, &dev_state->final_cam_pose.pos, &dev_state->final_cam_pose.orient);
-
-			LOGD ("sensor %d kalman filter for device %d yielded quat %f %f %f %f pos %f %f %f",
-				ctx->id, dev->id, dev_state->final_cam_pose.orient.x, dev_state->final_cam_pose.orient.y, dev_state->final_cam_pose.orient.z, dev_state->final_cam_pose.orient.w,
-				dev_state->final_cam_pose.pos.x, dev_state->final_cam_pose.pos.y, dev_state->final_cam_pose.pos.z);
-
-			update_device_pose (ctx, dev, frame, &frame->device_state[d]);
+			/* Didn't find this device - send the frame for long analysis */
+			LOGD("Sensor %d frame %d needs full search for device %d - sending to long analysis thread",
+				ctx->id, frame->id, dev->id);
+			frame->need_long_analysis = true;
+			continue;
 		}
 		else {
-			/* Didn't find this device - send for long analysis */
-			frame->need_long_analysis = true;
+			update_device_and_blobs (ctx, frame, dev, dev_state, &obj_cam_pose);
 		}
 	}
+}
 
-	return ret;
+static void tracker_process_blobs_long(rift_sensor_ctx *ctx, rift_sensor_capture_frame *frame)
+{
+	blobservation* bwobs = frame->bwobs;
+	int d;
+
+	LOGD("Sensor %d Frame %d - starting long search for devices", ctx->id, frame->id);
+
+	correspondence_search_set_blobs (ctx->cs, bwobs->blobs, bwobs->num_blobs);
+
+	/* Only process the devices that were available when this frame was captured */
+	for (d = 0; d < frame->n_devices; d++) {
+		rift_tracked_device *dev = ctx->devices[d];
+		rift_sensor_device_state *dev_state = frame->device_state + d;
+		posef obj_cam_pose;
+		bool match_all_blobs = (dev->id == 0); /* Let the HMD match whatever it can */
+
+		if (dev_state->score.good_pose_match) {
+			/* We already found this device during fast analysis */
+			continue;
+		}
+
+		correspondence_search_find_one_pose (ctx->cs, dev->id, match_all_blobs, &obj_cam_pose, &dev_state->score);
+
+		LOGV("Sensor %d Frame %d - doing long search for device %d matched %u blobs of %u (%s match)",
+			ctx->id, frame->id, dev->id, dev_state->score.matched_blobs, dev_state->score.visible_leds,
+			dev_state->score.good_pose_match ? "good" : "bad");
+
+		if (dev_state->score.good_pose_match) {
+			update_device_and_blobs (ctx, frame, dev, dev_state, &obj_cam_pose);
+		}
+	}
 }
 
 bool
@@ -390,7 +401,18 @@ static void dump_bin(const char* label, const unsigned char* data, int length)
 
 /* Called with sensor_lock held. Releases a frame back to the capture thread */
 static void
-release_capture_frame(rift_sensor_ctx *sensor, rift_sensor_capture_frame *frame) {
+release_capture_frame(rift_sensor_ctx *sensor, rift_sensor_capture_frame *frame)
+{
+	LOGD("Sensor %d Frame %d analysis done after %u ms. Captured %" PRIu64 " USB delivery %u ms thread switch %u ns analysis %ums (%ums blob extraction) %u ms long analysis",
+		 sensor->id, frame->id,
+		 (uint32_t) (ohmd_monotonic_get(sensor->ohmd_ctx) - frame->uvc.start_ts) / 1000000,
+		 frame->uvc.start_ts,
+		 (uint32_t) (frame->frame_delivered_ts - frame->uvc.start_ts) / 1000000,
+		 (uint32_t) (frame->image_analysis_start_ts - frame->frame_delivered_ts),
+		 (uint32_t) (frame->image_analysis_finish_ts - frame->image_analysis_start_ts) / 1000000,
+		 (uint32_t) (frame->blob_extract_finish_ts - frame->image_analysis_start_ts) / 1000000,
+		 (uint32_t) (frame->long_analysis_finish_ts - frame->long_analysis_start_ts) / 1000000);
+
 	if (frame->bwobs) {
 		blobwatch_release_observation(sensor->bw, frame->bwobs);
 		frame->bwobs = NULL;
@@ -410,12 +432,23 @@ static void new_frame_start_cb(struct rift_sensor_uvc_stream *stream, uint64_t s
 			sensor->id, led_pattern_phase);
 
 	ohmd_lock_mutex(sensor->sensor_lock);
-	next_frame = POP_QUEUE(&sensor->capture_frame_q);
+	if (sensor->cur_capture_frame != NULL) {
+		/* Previous frame never completed - some USB problem,
+		 * just reuse it (but update all the state for a new
+		 * timestamp)
+		 */
+		next_frame = sensor->cur_capture_frame;
+	}
+	else {
+		next_frame = POP_QUEUE(&sensor->capture_frame_q);
+	}
+
 	if (next_frame != NULL) {
 		if (sensor->dropped_frames) {
 				LOGW("Sensor %d dropped %d frames", sensor->id, sensor->dropped_frames);
 				sensor->dropped_frames = 0;
 		}
+		LOGD("Sensor %d starting capture into frame %d", sensor->id, next_frame->id);
 	}
 	else {
 		/* No frames available from the analysis threads yet - try
@@ -423,6 +456,7 @@ static void new_frame_start_cb(struct rift_sensor_uvc_stream *stream, uint64_t s
 		 * succeed, or else there's not enough capture frames in circulation */
 		next_frame = REWIND_QUEUE(&sensor->fast_analysis_q);
 		assert (next_frame != NULL);
+		LOGD("Sensor %d reclaimed frame %d from fast analysis for capture", sensor->id, next_frame->id);
 		sensor->dropped_frames++;
 	}
 
@@ -449,8 +483,48 @@ static void new_frame_start_cb(struct rift_sensor_uvc_stream *stream, uint64_t s
 	}
 	next_frame->n_devices = sensor->n_devices;
 
+	sensor->cur_capture_frame = next_frame;
 	rift_sensor_uvc_stream_set_frame(stream, (rift_sensor_uvc_frame *)next_frame);
 	ohmd_unlock_mutex(sensor->sensor_lock);
+}
+
+static void
+update_device_and_blobs (rift_sensor_ctx *ctx, rift_sensor_capture_frame *frame,
+	rift_tracked_device *dev, rift_sensor_device_state *dev_state, posef *obj_cam_pose)
+{
+	blobservation* bwobs = frame->bwobs;
+	dmat3 *camera_matrix = &ctx->camera_matrix;
+	double *dist_coeffs = ctx->dist_coeffs;
+
+	/* Clear existing blob IDs for this device, then
+	 * back project LED ids into blobs if we find them and the dot product
+	 * shows them pointing strongly to the camera */
+	for (int index = 0; index < bwobs->num_blobs; index++) {
+		struct blob *b = bwobs->blobs + index;
+		if (LED_OBJECT_ID (b->led_id) == dev->id) {
+			b->prev_led_id = b->led_id;
+			b->led_id = LED_INVALID_ID;
+		}
+	}
+
+	rift_mark_matching_blobs (obj_cam_pose, bwobs->blobs, bwobs->num_blobs, dev->id,
+			dev->leds->points, dev->leds->num_points,
+			camera_matrix, dist_coeffs, ctx->is_cv1);
+
+	/* Refine the pose with PnP now that we've labelled the blobs */
+	estimate_initial_pose (bwobs->blobs, bwobs->num_blobs,
+		dev->id, dev->leds->points, dev->leds->num_points, camera_matrix,
+		dist_coeffs, ctx->is_cv1,
+		obj_cam_pose, NULL, NULL, true);
+
+	kalman_pose_update (ctx->pose_filter, frame->uvc.start_ts, &obj_cam_pose->pos, &obj_cam_pose->orient);
+	kalman_pose_get_estimated (ctx->pose_filter, &dev_state->final_cam_pose.pos, &dev_state->final_cam_pose.orient);
+
+	LOGD ("sensor %d kalman filter for device %d yielded quat %f %f %f %f pos %f %f %f",
+		ctx->id, dev->id, dev_state->final_cam_pose.orient.x, dev_state->final_cam_pose.orient.y, dev_state->final_cam_pose.orient.z, dev_state->final_cam_pose.orient.w,
+		dev_state->final_cam_pose.pos.x, dev_state->final_cam_pose.pos.y, dev_state->final_cam_pose.pos.z);
+
+	update_device_pose (ctx, dev, frame, dev_state);
 }
 
 static void
@@ -565,8 +639,7 @@ static void frame_captured_cb(rift_sensor_uvc_stream *stream, rift_sensor_uvc_fr
 	rift_sensor_capture_frame *frame = (rift_sensor_capture_frame *)(uvc_frame);
 	rift_sensor_ctx *sensor = stream->user_data;
 
-	assert (sensor);
-
+	assert(sensor);
 	uint64_t now = ohmd_monotonic_get(sensor->ohmd_ctx);
 
 	frame->frame_delivered_ts = now;
@@ -598,6 +671,11 @@ static void frame_captured_cb(rift_sensor_uvc_stream *stream, rift_sensor_uvc_fr
 	LOGD ("Sensor %d captured frame %d phase %d", sensor->id, frame->id, frame->led_pattern_phase);
 
 	ohmd_lock_mutex(sensor->sensor_lock);
+	/* The frame being returned must be the most recent one
+	 * we sent to the UVC capture */
+	assert(sensor->cur_capture_frame == frame);
+	sensor->cur_capture_frame = NULL;
+
 	PUSH_QUEUE(&sensor->fast_analysis_q, frame);
 	ohmd_cond_broadcast (sensor->new_frame_cond);
 	ohmd_unlock_mutex(sensor->sensor_lock);
@@ -609,18 +687,20 @@ static void analyse_frame_fast(rift_sensor_ctx *sensor, rift_sensor_capture_fram
 	int width = frame->uvc.width;
 	int height = frame->uvc.height;
 
+	LOGD("Sensor %d Frame %d - starting fast analysis", sensor->id, frame->id);
+
 	frame->need_long_analysis = false;
+	frame->long_analysis_start_ts = frame->long_analysis_finish_ts = 0;
+
 	frame->image_analysis_start_ts = now;
 
 	blobwatch_process(sensor->bw, frame->uvc.data, width, height,
 		frame->led_pattern_phase, NULL, 0, &frame->bwobs);
 
-#if LOGLEVEL < 1
-	uint64_t blob_extract_end = ohmd_monotonic_get(sensor->ohmd_ctx);
-#endif
+	frame->blob_extract_finish_ts = ohmd_monotonic_get(sensor->ohmd_ctx);
 
 	if (frame->bwobs && frame->bwobs->num_blobs > 0) {
-		tracker_process_blobs (sensor, frame);
+		tracker_process_blobs_fast(sensor, frame);
 #if 0
 		printf("Sensor %d phase %d Blobs: %d\n", sensor->id, led_pattern_phase, sensor->bwobs->num_blobs);
 
@@ -639,8 +719,7 @@ static void analyse_frame_fast(rift_sensor_ctx *sensor, rift_sensor_capture_fram
 #endif
 	}
 
-	now = ohmd_monotonic_get(sensor->ohmd_ctx);
-	frame->image_analysis_finish_ts = now;
+	frame->image_analysis_finish_ts = ohmd_monotonic_get(sensor->ohmd_ctx);
 
 	if (ohmd_pw_video_stream_connected(sensor->debug_vid)) {
 		rift_debug_draw_frame (sensor->debug_frame, frame->bwobs, sensor->cs, frame,
@@ -663,30 +742,6 @@ static void analyse_frame_fast(rift_sensor_ctx *sensor, rift_sensor_capture_fram
 	}
 #endif
 
-#if LOGLEVEL < 1
-	double time_since_last_capture = 0;
-	if (sensor->prev_capture_ts) {
-		time_since_last_capture = (double)(frame->uvc.start_ts - sensor->prev_capture_ts) / 1000000.0;
-	}
-	sensor->prev_capture_ts = frame->uvc.start_ts;
-#endif
-
-	LOGD("Sensor %d Frame analysis done after %u ms. Captured %" PRIu64 " (%.1fms between frames) USB delivery %u ms thread switch %u ns analysis %ums (%ums blob extraction)",
-		 sensor->id, (uint32_t) (frame->image_analysis_finish_ts - frame->uvc.start_ts) / 1000000,
-		 frame->uvc.start_ts, time_since_last_capture,
-		 (uint32_t) (frame->frame_delivered_ts - frame->uvc.start_ts) / 1000000,
-		 (uint32_t) (frame->image_analysis_start_ts - frame->frame_delivered_ts),
-		 (uint32_t) (frame->image_analysis_finish_ts - frame->image_analysis_start_ts) / 1000000,
-		 (uint32_t) (blob_extract_end - frame->image_analysis_start_ts) / 1000000);
-}
-
-static void analyse_frame_long(rift_sensor_ctx *sensor, rift_sensor_capture_frame *frame)
-{
-	uint64_t now = ohmd_monotonic_get(sensor->ohmd_ctx);
-	frame->long_analysis_start_ts = now;
-
-	now = ohmd_monotonic_get(sensor->ohmd_ctx);
-	frame->long_analysis_finish_ts = now;
 }
 
 static unsigned int fast_analysis_thread(void *arg);
@@ -722,7 +777,7 @@ rift_sensor_new(ohmd_context* ohmd_ctx, int id, const char *serial_no,
 	sensor_ctx->stream.sof_cb = new_frame_start_cb;
 	sensor_ctx->stream.frame_cb = frame_captured_cb;
 	sensor_ctx->stream.user_data = sensor_ctx;
-	
+
 	sensor_ctx->have_camera_pose = false;
 
 	printf ("Found Rift Sensor %d w/ Serial %s. Connecting to Radio address 0x%02x%02x%02x%02x%02x\n",
@@ -751,6 +806,7 @@ rift_sensor_new(ohmd_context* ohmd_ctx, int id, const char *serial_no,
 			PUSH_QUEUE(&sensor_ctx->capture_frame_q, frame);
 	}
 	sensor_ctx->dropped_frames = 0;
+	sensor_ctx->cur_capture_frame = NULL;
 
 	snprintf(stream_id,64,"openhmd-rift-sensor-%s", sensor_ctx->serial_no);
 	stream_id[63] = 0;
@@ -781,7 +837,7 @@ rift_sensor_new(ohmd_context* ohmd_ctx, int id, const char *serial_no,
 	sensor_ctx->fast_analysis_thread = ohmd_create_thread (ohmd_ctx, fast_analysis_thread, sensor_ctx);
 	sensor_ctx->long_analysis_thread = ohmd_create_thread (ohmd_ctx, long_analysis_thread, sensor_ctx);
 
-	LOGI("Sensor %d starting stream\n", id);
+	LOGV("Sensor %d starting stream\n", id);
 	ret = rift_sensor_uvc_stream_start (&sensor_ctx->stream);
 	ASSERT_MSG(ret >= 0, fail, "could not start streaming\n");
 	sensor_ctx->stream_started = 1;
@@ -793,12 +849,12 @@ rift_sensor_new(ohmd_context* ohmd_ctx, int id, const char *serial_no,
 				ret = rift_sensor_ar0134_init(sensor_ctx->usb_devh);
 				if (ret < 0)
 					goto fail;
-		
+
 				LOGV("Sensor %d - setting up radio\n", id);
 				ret = rift_sensor_esp770u_setup_radio(sensor_ctx->usb_devh, radio_id);
 				if (ret < 0)
 					goto fail;
-		
+
 				break;
 			}
 			case DK2_PID:
@@ -816,7 +872,7 @@ rift_sensor_new(ohmd_context* ohmd_ctx, int id, const char *serial_no,
 				break;
 			}
 	}
-	LOGI("Sensor %d ready\n", id);
+	LOGV("Sensor %d ready\n", id);
 
 	return sensor_ctx;
 
@@ -836,7 +892,7 @@ rift_sensor_free (rift_sensor_ctx *sensor_ctx)
 
 	if (sensor_ctx->bw)
 			blobwatch_free (sensor_ctx->bw);
-		
+
 	if (sensor_ctx->stream_started)
 		rift_sensor_uvc_stream_stop(&sensor_ctx->stream);
 
@@ -884,7 +940,11 @@ static unsigned int long_analysis_thread(void *arg)
 			rift_sensor_capture_frame *frame = POP_QUEUE(&ctx->long_analysis_q);
 			if (frame != NULL) {
 				ohmd_unlock_mutex (ctx->sensor_lock);
-				analyse_frame_long(ctx, frame);
+
+				frame->long_analysis_start_ts = ohmd_monotonic_get(ctx->ohmd_ctx);
+				tracker_process_blobs_long(ctx, frame);
+				frame->long_analysis_finish_ts = ohmd_monotonic_get(ctx->ohmd_ctx);
+
 				ohmd_lock_mutex (ctx->sensor_lock);
 
 				/* Done with this frame - send it back to the capture thread */
@@ -901,15 +961,15 @@ static unsigned int long_analysis_thread(void *arg)
 
 static unsigned int fast_analysis_thread(void *arg)
 {
-	rift_sensor_ctx *ctx = arg;
+	rift_sensor_ctx *sensor = arg;
 
-	ohmd_lock_mutex (ctx->sensor_lock);
-	while (!ctx->shutdown) {
-			rift_sensor_capture_frame *frame = POP_QUEUE(&ctx->fast_analysis_q);
+	ohmd_lock_mutex (sensor->sensor_lock);
+	while (!sensor->shutdown) {
+			rift_sensor_capture_frame *frame = POP_QUEUE(&sensor->fast_analysis_q);
 			if (frame != NULL) {
-				ohmd_unlock_mutex (ctx->sensor_lock);
-				analyse_frame_fast(ctx, frame);
-				ohmd_lock_mutex (ctx->sensor_lock);
+				ohmd_unlock_mutex (sensor->sensor_lock);
+				analyse_frame_fast(sensor, frame);
+				ohmd_lock_mutex (sensor->sensor_lock);
 
 				/* Done with this frame - either send it back to the capture thread,
 				 * or to the long analysis thread */
@@ -917,20 +977,23 @@ static unsigned int fast_analysis_thread(void *arg)
 					/* If there is an un-fetched frame in the long analysis
 					 * queue, steal it back and return that to the capture thread,
 					 * then replace it with the new one */
-					rift_sensor_capture_frame *old_frame = REWIND_QUEUE(&ctx->long_analysis_q);
-					if (old_frame)
-						release_capture_frame(ctx, old_frame);
+					rift_sensor_capture_frame *old_frame = REWIND_QUEUE(&sensor->long_analysis_q);
+					if (old_frame) {
+						LOGD("Sensor %d reclaimed frame %d from long analysis queue",
+							sensor->id, old_frame->id);
+						release_capture_frame(sensor, old_frame);
+					}
 
-					PUSH_QUEUE(&ctx->long_analysis_q, frame);
+					PUSH_QUEUE(&sensor->long_analysis_q, frame);
 				} else {
-					release_capture_frame(ctx, frame);
+					release_capture_frame(sensor, frame);
 				}
 			}
-			if (!ctx->shutdown) {
-				ohmd_cond_wait(ctx->new_frame_cond, ctx->sensor_lock);
+			if (!sensor->shutdown) {
+				ohmd_cond_wait(sensor->new_frame_cond, sensor->sensor_lock);
 			}
 	}
-	ohmd_unlock_mutex (ctx->sensor_lock);
+	ohmd_unlock_mutex (sensor->sensor_lock);
 
 	return 0;
 }
