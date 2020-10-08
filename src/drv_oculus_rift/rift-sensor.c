@@ -264,6 +264,17 @@ static void tracker_process_blobs_long(rift_sensor_ctx *ctx, rift_sensor_capture
 
 		if (dev_state->score.good_pose_match) {
 			/* We already found this device during fast analysis */
+
+			/* Clear existing blob IDs for this device, as we only want to use
+			 * newly labelled LEDs for devices we search for to be fed back
+			 * to the blob tracker */
+			for (int index = 0; index < bwobs->num_blobs; index++) {
+				struct blob *b = bwobs->blobs + index;
+				if (LED_OBJECT_ID (b->led_id) == dev->id) {
+					b->led_id = LED_INVALID_ID;
+				}
+			}
+
 			continue;
 		}
 
@@ -275,6 +286,7 @@ static void tracker_process_blobs_long(rift_sensor_ctx *ctx, rift_sensor_capture
 
 		if (dev_state->score.good_pose_match) {
 			update_device_and_blobs (ctx, frame, dev, dev_state, &obj_cam_pose);
+	    frame->long_analysis_found_new_blobs = true;
 		}
 	}
 }
@@ -414,7 +426,7 @@ release_capture_frame(rift_sensor_ctx *sensor, rift_sensor_capture_frame *frame)
 		 (uint32_t) (frame->long_analysis_finish_ts - frame->long_analysis_start_ts) / 1000000);
 
 	if (frame->bwobs) {
-		blobwatch_release_observation(sensor->bw, frame->bwobs);
+		blobwatch_release_observation(sensor->bw, frame->bwobs, frame->long_analysis_found_new_blobs);
 		frame->bwobs = NULL;
 	}
 	PUSH_QUEUE(&sensor->capture_frame_q, frame);
@@ -690,6 +702,7 @@ static void analyse_frame_fast(rift_sensor_ctx *sensor, rift_sensor_capture_fram
 	LOGD("Sensor %d Frame %d - starting fast analysis", sensor->id, frame->id);
 
 	frame->need_long_analysis = false;
+	frame->long_analysis_found_new_blobs = false;
 	frame->long_analysis_start_ts = frame->long_analysis_finish_ts = 0;
 
 	frame->image_analysis_start_ts = now;

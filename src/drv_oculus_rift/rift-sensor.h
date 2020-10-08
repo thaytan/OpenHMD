@@ -54,6 +54,8 @@ struct rift_sensor_capture_frame {
 
 	bool need_long_analysis;
 
+	bool long_analysis_found_new_blobs;
+
 	/* Timestamp of long/image analysis thread processing start */
 	uint64_t long_analysis_start_ts;
 

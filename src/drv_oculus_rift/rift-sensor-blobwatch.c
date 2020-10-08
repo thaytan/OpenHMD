@@ -83,6 +83,7 @@ static blobservation *POP_QUEUE(blobservation_queue *q) {
  * Blob detector internal state
  */
 struct blobwatch {
+	uint32_t next_blob_id;
 	uint8_t threshold;
 	int width;
 	int height;
@@ -115,6 +116,7 @@ blobwatch *blobwatch_new(uint8_t threshold, int width, int height)
 		return NULL;
 
 	memset(bw, 0, sizeof(*bw));
+	bw->next_blob_id = 1;
 	bw->threshold = threshold;
 	bw->width = width;
 	bw->height = height;
@@ -139,9 +141,10 @@ void blobwatch_free (blobwatch *bw)
  * Stores blob information collected in the last extent e into the blob
  * array b at the given index.
  */
-static inline void store_blob(struct extent *e, int index, int y, struct blob *b)
+static inline void store_blob(struct extent *e, int index, int y, struct blob *b, uint32_t blob_id)
 {
 	b += index;
+	b->blob_id = blob_id;
 	b->x = (e->left + e->right) / 2.0;
 	b->y = (e->top + y) / 2.0;
 	b->vx = 0;
@@ -214,7 +217,7 @@ static void process_scanline(uint8_t *line, blobwatch *bw, int y,
 			       ob->num_blobs < num_blobs) {
 				/* Don't store 1x1 blobs */
 				if (le->top != y || le->left != le->right)
-					store_blob(le, ob->num_blobs++, y, blobs);
+					store_blob(le, ob->num_blobs++, y, blobs, bw->next_blob_id++);
 
 				le++;
 			}
@@ -257,7 +260,7 @@ static void process_scanline(uint8_t *line, blobwatch *bw, int y,
 		while (le < le_end && ob->num_blobs < num_blobs) {
 			/* Don't store 1x1 blobs */
 			if (le->top != y || le->left != le->right)
-				store_blob(le, ob->num_blobs++, y, blobs);
+				store_blob(le, ob->num_blobs++, y, blobs, bw->next_blob_id++);
 			le++;
 		}
 	}
@@ -273,7 +276,7 @@ static void process_scanline(uint8_t *line, blobwatch *bw, int y,
 
 			/* Don't store 1x1 blobs */
 			if (le->top != y || le->left != le->right)
-				store_blob(extent, ob->num_blobs++, y, blobs);
+				store_blob(extent, ob->num_blobs++, y, blobs, bw->next_blob_id++);
 		}
 	}
 }
@@ -315,6 +318,7 @@ static int find_free_track(uint8_t *tracked)
 }
 
 void copy_matching_blob(struct blob *to, struct blob* from) {
+	to->blob_id = from->blob_id;
 	to->vx = to->x - from->x;
 	to->vy = to->y - from->y;
 	memcpy (to->pattern_bits, from->pattern_bits, sizeof (from->pattern_bits));
@@ -514,7 +518,38 @@ struct blob *blobwatch_find_blob_at(blobwatch *bw, int x, int y)
 	return NULL;
 }
 
-void blobwatch_release_observation(blobwatch *bw, blobservation *ob)
+static void update_labels_from_observation(blobwatch *bw, blobservation *ob)
 {
+	/* Take the observation in ob and use any LED labels in it to update any missing
+	 * LED labels in the last observation */
+	/* FIXME: This is an n^2 match for simplicity. Filtering out blobs with no LED
+	 * label and sorting the blobs by ID might make things quicker for larger numbers
+	 * of blobs - needs testing. */
+	blobservation *last_ob = bw->last_observation;
+	int i, l;
+
+	if (last_ob == NULL || last_ob == ob)
+		return; /* Nothing to do */
+
+	for (i = 0; i < ob->num_blobs; i++) {
+		struct blob *b = ob->blobs + i;
+		if (b->led_id == LED_INVALID_ID)
+			continue; /* Not labelled */
+
+		for (l = 0; l < last_ob->num_blobs; l++) {
+			struct blob *new_b = last_ob->blobs + l;
+			if (new_b->blob_id == b->blob_id && new_b->led_id == LED_INVALID_ID) {
+				printf ("Found matching blob %u - labelled with LED id %x\n",
+					b->blob_id, b->led_id);
+				new_b->led_id = b->led_id;
+			}
+		}
+	}
+}
+
+void blobwatch_release_observation(blobwatch *bw, blobservation *ob, bool update_labels)
+{
+	if (update_labels)
+		update_labels_from_observation(bw, ob);
 	PUSH_QUEUE(&bw->observation_q, ob);
 }
