@@ -23,6 +23,9 @@ struct leds;
 #define NUM_FRAMES_HISTORY	3
 #define MAX_EXTENTS_PER_LINE	30
 
+/* Set to 1 to do extra array tracking consistency checks */
+#define CONSISTENCY_CHECKS 0
+
 #define QUEUE_ENTRIES (NUM_FRAMES_HISTORY+1)
 
 #define abs(x) ((x) >= 0 ? (x) : -(x))
@@ -461,6 +464,7 @@ void blobwatch_process(blobwatch *bw, uint8_t *frame,
 			ob->tracked[b2->track_index] = i + 1;
 	}
 
+#if CONSISTENCY_CHECKS
 	/* Check blob <-> tracked array links for consistency */
 	for (i = 0; i < ob->num_blobs; i++) {
 		struct blob *b = &ob->blobs[i];
@@ -471,6 +475,7 @@ void blobwatch_process(blobwatch *bw, uint8_t *frame,
 			       ob->tracked[b->track_index], i + 1);
 		}
 	}
+#endif
 
 	if (bw->flicker_enable) {
 		/* Identify blobs by their blinking pattern */
