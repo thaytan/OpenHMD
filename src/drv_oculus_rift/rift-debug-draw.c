@@ -169,7 +169,6 @@ void rift_debug_draw_frame (uint8_t *pixels, struct blobservation* bwobs,
   posef *camera_pose)
 {
 	uint8_t *src = frame->uvc.data;
-	
 	int x, y;
 	int width = frame->uvc.width;
 	int height = frame->uvc.height;
@@ -219,7 +218,7 @@ void rift_debug_draw_frame (uint8_t *pixels, struct blobservation* bwobs,
 					d[0] = d[1] = d[2] = src[x];
 					d += 3;
 				}
-		
+
 				dest += out_stride;
 				src += in_stride;
 			}
@@ -253,15 +252,21 @@ void rift_debug_draw_frame (uint8_t *pixels, struct blobservation* bwobs,
 				dist_coeffs, is_cv1, &pose, led_out_points);
 
 			for (i = 0; i < dev->leds->num_points; i++) {
+				rift_led *leds = dev->leds->points;
 				vec3f *p = led_out_points + i;
-				vec3f facing;
+				vec3f normal, position;
+				double facing_dot;
 				int x = round (p->x);
 				int y = round (p->y);
 
-				oquatf_get_rotated (&pose.orient,
-					&dev->leds->points[i].dir, &facing);
+				oquatf_get_rotated(&pose.orient, &leds[i].pos, &position);
+				ovec3f_add (&pose.pos, &position, &position);
 
-				if (facing.z < -0.25) {
+				ovec3f_normalize_me (&position);
+				oquatf_get_rotated(&pose.orient, &leds[i].dir, &normal);
+				facing_dot = ovec3f_get_dot (&position, &normal);
+
+				if (facing_dot < -0.25) {
 					/* Camera facing */
 					draw_rgb_marker (pixels + 3*width, width, out_stride, height, x,
 						y, 6, 6, 0x008080);
@@ -287,15 +292,21 @@ void rift_debug_draw_frame (uint8_t *pixels, struct blobservation* bwobs,
 					dist_coeffs, is_cv1, &pose, led_out_points);
 
 			for (i = 0; i < dev->leds->num_points; i++) {
+				rift_led *leds = dev->leds->points;
 				vec3f *p = led_out_points + i;
-				vec3f facing;
+				vec3f normal, position;
+				double facing_dot;
 				int x = round (p->x);
 				int y = round (p->y);
 
-				oquatf_get_rotated (&pose.orient,
-						&dev->leds->points[i].dir, &facing);
+				oquatf_get_rotated(&pose.orient, &leds[i].pos, &position);
+				ovec3f_add (&pose.pos, &position, &position);
 
-				if (facing.z < -0.25) {
+				ovec3f_normalize_me (&position);
+				oquatf_get_rotated(&pose.orient, &leds[i].dir, &normal);
+				facing_dot = ovec3f_get_dot (&position, &normal);
+
+				if (facing_dot < -0.25) {
 					/* Camera facing */
 					draw_rgb_marker (pixels, width, out_stride, height, x,
 							y, 6, 6, colours[dev->id]);
