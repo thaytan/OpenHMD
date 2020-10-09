@@ -198,10 +198,10 @@ rift_tracker_free (rift_tracker_ctx *tracker_ctx)
 		rift_sensor_free (sensor_ctx);
 	}
 
-  for (i = 0; i < tracker_ctx->n_devices; i++) {
-    if (tracker_ctx->devices[i].led_search)
-      led_search_model_free (tracker_ctx->devices[i].led_search);
-  }
+	for (i = 0; i < tracker_ctx->n_devices; i++) {
+		if (tracker_ctx->devices[i].led_search)
+			led_search_model_free (tracker_ctx->devices[i].led_search);
+	}
 
 	/* Stop USB event thread */
 	tracker_ctx->usb_completed = true;
