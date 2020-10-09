@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: BSL-1.0
  */
 #include <assert.h>
+#include <string.h>
 
 #include "rift-debug-draw.h"
 #include "rift-sensor-pose-helper.h"
@@ -176,49 +177,62 @@ void rift_debug_draw_frame (uint8_t *pixels, struct blobservation* bwobs,
 	int out_stride = frame->uvc.width*3*2;
 
 	uint8_t *dest = pixels;
-  for (y = 0; y < height; y++) {
-    /* Expand to RGB and copy the source to both halves */
-    uint8_t *d = dest;
-    for (x = 0; x < width; x++) {
-      /* Expand GRAY8 to yellow */
-      d[0] = d[1] = d[2] = src[x];
-      d += 3;
-    }
+	for (y = 0; y < height; y++) {
+		/* Expand to RGB and copy the source to the RHS, paint the
+		 * LHS black, and later draw only the pixels that were
+		 * detected as blobs */
+		uint8_t *d = dest;
+		memset (d, 0, width*3);
 
-    d = dest + width * 3;
-    for (x = 0; x < width; x++) {
-      /* Expand GRAY8 to yellow */
-      d[0] = d[1] = d[2] = src[x];
-      d += 3;
-    }
+		d = dest + width * 3;
+		for (x = 0; x < width; x++) {
+			/* Expand GRAY8 to RGB */
+			d[0] = d[1] = d[2] = src[x];
+			d += 3;
+		}
 
-    dest += out_stride;
-    src += in_stride;
-  }
+		dest += out_stride;
+		src += in_stride;
+	}
 
-  const int colours[] = { 0xFF0000, 0x00FF00, 0x0000FF };
+	const int colours[] = { 0xFF0000, 0x00FF00, 0x0000FF };
 
-  if (bwobs) {
-    /* Draw the blobs in the video on the RHS */
-    for (int index = 0; index < bwobs->num_blobs; index++) {
+	if (bwobs) {
+		/* Draw the blobs in the video */
+		for (int index = 0; index < bwobs->num_blobs; index++) {
 			struct blob *b = bwobs->blobs + index;
-      int start_x, start_y, w, h;
+			int start_x, start_y, w, h;
 
-      start_x = b->x - b->width / 2.0;
-      start_y = b->y - b->height / 2.0;
-      w = b->width;
-      h = b->height;
-      clamp_rect (&start_x, &start_y, &w, &h, width, height);
+			start_x = b->x - b->width / 2.0;
+			start_y = b->y - b->height / 2.0;
+			w = b->width;
+			h = b->height;
+			clamp_rect (&start_x, &start_y, &w, &h, width, height);
 
-      /* Tint known blobs by their device ID in the RHS image */
+			/* Draw the original pixels in the LHS that are within blobs */
+			uint8_t *dest = pixels + start_y * out_stride;
+			uint8_t *src = frame->uvc.data + start_y * in_stride;
+			for (y = 0; y < h; y++) {
+				uint8_t *d = dest + start_x*3;
+				for (x = start_x; x < start_x + w; x++) {
+					/* Expand GRAY8 to RGB */
+					d[0] = d[1] = d[2] = src[x];
+					d += 3;
+				}
+		
+				dest += out_stride;
+				src += in_stride;
+			}
+
+			/* Tint known blobs by their device ID in the RHS image */
 			if (b->led_id != LED_INVALID_ID) {
 				int d = LED_OBJECT_ID (b->led_id);
 				assert (d < 3);
 
 				colour_rgb_rect (pixels + 3*width, width, out_stride, height, start_x,
-          start_y, b->width, b->height, colours[d]);
+					start_y, b->width, b->height, colours[d]);
 			}
-    }
+		}
 
 		int d;
 		vec3f led_out_points[MAX_OBJECT_LEDS];
@@ -272,24 +286,24 @@ void rift_debug_draw_frame (uint8_t *pixels, struct blobservation* bwobs,
 					dev->leds->num_points, &camera_matrix,
 					dist_coeffs, is_cv1, &pose, led_out_points);
 
-      for (i = 0; i < dev->leds->num_points; i++) {
-        vec3f *p = led_out_points + i;
-        vec3f facing;
-        int x = round (p->x);
-        int y = round (p->y);
+			for (i = 0; i < dev->leds->num_points; i++) {
+				vec3f *p = led_out_points + i;
+				vec3f facing;
+				int x = round (p->x);
+				int y = round (p->y);
 
-        oquatf_get_rotated (&pose.orient,
-            &dev->leds->points[i].dir, &facing);
+				oquatf_get_rotated (&pose.orient,
+						&dev->leds->points[i].dir, &facing);
 
-        if (facing.z < -0.25) {
-          /* Camera facing */
-          draw_rgb_marker (pixels, width, out_stride, height, x,
-              y, 6, 6, colours[dev->id]);
-        } else {
-          draw_rgb_marker (pixels, width, out_stride, height, x,
-              y, 4, 4, 0x202000);
-        }
-      }
-    }
-  }
+				if (facing.z < -0.25) {
+					/* Camera facing */
+					draw_rgb_marker (pixels, width, out_stride, height, x,
+							y, 6, 6, colours[dev->id]);
+				} else {
+					draw_rgb_marker (pixels, width, out_stride, height, x,
+							y, 4, 4, 0x202000);
+				}
+			}
+		}
+	}
 }
