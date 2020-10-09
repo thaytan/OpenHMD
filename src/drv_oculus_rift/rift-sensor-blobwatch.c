@@ -539,7 +539,7 @@ static void update_labels_from_observation(blobwatch *bw, blobservation *ob)
 		for (l = 0; l < last_ob->num_blobs; l++) {
 			struct blob *new_b = last_ob->blobs + l;
 			if (new_b->blob_id == b->blob_id && new_b->led_id == LED_INVALID_ID) {
-				printf ("Found matching blob %u - labelled with LED id %x\n",
+				LOGV("Found matching blob %u - labelled with LED id %x\n",
 					b->blob_id, b->led_id);
 				new_b->led_id = b->led_id;
 			}
