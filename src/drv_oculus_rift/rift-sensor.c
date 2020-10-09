@@ -903,9 +903,6 @@ rift_sensor_free (rift_sensor_ctx *sensor_ctx)
 	if (sensor_ctx == NULL)
 		return;
 
-	if (sensor_ctx->bw)
-			blobwatch_free (sensor_ctx->bw);
-
 	if (sensor_ctx->stream_started)
 		rift_sensor_uvc_stream_stop(&sensor_ctx->stream);
 
@@ -920,6 +917,8 @@ rift_sensor_free (rift_sensor_ctx *sensor_ctx)
 	ohmd_destroy_mutex(sensor_ctx->sensor_lock);
 	ohmd_destroy_cond(sensor_ctx->new_frame_cond);
 
+	if (sensor_ctx->bw)
+		blobwatch_free (sensor_ctx->bw);
 	if (sensor_ctx->debug_vid != NULL)
 		ohmd_pw_video_stream_free (sensor_ctx->debug_vid);
 	if (sensor_ctx->debug_frame != NULL)
