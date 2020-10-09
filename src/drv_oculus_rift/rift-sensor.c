@@ -908,6 +908,7 @@ rift_sensor_free (rift_sensor_ctx *sensor_ctx)
 
 	/* Shut down analysis threads */
 	ohmd_lock_mutex(sensor_ctx->sensor_lock);
+	sensor_ctx->shutdown = true;
 	ohmd_cond_broadcast(sensor_ctx->new_frame_cond);
 	ohmd_unlock_mutex(sensor_ctx->sensor_lock);
 
