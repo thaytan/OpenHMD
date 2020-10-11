@@ -69,9 +69,6 @@ void correspondence_search_set_blobs (correspondence_search_t *cs, struct blob *
 bool correspondence_search_set_model (correspondence_search_t *cs, int model_id, led_search_model_t *model);
 void correspondence_search_free (correspondence_search_t *cs);
 
-bool correspondence_search_project_pose (correspondence_search_t *cs, led_search_model_t *model,
-        posef *pose, cs_model_info_t *mi, bool expected_match);
-int correspondence_search_find_pose (correspondence_search_t *cs);
 bool correspondence_search_find_one_pose (correspondence_search_t *cs, int model_id, bool match_all_blobs, posef *pose, rift_pose_metrics *score);
 bool correspondence_search_have_pose (correspondence_search_t *cs, int model_id, posef *pose, rift_pose_metrics *score);
 #endif

@@ -195,7 +195,7 @@ dump_pose (correspondence_search_t *cs, led_search_model_t *model, posef *pose, 
 }
 #endif
 
-bool
+static bool
 correspondence_search_project_pose (correspondence_search_t *cs, led_search_model_t *model,
 	posef *pose, cs_model_info_t *mi, bool expected_match)
 {
@@ -659,53 +659,6 @@ search_pose_for_model (correspondence_search_t *cs, cs_model_info_t *mi)
     return true;
 
   return false;
-}
-
-int
-correspondence_search_find_pose (correspondence_search_t *cs)
-{
-    int m;
-    int found_poses = 0;
-
-    cs->num_trials = cs->num_pose_checks = 0;
-
-    if (cs->num_points < 4)
-        return 0; /* Not enough blobs to bother */
-
-    /* Loop over each model and try to find correspondences */
-    for (m = 0; m < cs->num_models; m++) {
-        cs_model_info_t *mi = &cs->models[m];
-        if (search_pose_for_model (cs, mi))
-          found_poses++;
-    }
-
-    printf ("Ran %u trials, and %u full pose checks\n", cs->num_trials, cs->num_pose_checks);
-
-#if DUMP_SCENE
-    printf ("ref_points += [\n");
-    int b;
-    for (b = 0; b < cs->num_points; b++) {
-        cs_image_point_t *p = cs->points + b;
-        printf ("  (%f, %f),\n", p->point_homog[0], p->point_homog[1]);
-    }
-    printf ("]\n");
-#endif
-
-    for (m = 0; m < cs->num_models; m++) {
-#if DUMP_FULL_DEBUG
-        cs_model_info_t *mi = &cs->models[m];
-        DEBUG("# Best match for model %d was %d points out of %d with error %f pixels^2\n", m, mi->best_score.matched_blobs,
-                mi->best_score.visible_leds, mi->best_score.reprojection_error);
-        DEBUG("# pose orient %f %f %f %f pos %f %f %f\n",
-                      mi->best_pose.orient.x, mi->best_pose.orient.y, mi->best_pose.orient.z, mi->best_pose.orient.w,
-                      mi->best_pose.pos.x, mi->best_pose.pos.y, mi->best_pose.pos.z);
-#if DUMP_SCENE
-        dump_pose (cs, mi->model, &mi->best_pose, mi);
-#endif
-#endif
-    }
-
-    return found_poses;
 }
 
 bool
