@@ -48,8 +48,8 @@ struct rift_tracker_ctx_s
 	uint8_t n_devices;
 };
 
-void
-rift_tracker_add_device (rift_tracker_ctx *ctx, int device_id, fusion *f, posef *imu_pose, rift_leds *leds)
+rift_tracked_device *
+rift_tracker_add_device (rift_tracker_ctx *ctx, int device_id, posef *imu_pose, rift_leds *leds)
 {
 	int i;
 	rift_tracked_device *next_dev;
@@ -60,7 +60,7 @@ rift_tracker_add_device (rift_tracker_ctx *ctx, int device_id, fusion *f, posef 
 	next_dev = ctx->devices + ctx->n_devices;
 
 	next_dev->id = device_id;
-	next_dev->fusion = f;
+	ofusion_init(&next_dev->fusion);
 	next_dev->fusion_to_model = *imu_pose;
 
 	next_dev->leds = leds;
@@ -77,6 +77,7 @@ rift_tracker_add_device (rift_tracker_ctx *ctx, int device_id, fusion *f, posef 
 	}
 
 	printf("device %d online. Now tracking.\n", device_id);
+	return next_dev;
 }
 
 static unsigned int uvc_handle_events(void *arg)
@@ -100,6 +101,11 @@ rift_tracker_new (ohmd_context* ohmd_ctx,
 	tracker_ctx = ohmd_alloc(ohmd_ctx, sizeof (rift_tracker_ctx));
 	tracker_ctx->ohmd_ctx = ohmd_ctx;
 	tracker_ctx->tracker_lock = ohmd_create_mutex(ohmd_ctx);
+
+	for (i = 0; i < RIFT_MAX_TRACKED_DEVICES; i++) {
+		rift_tracked_device *dev = tracker_ctx->devices + i;
+		dev->device_lock = ohmd_create_mutex(ohmd_ctx);
+	}
 
 	ret = libusb_init(&tracker_ctx->usb_ctx);
 	ASSERT_MSG(ret >= 0, fail, "could not initialize libusb\n");
@@ -198,9 +204,11 @@ rift_tracker_free (rift_tracker_ctx *tracker_ctx)
 		rift_sensor_free (sensor_ctx);
 	}
 
-	for (i = 0; i < tracker_ctx->n_devices; i++) {
-		if (tracker_ctx->devices[i].led_search)
-			led_search_model_free (tracker_ctx->devices[i].led_search);
+	for (i = 0; i < RIFT_MAX_TRACKED_DEVICES; i++) {
+		rift_tracked_device *dev = tracker_ctx->devices + i;
+		if (dev->led_search)
+			led_search_model_free (dev->led_search);
+		ohmd_destroy_mutex (dev->device_lock);
 	}
 
 	/* Stop USB event thread */
@@ -212,4 +220,49 @@ rift_tracker_free (rift_tracker_ctx *tracker_ctx)
 
 	ohmd_destroy_mutex (tracker_ctx->tracker_lock);
 	free (tracker_ctx);
+}
+
+void rift_tracked_device_imu_update(rift_tracked_device *dev, float dt, const vec3f* ang_vel, const vec3f* accel, const vec3f* mag_field)
+{
+	ohmd_lock_mutex (dev->device_lock);
+	ofusion_update(&dev->fusion, dt, ang_vel, accel, mag_field);
+	ohmd_unlock_mutex (dev->device_lock);
+}
+
+void rift_tracked_device_get_view_pose(rift_tracked_device *dev, posef *pose)
+{
+	ohmd_lock_mutex (dev->device_lock);
+	oposef_init(pose, &dev->fusion.world_position, &dev->fusion.orient);
+	ohmd_unlock_mutex (dev->device_lock);
+}
+
+void rift_tracked_device_model_pose_update(rift_tracked_device *dev, double time, posef *pose)
+{
+	ohmd_lock_mutex (dev->device_lock);
+
+	/* Undo any IMU to device conversion */
+	oposef_apply_inverse(pose, &dev->fusion_to_model, pose);
+
+	if (dev->id == 0) {
+		/* Mirror the pose in XZ to go from device axes to view-plane */
+		oposef_mirror_XZ(pose);
+	}
+	ofusion_tracker_update (&dev->fusion, time, &pose->pos, &pose->orient);
+	ohmd_unlock_mutex (dev->device_lock);
+}
+
+void rift_tracked_device_get_model_pose(rift_tracked_device *dev, posef *pose)
+{
+	posef tmp;
+	ohmd_lock_mutex (dev->device_lock);
+
+	oposef_init(&tmp, &dev->fusion.world_position, &dev->fusion.orient);
+	if (dev->id == 0) {
+		/* Mirror the pose in XZ to go from view-plane to device axes for the HMD */
+		oposef_mirror_XZ(&tmp);
+	}
+
+	/* Apply any needed global pose change */
+	oposef_apply(&tmp, &dev->fusion_to_model, pose);
+	ohmd_unlock_mutex (dev->device_lock);
 }

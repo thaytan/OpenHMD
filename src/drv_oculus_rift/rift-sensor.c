@@ -479,17 +479,8 @@ static void new_frame_start_cb(struct rift_sensor_uvc_stream *stream, uint64_t s
 		rift_tracked_device *dev = sensor->devices[d];
 		rift_sensor_device_state *dev_state = next_frame->device_state + d;
 
-		/* FIXME: Thread safety around the fusion */
-		posef tmp;
-		oposef_init(&tmp, &dev->fusion->world_position, &dev->fusion->orient);
+		rift_tracked_device_get_model_pose(dev, &dev_state->capture_world_pose);
 
-		if (dev->id == 0) {
-			/* Mirror the pose in XZ to go from view-plane to device axes for the HMD */
-			oposef_mirror_XZ(&tmp);
-		}
-
-		/* Apply any needed global pose change */
-		oposef_apply(&tmp, &dev->fusion_to_model, &dev_state->capture_world_pose);
 		/* Mark the score as un-evaluated to start */
 		dev_state->score.good_pose_match = false;
 	}
@@ -570,18 +561,10 @@ update_device_pose (rift_sensor_ctx *sensor_ctx, rift_tracked_device *dev,
 				dev->id, pose.orient.x, pose.orient.y, pose.orient.z, pose.orient.w,
 				pose.pos.x, pose.pos.y, pose.pos.z);
 
-			/* Undo any IMU to device conversion */
-			oposef_apply_inverse(&pose, &dev->fusion_to_model, &pose);
-
-			if (dev->id == 0) {
-				/* Mirror the pose in XZ to go from device axes to view-plane */
-				oposef_mirror_XZ(&pose);
-			}
-
-			ofusion_tracker_update (dev->fusion, (double)(frame_ts) / 1000000000.0, &pose.pos, &pose.orient);
+			rift_tracked_device_model_pose_update(dev, (double)(frame_ts) / 1000000000.0, &pose);
 
 #if 0
-			oposef_init(&pose, &dev->fusion->world_position, &dev->fusion->orient);
+			rift_tracked_device_get_model_pose(dev, &pose);
 
 			LOGD("After update, fusion for device %d pose quat %f %f %f %f  pos %f %f %f",
 				dev->id, pose.orient.x, pose.orient.y, pose.orient.z, pose.orient.w,
@@ -594,7 +577,8 @@ update_device_pose (rift_sensor_ctx *sensor_ctx, rift_tracked_device *dev,
 				pose.pos.x, pose.pos.y, pose.pos.z);
 #endif
 		}
-		else if (dev->id == 0 && oquatf_get_length (&capture_pose->orient) > 0.9 && dev->fusion->last_gravity_vector_time > 0) {
+		/* FIXME: Do a proper check for gravity vector validity/certainty */
+		else if (dev->id == 0 && oquatf_get_length (&capture_pose->orient) > 0.9 && dev->fusion.last_gravity_vector_time > 0) {
 			/* No camera pose yet. If this is the HMD, we had an IMU pose at capture time,
 			 * and the fusion has a gravity vector from the IMU, use it to
 			 * initialise the camera (world->camera) pose using the current headset pose.

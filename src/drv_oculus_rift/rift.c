@@ -57,8 +57,7 @@ struct rift_hmd_s {
 	pkt_tracker_sensor sensor;
 	uint32_t last_imu_timestamp;
 	double last_keep_alive;
-	fusion sensor_fusion;
-	vec3f raw_mag, raw_accel, raw_gyro;
+	rift_tracked_device *tracked_dev;
 
 	struct {
 		vec3f pos;
@@ -214,11 +213,12 @@ static void handle_tracker_sensor_msg(rift_hmd_t* priv, unsigned char* buffer, i
 	}
 
 	pkt_tracker_sensor* s = &priv->sensor;
+	vec3f raw_mag;
 
 	dump_packet_tracker_sensor(s);
 
 	int32_t mag32[] = { s->mag[0], s->mag[1], s->mag[2] };
-	vec3f_from_rift_vec(mag32, &priv->raw_mag);
+	vec3f_from_rift_vec(mag32, &raw_mag);
 
 	// TODO: handle overflows in a nicer way
 	float dt = TICK_LEN; // TODO: query the Rift for the sample rate
@@ -266,7 +266,7 @@ static void handle_tracker_sensor_msg(rift_hmd_t* priv, unsigned char* buffer, i
 						  gyro_calibration[2][2] * gyro.z;
 		}
 
-		ofusion_update(&priv->sensor_fusion, dt, &gyro, &accel, &priv->raw_mag);
+		rift_tracked_device_imu_update(priv->tracked_dev, dt, &gyro, &accel, &raw_mag);
 		dt = TICK_LEN; // TODO: query the Rift for the sample rate
 	}
 
@@ -305,7 +305,7 @@ static void handle_touch_controller_message(rift_hmd_t *hmd,
 		posef imu_pose;
 		oposef_init(&imu_pose, &touch->calibration.imu_position, &imu_orient);
 
-		rift_tracker_add_device (hmd->tracker_ctx, touch->base.id, &touch->imu_fusion, &imu_pose, &touch->calibration.leds);
+		touch->tracked_dev = rift_tracker_add_device (hmd->tracker_ctx, touch->base.id, &imu_pose, &touch->calibration.leds);
 		touch->have_calibration = true;
 	}
 
@@ -358,7 +358,7 @@ static void handle_touch_controller_message(rift_hmd_t *hmd,
 			  c->gyro_calibration[7] * g[1] +
 			  c->gyro_calibration[8] * g[2];
 
-	ofusion_update(&touch->imu_fusion, dt_s, &gyro, &accel, &mag);
+	rift_tracked_device_imu_update(touch->tracked_dev, dt_s, &gyro, &accel, &mag);
 	touch->last_timestamp = msg->touch.timestamp;
 	touch->time_valid = true;
 
@@ -546,6 +546,8 @@ static void update_device(ohmd_device* device)
 
 static int getf_hmd(rift_hmd_t *hmd, ohmd_float_value type, float* out)
 {
+	posef pose = { 0, };
+
 	switch(type){
 	case OHMD_DISTORTION_K: {
 			for (int i = 0; i < 6; i++) {
@@ -555,13 +557,18 @@ static int getf_hmd(rift_hmd_t *hmd, ohmd_float_value type, float* out)
 		}
 
 	case OHMD_ROTATION_QUAT: {
-			//*(quatf*)out = hmd->touch_dev[0].imu_fusion.orient;
-			*(quatf*)out = hmd->sensor_fusion.orient;
+			if (hmd->tracked_dev) {
+				rift_tracked_device_get_view_pose(hmd->tracked_dev, &pose);
+			}
+			*(quatf*)out = pose.orient;
 			break;
 		}
 
 	case OHMD_POSITION_VECTOR:
-		*(vec3f*)out = hmd->sensor_fusion.world_position;
+		if (hmd->tracked_dev) {
+			rift_tracked_device_get_view_pose(hmd->tracked_dev, &pose);
+		}
+		*(vec3f*)out = pose.pos;
 		break;
 
 	case OHMD_CONTROLS_STATE:
@@ -588,14 +595,21 @@ static int getf_hmd(rift_hmd_t *hmd, ohmd_float_value type, float* out)
 static int getf_touch_controller(rift_device_priv* dev_priv, ohmd_float_value type, float* out)
 {
 	rift_touch_controller_t *touch = (rift_touch_controller_t *)(dev_priv);
+	posef pose = { 0, };
 
 	switch(type){
 	case OHMD_ROTATION_QUAT: {
-			*(quatf*)out = touch->imu_fusion.orient;
+			if (touch->tracked_dev) {
+				rift_tracked_device_get_view_pose(touch->tracked_dev, &pose);
+			}
+			*(quatf*)out = pose.orient;
 			break;
 		}
 	case OHMD_POSITION_VECTOR:
-		*(vec3f*)out = touch->imu_fusion.world_position;
+		if (touch->tracked_dev) {
+			rift_tracked_device_get_view_pose(touch->tracked_dev, &pose);
+		}
+		*(vec3f*)out = pose.pos;
 		break;
 	case OHMD_DISTORTION_K:
 		return -1;
@@ -826,7 +840,6 @@ static void init_touch_device(rift_touch_controller_t *touch, int id, int device
 
 	touch->base.id = id;
 	touch->device_num = device_num;
-	ofusion_init(&touch->imu_fusion);
 	touch->time_valid = false;
 
 	ohmd_set_default_device_properties(&ohmd_dev->properties);
@@ -1064,15 +1077,12 @@ static rift_hmd_t *open_hmd(ohmd_driver* driver, ohmd_device_desc* desc)
 	// Find and attach Rift sensors if available
 	priv->tracker_ctx = rift_tracker_new (driver->ctx, priv->radio_address);
 
-	// initialize sensor fusion
-	ofusion_init(&priv->sensor_fusion);
-
 	/* Configure the rift device in the tracker */
 	quatf imu_orient = {{ 0.0, 0.0, 0.0, 1.0 }};
 	posef imu_pose;
 	oposef_init(&imu_pose, &priv->imu.pos, &imu_orient);
 
-	rift_tracker_add_device (priv->tracker_ctx, 0, &priv->sensor_fusion, &imu_pose, &priv->leds);
+	priv->tracked_dev = rift_tracker_add_device (priv->tracker_ctx, 0, &imu_pose, &priv->leds);
 
 	return priv;
 

@@ -213,6 +213,7 @@ typedef struct {
 	rift_leds leds;
 } rift_touch_calibration;
 
+typedef struct rift_tracked_device_s rift_tracked_device;
 typedef struct rift_hmd_s rift_hmd_t;
 typedef struct rift_device_priv_s rift_device_priv;
 typedef struct rift_touch_controller_s rift_touch_controller_t;
@@ -229,7 +230,7 @@ struct rift_touch_controller_s {
 	rift_device_priv base;
 
 	int device_num;
-	fusion imu_fusion;
+	rift_tracked_device *tracked_dev;
 
 	bool have_calibration;
 	rift_touch_calibration calibration;
