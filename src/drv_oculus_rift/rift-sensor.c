@@ -278,7 +278,18 @@ static void tracker_process_blobs_long(rift_sensor_ctx *ctx, rift_sensor_capture
 			continue;
 		}
 
-		correspondence_search_find_one_pose (ctx->cs, dev->id, match_all_blobs, &obj_cam_pose, &dev_state->score);
+		/* If the gravity vector error is < 45 degrees, try for an aligned pose from the prior */
+		if (ctx->have_camera_pose && dev_state->gravity_error_rad < M_PI/2.0) {
+			const vec3f up = {{ 0.0, 1.0, 0.0 }};
+			vec3f pose_gravity;
+
+			oquatf_get_rotated(&obj_cam_pose.orient, &up, &pose_gravity);
+			correspondence_search_find_one_pose_aligned (ctx->cs, dev->id, match_all_blobs, &obj_cam_pose,
+					&pose_gravity, dev_state->gravity_error_rad + DEG_TO_RAD(5), &dev_state->score);
+			LOGI ("Got aligned pose!");
+		} else {
+			correspondence_search_find_one_pose (ctx->cs, dev->id, match_all_blobs, &obj_cam_pose, &dev_state->score);
+		}
 
 		LOGV("Sensor %d Frame %d - doing long search for device %d matched %u blobs of %u (%s match)",
 			ctx->id, frame->id, dev->id, dev_state->score.matched_blobs, dev_state->score.visible_leds,
@@ -286,7 +297,7 @@ static void tracker_process_blobs_long(rift_sensor_ctx *ctx, rift_sensor_capture
 
 		if (dev_state->score.good_pose_match) {
 			update_device_and_blobs (ctx, frame, dev, dev_state, &obj_cam_pose);
-	    frame->long_analysis_found_new_blobs = true;
+			frame->long_analysis_found_new_blobs = true;
 		}
 	}
 }

@@ -203,11 +203,21 @@ correspondence_search_project_pose (correspondence_search_t *cs, led_search_mode
   /* If enough match, print out the pose */
 	rift_leds *leds = model->leds;
 
-  /* Incrememnt stats */
+  /* Increment stats */
   cs->num_pose_checks++;
 
   if (pose->pos.z < 0.05 || pose->pos.z > 15) /* Invalid position, out of range */
     return false;
+
+	/* See if we need to make a gravity vector alignment check */
+	if (mi->match_gravity_vector) {
+		const vec3f up = {{ 0.0, 1.0, 0.0 }};
+		vec3f pose_gravity;
+
+		oquatf_get_rotated(&pose->orient, &up, &pose_gravity);
+		if (ovec3f_get_angle(&pose_gravity, &mi->gravity_vector) > mi->gravity_tolerance_rad)
+			return false;
+	}
 
   rift_pose_metrics score;
 
@@ -694,6 +704,42 @@ correspondence_search_find_one_pose (correspondence_search_t *cs, int model_id, 
 
     mi->good_pose_match = false;
     mi->match_all_blobs = match_all_blobs;
+		mi->match_gravity_vector = false;
+
+    if (search_pose_for_model (cs, mi) && mi->good_pose_match) {
+			*pose = mi->best_pose;
+      *score = mi->best_score;
+
+      DEBUG("# Best match for model %d was %d points out of %d with error %f pixels^2\n", model_id, mi->best_score.matched_blobs,
+                mi->best_score.visible_leds, mi->best_score.reprojection_error);
+      DEBUG("# pose orient %f %f %f %f pos %f %f %f\n",
+                mi->best_pose.orient.x, mi->best_pose.orient.y, mi->best_pose.orient.z, mi->best_pose.orient.w,
+                mi->best_pose.pos.x, mi->best_pose.pos.y, mi->best_pose.pos.z);
+      return true;
+    }
+    return false;
+  }
+
+  return false;
+}
+
+bool
+correspondence_search_find_one_pose_aligned (correspondence_search_t *cs, int model_id, bool match_all_blobs, posef *pose,
+	vec3f *gravity_vector, float gravity_tolerance_rad, rift_pose_metrics *score)
+{
+  int i;
+
+  for (i = 0; i < cs->num_models; i++) {
+    cs_model_info_t *mi = &cs->models[i];
+    if (mi->id != model_id)
+        continue;
+
+    mi->good_pose_match = false;
+    mi->match_all_blobs = match_all_blobs;
+    mi->match_all_blobs = match_all_blobs;
+		mi->match_gravity_vector = true;
+    mi->gravity_vector = *gravity_vector;
+    mi->gravity_tolerance_rad = gravity_tolerance_rad;
 
     if (search_pose_for_model (cs, mi) && mi->good_pose_match) {
 			*pose = mi->best_pose;
