@@ -251,7 +251,7 @@ void rift_tracked_device_model_pose_update(rift_tracked_device *dev, double time
 	ohmd_unlock_mutex (dev->device_lock);
 }
 
-void rift_tracked_device_get_model_pose(rift_tracked_device *dev, posef *pose)
+void rift_tracked_device_get_model_pose(rift_tracked_device *dev, double ts, posef *pose, float *gravity_error_rad)
 {
 	posef tmp;
 	ohmd_lock_mutex (dev->device_lock);
@@ -264,5 +264,18 @@ void rift_tracked_device_get_model_pose(rift_tracked_device *dev, posef *pose)
 
 	/* Apply any needed global pose change */
 	oposef_apply(&tmp, &dev->fusion_to_model, pose);
+
+	/* FIXME: Return a real value based on orientation covariance, when the filtering can supply that.
+	 * For now, check that there was a recent gravity update and it was small */
+	if (gravity_error_rad) {
+		double time_since_gravity = (ts - dev->fusion.last_gravity_vector_time);
+		if (time_since_gravity > -0.5 && time_since_gravity < 0.5) {
+			*gravity_error_rad = dev->fusion.grav_error_angle;
+		}
+		else {
+			*gravity_error_rad = M_PI;
+		}
+	}
+
 	ohmd_unlock_mutex (dev->device_lock);
 }

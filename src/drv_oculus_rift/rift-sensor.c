@@ -479,7 +479,7 @@ static void new_frame_start_cb(struct rift_sensor_uvc_stream *stream, uint64_t s
 		rift_tracked_device *dev = sensor->devices[d];
 		rift_sensor_device_state *dev_state = next_frame->device_state + d;
 
-		rift_tracked_device_get_model_pose(dev, &dev_state->capture_world_pose);
+		rift_tracked_device_get_model_pose(dev, (double) (start_time) / 1000000000.0, &dev_state->capture_world_pose, &dev_state->gravity_error_rad);
 
 		/* Mark the score as un-evaluated to start */
 		dev_state->score.good_pose_match = false;
@@ -564,7 +564,7 @@ update_device_pose (rift_sensor_ctx *sensor_ctx, rift_tracked_device *dev,
 			rift_tracked_device_model_pose_update(dev, (double)(frame_ts) / 1000000000.0, &pose);
 
 #if 0
-			rift_tracked_device_get_model_pose(dev, &pose);
+		  rift_tracked_device_get_model_pose(dev, (double) (frame_ts) / 1000000000.0, &pose, NULL);
 
 			LOGD("After update, fusion for device %d pose quat %f %f %f %f  pos %f %f %f",
 				dev->id, pose.orient.x, pose.orient.y, pose.orient.z, pose.orient.w,
@@ -577,10 +577,10 @@ update_device_pose (rift_sensor_ctx *sensor_ctx, rift_tracked_device *dev,
 				pose.pos.x, pose.pos.y, pose.pos.z);
 #endif
 		}
-		/* FIXME: Do a proper check for gravity vector validity/certainty */
-		else if (dev->id == 0 && oquatf_get_length (&capture_pose->orient) > 0.9 && dev->fusion.last_gravity_vector_time > 0) {
+		/* FIXME: Arbitrary 5 degree threshold for gravity vector as a random magic number */
+		else if (dev->id == 0 && oquatf_get_length (&capture_pose->orient) > 0.9 && dev_state->gravity_error_rad < RAD_TO_DEG(5.0)) {
 			/* No camera pose yet. If this is the HMD, we had an IMU pose at capture time,
-			 * and the fusion has a gravity vector from the IMU, use it to
+			 * and the fusion has a good gravity vector from the IMU, use it to
 			 * initialise the camera (world->camera) pose using the current headset pose.
 			 * Calculate the xform from camera->world by applying
 			 * the observed pose (object->camera), inverted (so camera->object) to our found
@@ -595,12 +595,12 @@ update_device_pose (rift_sensor_ctx *sensor_ctx, rift_tracked_device *dev,
 			oposef_apply(&camera_object_pose, capture_pose, &sensor_ctx->camera_pose);
 
 			LOGI("Set sensor %d pose from device %d - tracker pose quat %f %f %f %f  pos %f %f %f"
-					" fusion pose quat %f %f %f %f  pos %f %f %f yielded"
+					" fusion pose quat %f %f %f %f  pos %f %f %f gravity error %f degrees yielded"
 					" world->camera pose quat %f %f %f %f  pos %f %f %f",
 				sensor_ctx->id, dev->id,
 				pose.orient.x, pose.orient.y, pose.orient.z, pose.orient.w, pose.pos.x, pose.pos.y, pose.pos.z,
 				capture_pose->orient.x, capture_pose->orient.y, capture_pose->orient.z, capture_pose->orient.w,
-				capture_pose->pos.x, capture_pose->pos.y, capture_pose->pos.z,
+				capture_pose->pos.x, capture_pose->pos.y, capture_pose->pos.z, RAD_TO_DEG(dev_state->gravity_error_rad),
 				sensor_ctx->camera_pose.orient.x, sensor_ctx->camera_pose.orient.y, sensor_ctx->camera_pose.orient.z, sensor_ctx->camera_pose.orient.w,
 				sensor_ctx->camera_pose.pos.x, sensor_ctx->camera_pose.pos.y, sensor_ctx->camera_pose.pos.z);
 

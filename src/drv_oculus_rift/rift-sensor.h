@@ -21,6 +21,7 @@ typedef struct rift_sensor_capture_frame rift_sensor_capture_frame;
 
 struct rift_sensor_device_state {
 	posef capture_world_pose;
+	float gravity_error_rad; /* Gravity vector uncertainty in radians 0..M_PI */
 	posef final_cam_pose;
 	rift_pose_metrics score;
 };

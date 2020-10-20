@@ -46,6 +46,6 @@ void rift_tracked_device_imu_update(rift_tracked_device *dev, float dt, const ve
 void rift_tracked_device_get_view_pose(rift_tracked_device *dev, posef *pose);
 
 void rift_tracked_device_model_pose_update(rift_tracked_device *dev, double time, posef *pose);
-void rift_tracked_device_get_model_pose(rift_tracked_device *dev, posef *pose);
+void rift_tracked_device_get_model_pose(rift_tracked_device *dev, double ts, posef *pose, float *gravity_error_rad);
 
 #endif
