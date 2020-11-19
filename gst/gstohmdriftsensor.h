@@ -31,7 +31,6 @@
 #include "rift-sensor-opencv.h"
 #include "correspondence_search.h"
 #include "led_search.h"
-#include "kalman.h"
 
 G_BEGIN_DECLS
 
@@ -74,7 +73,6 @@ struct _GstOhmdRiftSensor {
 
   double angle;
 
-  kalman_pose *pose_filter;
   vec3f pose_pos;
   quatf pose_orient;
 

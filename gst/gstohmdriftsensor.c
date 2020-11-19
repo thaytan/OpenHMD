@@ -353,8 +353,6 @@ gst_ohmd_rift_sensor_finalize (GObject * obj)
 
   if (filter->bw)
     blobwatch_free (filter->bw);
-  if (filter->pose_filter)
-    kalman_pose_free (filter->pose_filter);
   if (filter->cs)
     correspondence_search_free (filter->cs);
 
@@ -431,9 +429,6 @@ gst_ohmd_rift_sensor_setup (GstOhmdRiftSensor * filter)
 
   filter->last_pattern_time = GST_CLOCK_TIME_NONE;
 
-  if (filter->pose_filter)
-    kalman_pose_free (filter->pose_filter);
-  filter->pose_filter = kalman_pose_new (NULL);
   memset (&filter->pose_pos, 0, sizeof (filter->pose_pos));
   memset (&filter->pose_orient, 0, sizeof (filter->pose_orient));
 
@@ -778,14 +773,8 @@ tracker_process_blobs (GstOhmdRiftSensor * filter, GstClockTime ts)
           filter->leds[0].points, filter->leds[0].num_points, camera_matrix,
           dist_coeffs, filter->is_cv1, &rot, &trans, &num_leds, true)) {
 
-#if KALMAN_FILTER
-    kalman_pose_update (filter->pose_filter, ts, &trans, &rot);
-    kalman_pose_get_estimated (filter->pose_filter, &filter->pose_pos,
-        &filter->pose_orient);
-#else
     filter->pose_pos = trans;
     filter->pose_orient = rot;
-#endif
 
 #if 0
     /* Test code that just spins the HMD around 1 axis for visualisation testing */

@@ -22,7 +22,6 @@
 
 #include "rift-debug-draw.h"
 
-#include "kalman.h"
 #include "ohmd-pipewire.h"
 
 #define ASSERT_MSG(_v, label, ...) if(!(_v)){ fprintf(stderr, __VA_ARGS__); goto label; }

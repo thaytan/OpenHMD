@@ -30,7 +30,6 @@
 
 #include "rift-debug-draw.h"
 
-#include "kalman.h"
 #include "ohmd-pipewire.h"
 
 #define ASSERT_MSG(_v, label, ...) if(!(_v)){ fprintf(stderr, __VA_ARGS__); goto label; }
@@ -114,8 +113,6 @@ struct rift_sensor_ctx_s
 	double dist_coeffs[5];
 
 	correspondence_search_t *cs;
-
-	kalman_pose *pose_filter;
 
 	vec3f led_out_points[MAX_OBJECT_LEDS];
 
@@ -531,10 +528,10 @@ update_device_and_blobs (rift_sensor_ctx *ctx, rift_sensor_capture_frame *frame,
 		dist_coeffs, ctx->is_cv1,
 		obj_cam_pose, NULL, NULL, true);
 
-	kalman_pose_update (ctx->pose_filter, frame->uvc.start_ts, &obj_cam_pose->pos, &obj_cam_pose->orient);
-	kalman_pose_get_estimated (ctx->pose_filter, &dev_state->final_cam_pose.pos, &dev_state->final_cam_pose.orient);
+  dev_state->final_cam_pose.pos = obj_cam_pose->pos;
+  dev_state->final_cam_pose.orient = obj_cam_pose->orient;
 
-	LOGD ("sensor %d kalman filter for device %d yielded quat %f %f %f %f pos %f %f %f",
+	LOGD ("sensor %d PnP for device %d yielded quat %f %f %f %f pos %f %f %f",
 		ctx->id, dev->id, dev_state->final_cam_pose.orient.x, dev_state->final_cam_pose.orient.y, dev_state->final_cam_pose.orient.z, dev_state->final_cam_pose.orient.w,
 		dev_state->final_cam_pose.pos.x, dev_state->final_cam_pose.pos.y, dev_state->final_cam_pose.pos.z);
 
@@ -780,8 +777,6 @@ rift_sensor_new(ohmd_context* ohmd_ctx, int id, const char *serial_no,
 	sensor_ctx->tracker = tracker;
 	sensor_ctx->usb_devh = usb_devh;
 
-	sensor_ctx->pose_filter = kalman_pose_new (ohmd_ctx);
-
 	sensor_ctx->stream.sof_cb = new_frame_start_cb;
 	sensor_ctx->stream.frame_cb = frame_captured_cb;
 	sensor_ctx->stream.user_data = sensor_ctx;
@@ -926,8 +921,6 @@ rift_sensor_free (rift_sensor_ctx *sensor_ctx)
 
 	if (sensor_ctx->usb_devh)
 		libusb_close (sensor_ctx->usb_devh);
-
-	kalman_pose_free (sensor_ctx->pose_filter);
 
 	for (i = 0; i < NUM_CAPTURE_BUFFERS; i++) {
 			rift_sensor_capture_frame *frame = sensor_ctx->frames + i;
