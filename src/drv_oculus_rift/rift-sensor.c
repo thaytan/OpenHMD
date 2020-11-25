@@ -30,8 +30,6 @@
 
 #include "rift-debug-draw.h"
 
-#include "ohmd-pipewire.h"
-
 #define ASSERT_MSG(_v, label, ...) if(!(_v)){ fprintf(stderr, __VA_ARGS__); goto label; }
 
 /* We need 4 capture buffers:
@@ -141,7 +139,6 @@ struct rift_sensor_ctx_s
 
 	ohmd_pw_video_stream *debug_vid;
 	uint8_t *debug_frame;
-	ohmd_pw_debug_stream *debug_metadata;
 
 	/* Updated from fast_analysis_thread */
 	bool have_camera_pose;
@@ -732,21 +729,6 @@ static void analyse_frame_fast(rift_sensor_ctx *sensor, rift_sensor_capture_fram
 			sensor->dist_fisheye, sensor->dist_coeffs, &sensor->camera_pose);
 		ohmd_pw_video_stream_push (sensor->debug_vid, frame->uvc.start_ts, sensor->debug_frame);
 	}
-#if 0
-	if (ohmd_pw_debug_stream_connected(sensor->debug_metadata)) {
-		char *debug_str;
-
-		asprintf (&debug_str, "{ ts: %llu, exposure_phase: %d, position: { %f, %f, %f }, orientation: { %f, %f, %f, %f } }",
-		  (unsigned long long) frame->uvc.start_ts, led_pattern_phase,
-		  sensor->pose.pos.x, sensor->pose.pos.y, sensor->pose.pos.z,
-		  sensor->pose.orient.x, sensor->pose.orient.y,
-		  sensor->pose.orient.z, sensor->pose.orient.w);
-
-		ohmd_pw_debug_stream_push (sensor->debug_metadata, frame->uvc.start_ts, debug_str);
-		free(debug_str);
-	}
-#endif
-
 }
 
 static unsigned int fast_analysis_thread(void *arg);
@@ -819,7 +801,6 @@ rift_sensor_new(ohmd_context* ohmd_ctx, int id, const char *serial_no,
 		/* Allocate an RGB debug frame, twice the width of the input */
 		sensor_ctx->debug_frame = ohmd_alloc(ohmd_ctx, 2 * 3 * sensor_ctx->stream.width * sensor_ctx->stream.height);
 	}
-	sensor_ctx->debug_metadata = ohmd_pw_debug_stream_new (stream_id);
 
 	sensor_ctx->bw = blobwatch_new(sensor_ctx->is_cv1 ? BLOB_THRESHOLD_CV1 : BLOB_THRESHOLD_DK2, sensor_ctx->stream.width, sensor_ctx->stream.height);
 
@@ -914,8 +895,6 @@ rift_sensor_free (rift_sensor_ctx *sensor_ctx)
 		ohmd_pw_video_stream_free (sensor_ctx->debug_vid);
 	if (sensor_ctx->debug_frame != NULL)
 		free (sensor_ctx->debug_frame);
-	if (sensor_ctx->debug_metadata != NULL)
-		ohmd_pw_debug_stream_free (sensor_ctx->debug_metadata);
 
 	rift_sensor_uvc_stream_clear(&sensor_ctx->stream);
 

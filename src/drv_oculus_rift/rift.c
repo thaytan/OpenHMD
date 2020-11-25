@@ -201,7 +201,7 @@ static void set_coordinate_frame(rift_hmd_t* priv, rift_coordinate_frame coordfr
 	}
 }
 
-static void handle_tracker_sensor_msg(rift_hmd_t* priv, unsigned char* buffer, int size)
+static void handle_tracker_sensor_msg(rift_hmd_t* priv, uint64_t ts, unsigned char* buffer, int size)
 {
 	if (buffer[0] == RIFT_IRQ_SENSORS_DK1
 	  && !decode_tracker_sensor_msg_dk1(&priv->sensor, buffer, size)){
@@ -266,7 +266,7 @@ static void handle_tracker_sensor_msg(rift_hmd_t* priv, unsigned char* buffer, i
 						  gyro_calibration[2][2] * gyro.z;
 		}
 
-		rift_tracked_device_imu_update(priv->tracked_dev, dt, &gyro, &accel, &raw_mag);
+		rift_tracked_device_imu_update(priv->tracked_dev, ts, dt, &gyro, &accel, &raw_mag);
 		dt = TICK_LEN; // TODO: query the Rift for the sample rate
 	}
 
@@ -276,7 +276,7 @@ static void handle_tracker_sensor_msg(rift_hmd_t* priv, unsigned char* buffer, i
 		rift_tracker_new_exposure (priv->tracker_ctx, priv->sensor.led_pattern_phase);
 }
 
-static void handle_touch_controller_message(rift_hmd_t *hmd,
+static void handle_touch_controller_message(rift_hmd_t *hmd, uint64_t ts,
 		rift_touch_controller_t *touch, pkt_rift_radio_message *msg)
 {
 	// The top bits are carrying something unknown. Ignore them
@@ -358,7 +358,7 @@ static void handle_touch_controller_message(rift_hmd_t *hmd,
 			  c->gyro_calibration[7] * g[1] +
 			  c->gyro_calibration[8] * g[2];
 
-	rift_tracked_device_imu_update(touch->tracked_dev, dt_s, &gyro, &accel, &mag);
+	rift_tracked_device_imu_update(touch->tracked_dev, ts, dt_s, &gyro, &accel, &mag);
 	touch->last_timestamp = msg->touch.timestamp;
 	touch->time_valid = true;
 
@@ -429,7 +429,7 @@ static void handle_touch_controller_message(rift_hmd_t *hmd,
 	}
 }
 
-static void handle_rift_radio_message(rift_hmd_t *hmd, pkt_rift_radio_message *msg)
+static void handle_rift_radio_message(rift_hmd_t *hmd, uint64_t ts, pkt_rift_radio_message *msg)
 {
 	switch (msg->device_type) {
 		case RIFT_REMOTE:
@@ -439,10 +439,10 @@ static void handle_rift_radio_message(rift_hmd_t *hmd, pkt_rift_radio_message *m
 			hmd->remote_buttons_state = msg->remote.buttons;
 			break;
 		case RIFT_TOUCH_CONTROLLER_RIGHT:
-			handle_touch_controller_message (hmd, &hmd->touch_dev[0], msg);
+			handle_touch_controller_message (hmd, ts, &hmd->touch_dev[0], msg);
 			break;
 		case RIFT_TOUCH_CONTROLLER_LEFT:
-			handle_touch_controller_message (hmd, &hmd->touch_dev[1], msg);
+			handle_touch_controller_message (hmd, ts, &hmd->touch_dev[1], msg);
 			break;
 	}
 }
@@ -463,7 +463,7 @@ static void rift_send_keepalive(rift_hmd_t *priv)
 }
 
 
-static void handle_rift_radio_report(rift_hmd_t* hmd, unsigned char* buffer, int size)
+static void handle_rift_radio_report(rift_hmd_t* hmd, uint64_t ts, unsigned char* buffer, int size)
 {
 	pkt_rift_radio_report r;
 
@@ -471,9 +471,9 @@ static void handle_rift_radio_report(rift_hmd_t* hmd, unsigned char* buffer, int
 		return;
 
 	if (r.message[0].valid)
-		handle_rift_radio_message(hmd, &r.message[0]);
+		handle_rift_radio_message(hmd, ts, &r.message[0]);
 	if (r.message[1].valid)
-		handle_rift_radio_message(hmd, &r.message[1]);
+		handle_rift_radio_message(hmd, ts, &r.message[1]);
 }
 
 static void update_hmd(rift_hmd_t *priv)
@@ -499,9 +499,12 @@ static void update_hmd(rift_hmd_t *priv)
 			break; // No more messages, return.
 		}
 
+		/* FIXME: Collect all HID messages that are pending, then work backward to calculate capture timestamps? */
+		uint64_t ts = ohmd_monotonic_get(priv->ctx);
+
 		// currently the only message type the hardware supports (I think)
 		if(buffer[0] == RIFT_IRQ_SENSORS_DK1 || buffer[0] == RIFT_IRQ_SENSORS_DK2) {
-			handle_tracker_sensor_msg(priv, buffer, size);
+			handle_tracker_sensor_msg(priv, ts, buffer, size);
 		}else{
 			LOGE("unknown message type: %u", buffer[0]);
 		}
@@ -520,8 +523,11 @@ static void update_hmd(rift_hmd_t *priv)
 			break; // No more messages, return.
 		}
 
+		/* FIXME: Collect all HID messages that are pending, then work backward to calculate capture timestamps? */
+		uint64_t ts = ohmd_monotonic_get(priv->ctx);
+
 		if (buffer[0] == RIFT_RADIO_REPORT_ID)
-			handle_rift_radio_report (priv, buffer, size);
+			handle_rift_radio_report (priv, ts, buffer, size);
 	}
 }
 

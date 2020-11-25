@@ -8,6 +8,7 @@
 
 #include "rift.h"
 #include "correspondence_search.h"
+#include "ohmd-pipewire.h"
 
 #ifndef __RIFT_TRACKER_H__
 #define __RIFT_TRACKER_H__
@@ -15,6 +16,17 @@
 typedef struct rift_tracker_ctx_s rift_tracker_ctx;
 
 #define RIFT_MAX_TRACKED_DEVICES 3
+
+#define RIFT_MAX_PENDING_IMU_OBSERVATIONS 1000
+
+typedef struct rift_tracked_device_imu_observation rift_tracked_device_imu_observation;
+
+struct rift_tracked_device_imu_observation {
+    uint64_t ts;
+    vec3f ang_vel;
+    vec3f accel;
+    vec3f mag;
+};
 
 struct rift_tracked_device_s
 {
@@ -30,6 +42,11 @@ struct rift_tracked_device_s
 
 	/* The model (HMD/controller) pose -> world transform */
 	posef pose;
+
+  int num_pending_imu_observations;
+  rift_tracked_device_imu_observation pending_imu_observations[RIFT_MAX_PENDING_IMU_OBSERVATIONS];
+
+	ohmd_pw_debug_stream *debug_metadata;
 };
 
 rift_tracker_ctx *rift_tracker_new (ohmd_context* ohmd_ctx,
@@ -42,7 +59,7 @@ uint8_t rift_tracker_get_device_list(rift_tracker_ctx *tracker_ctx, rift_tracked
 
 void rift_tracker_free (rift_tracker_ctx *ctx);
 
-void rift_tracked_device_imu_update(rift_tracked_device *dev, float dt, const vec3f* ang_vel, const vec3f* accel, const vec3f* mag_field);
+void rift_tracked_device_imu_update(rift_tracked_device *dev, uint64_t ts, float dt, const vec3f* ang_vel, const vec3f* accel, const vec3f* mag_field);
 void rift_tracked_device_get_view_pose(rift_tracked_device *dev, posef *pose);
 
 void rift_tracked_device_model_pose_update(rift_tracked_device *dev, double time, posef *pose);
