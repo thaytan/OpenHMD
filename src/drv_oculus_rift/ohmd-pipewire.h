@@ -37,7 +37,7 @@ void ohmd_pw_debug_stream_free (ohmd_pw_debug_stream *s);
 #define ohmd_pw_video_stream_free(v)
 
 #define ohmd_pw_debug_stream_new(stream_id) NULL
-#define ohmd_pw_debuf_stream_connected(s) false
+#define ohmd_pw_debug_stream_connected(s) false
 #define ohmd_pw_debug_stream_push(s,pts,debug_str)
 #define ohmd_pw_debug_stream_free(s)
 #endif
