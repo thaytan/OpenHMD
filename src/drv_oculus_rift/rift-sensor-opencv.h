@@ -38,7 +38,7 @@ bool estimate_initial_pose(struct blob *blobs, int num_blobs,
 			   int device_id, rift_led *leds, int num_leds,
 			   dmat3 *camera_matrix, double dist_coeffs[5], bool dist_fisheye,
 			   posef *pose, int *num_leds_out,
-			   int *num_inliers, bool use_extrinsic_guess);
+			   int *num_inliers, bool use_extrinsic_guess)
 {
 	(void)blobs;
 	(void)num_blobs;
@@ -56,7 +56,7 @@ bool estimate_initial_pose(struct blob *blobs, int num_blobs,
 }
 #define rift_project_points(leds,num_led_pos,camera_matrix,dist_coeffs,dist_fisheye,pose,out_points)
 
-#define undistort_points (blobs,num_blobs,out_points,camera_matrix,dist_coeffs,dist_fisheye)
+#define undistort_points(blobs,num_blobs,out_points,camera_matrix,dist_coeffs,dist_fisheye)
 
 #define refine_pose(image_points,leds,num_matches,pose,reprojection_error)
 
