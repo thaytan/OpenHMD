@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.1)
 
-project(openhmd C)
+project(openhmd C CXX)
 
 set(CMAKE_C_STANDARD 99)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
@@ -74,9 +74,11 @@ if(OPENHMD_DRIVER_OCULUS_RIFT)
 	${CMAKE_CURRENT_LIST_DIR}/src/drv_oculus_rift/rift-sensor-ar0134.c
 	${CMAKE_CURRENT_LIST_DIR}/src/drv_oculus_rift/rift-sensor-uvc.c
 	${CMAKE_CURRENT_LIST_DIR}/src/drv_oculus_rift/rift-sensor-blobwatch.c
+	${CMAKE_CURRENT_LIST_DIR}/src/drv_oculus_rift/rift-sensor-opencv.cpp
 	${CMAKE_CURRENT_LIST_DIR}/src/drv_oculus_rift/rift-tracker.c
 	)
 	add_definitions(-DDRIVER_OCULUS_RIFT)
+  add_definitions(-DHAVE_OPENCV=1)
 
 	find_package(HIDAPI REQUIRED)
   include_directories(${HIDAPI_INCLUDE_DIRS} ${libusb-1.0_INCLUDE_DIRS} ${OpenCV_INCLUDE_DIRS})
