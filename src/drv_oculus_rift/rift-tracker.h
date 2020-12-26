@@ -20,12 +20,26 @@ typedef struct rift_tracker_ctx_s rift_tracker_ctx;
 #define RIFT_MAX_PENDING_IMU_OBSERVATIONS 1000
 
 typedef struct rift_tracked_device_imu_observation rift_tracked_device_imu_observation;
+typedef struct rift_tracker_exposure_info rift_tracker_exposure_info;
+
+struct rift_tracker_exposure_info {
+	uint64_t local_ts;
+	uint32_t hmd_ts;
+
+	uint16_t count;
+	uint8_t led_pattern_phase;
+};
 
 struct rift_tracked_device_imu_observation {
-    uint64_t ts;
-    vec3f ang_vel;
-    vec3f accel;
-    vec3f mag;
+	uint64_t local_ts;
+	uint32_t device_ts;
+	float dt;
+
+	vec3f ang_vel;
+	vec3f accel;
+	vec3f mag;
+
+	quatf simple_orient;
 };
 
 struct rift_tracked_device_s
@@ -43,8 +57,10 @@ struct rift_tracked_device_s
 	/* The model (HMD/controller) pose -> world transform */
 	posef pose;
 
-  int num_pending_imu_observations;
-  rift_tracked_device_imu_observation pending_imu_observations[RIFT_MAX_PENDING_IMU_OBSERVATIONS];
+	uint32_t last_device_ts;
+
+	int num_pending_imu_observations;
+	rift_tracked_device_imu_observation pending_imu_observations[RIFT_MAX_PENDING_IMU_OBSERVATIONS];
 
 	ohmd_pw_debug_stream *debug_metadata;
 };
@@ -53,16 +69,16 @@ rift_tracker_ctx *rift_tracker_new (ohmd_context* ohmd_ctx,
 		const uint8_t radio_id[5]);
 
 rift_tracked_device *rift_tracker_add_device (rift_tracker_ctx *ctx, int device_id, posef *imu_pose, rift_leds *leds);
-void rift_tracker_new_exposure (rift_tracker_ctx *ctx, uint8_t led_pattern_phase);
-uint8_t rift_tracker_get_led_pattern_phase (rift_tracker_ctx *ctx, uint64_t *ts);
+void rift_tracker_update_exposure (rift_tracker_ctx *ctx, uint16_t exposure_count, uint32_t exposure_hmd_ts, uint8_t led_pattern_phase);
+bool rift_tracker_get_exposure_info (rift_tracker_ctx *ctx, rift_tracker_exposure_info *info);
 uint8_t rift_tracker_get_device_list(rift_tracker_ctx *tracker_ctx, rift_tracked_device **dev_list);
 
 void rift_tracker_free (rift_tracker_ctx *ctx);
 
-void rift_tracked_device_imu_update(rift_tracked_device *dev, uint64_t ts, float dt, const vec3f* ang_vel, const vec3f* accel, const vec3f* mag_field);
+void rift_tracked_device_imu_update(rift_tracked_device *dev, uint64_t local_ts, uint32_t device_ts, float dt, const vec3f* ang_vel, const vec3f* accel, const vec3f* mag_field);
 void rift_tracked_device_get_view_pose(rift_tracked_device *dev, posef *pose);
 
-void rift_tracked_device_model_pose_update(rift_tracked_device *dev, double time, posef *pose);
+void rift_tracked_device_model_pose_update(rift_tracked_device *dev, uint64_t local_ts, rift_tracker_exposure_info *exposure_info, posef *pose);
 void rift_tracked_device_get_model_pose(rift_tracked_device *dev, double ts, posef *pose, float *gravity_error_rad);
 
 #endif

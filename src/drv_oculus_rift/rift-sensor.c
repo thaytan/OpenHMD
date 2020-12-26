@@ -440,13 +440,20 @@ release_capture_frame(rift_sensor_ctx *sensor, rift_sensor_capture_frame *frame)
 static void new_frame_start_cb(struct rift_sensor_uvc_stream *stream, uint64_t start_time)
 {
 	rift_sensor_ctx *sensor = stream->user_data;
-	uint64_t phase_ts;
-	uint8_t led_pattern_phase = rift_tracker_get_led_pattern_phase (sensor->tracker, &phase_ts);
+	rift_tracker_exposure_info exposure_info;
+	bool exposure_info_valid;
 	rift_sensor_capture_frame *next_frame;
 	int d;
 
-	LOGD("%f ms Sensor %d SOF phase %d", (double) (start_time) / 1000000.0,
-			sensor->id, led_pattern_phase);
+	exposure_info_valid = rift_tracker_get_exposure_info (sensor->tracker, &exposure_info);
+
+	if (exposure_info_valid) {
+		LOGD("%f ms Sensor %d SOF phase %d", (double) (start_time) / 1000000.0,
+			sensor->id, exposure_info.led_pattern_phase);
+	}
+	else {
+		LOGD("%f ms Sensor %d SOF no phase info", (double) (start_time) / 1000000.0, sensor->id);
+	}
 
 	ohmd_lock_mutex(sensor->sensor_lock);
 	if (sensor->cur_capture_frame != NULL) {
@@ -477,8 +484,8 @@ static void new_frame_start_cb(struct rift_sensor_uvc_stream *stream, uint64_t s
 		sensor->dropped_frames++;
 	}
 
-	next_frame->led_pattern_phase = led_pattern_phase;
-	next_frame->led_pattern_sof_ts = phase_ts;
+	next_frame->exposure_info = exposure_info;
+	next_frame->exposure_info_valid = exposure_info_valid;
 
 	for (d = 0; d < sensor->n_devices; d++) {
 		rift_tracked_device *dev = sensor->devices[d];
@@ -542,7 +549,6 @@ update_device_pose (rift_sensor_ctx *sensor_ctx, rift_tracked_device *dev,
 	posef pose = dev_state->final_cam_pose;
 	posef *capture_pose = &dev_state->capture_world_pose;
 	rift_pose_metrics *score = &dev_state->score;
-	uint64_t frame_ts = frame->uvc.start_ts;
 
 	rift_evaluate_pose (score, &pose,
 		frame->bwobs->blobs, frame->bwobs->num_blobs,
@@ -554,6 +560,8 @@ update_device_pose (rift_sensor_ctx *sensor_ctx, rift_tracked_device *dev,
 		LOGV("Found good pose match - %u LEDs matched %u visible ones\n",
 			score->matched_blobs, score->visible_leds);
 		if (sensor_ctx->have_camera_pose) {
+			uint64_t now = ohmd_monotonic_get(sensor_ctx->ohmd_ctx);
+
 			/* The pose we found is the transform from object coords to camera-relative coords.
 			 * Our camera pose stores the transform from camera to world, and what we
 			 * need to give the fusion is transform from object->world.
@@ -562,14 +570,15 @@ update_device_pose (rift_sensor_ctx *sensor_ctx, rift_tracked_device *dev,
 			 * the camera->world pose. */
 			oposef_apply(&pose, &sensor_ctx->camera_pose, &pose);
 
-			LOGD("Updating fusion for device %d pose quat %f %f %f %f  pos %f %f %f",
+			LOGD("TS %llu Updating fusion for device %d pose quat %f %f %f %f  pos %f %f %f",
+				(unsigned long long)(now),
 				dev->id, pose.orient.x, pose.orient.y, pose.orient.z, pose.orient.w,
 				pose.pos.x, pose.pos.y, pose.pos.z);
 
-			rift_tracked_device_model_pose_update(dev, (double)(frame_ts) / 1000000000.0, &pose);
+			rift_tracked_device_model_pose_update(dev, now, &frame->exposure_info, &pose);
 
 #if 0
-		  rift_tracked_device_get_model_pose(dev, (double) (frame_ts) / 1000000000.0, &pose, NULL);
+		  rift_tracked_device_get_model_pose(dev, (double) (frame->uvc.start_ts) / 1000000000.0, &pose, NULL);
 
 			LOGD("After update, fusion for device %d pose quat %f %f %f %f  pos %f %f %f",
 				dev->id, pose.orient.x, pose.orient.y, pose.orient.z, pose.orient.w,
@@ -646,30 +655,36 @@ static void frame_captured_cb(rift_sensor_uvc_stream *stream, rift_sensor_uvc_fr
 	frame->frame_delivered_ts = now;
 
 	/* led pattern phase comes from sensor reports */
-	uint8_t led_pattern_phase = frame->led_pattern_phase;
-	uint64_t cur_phase_ts;
-	uint8_t cur_led_pattern_phase = rift_tracker_get_led_pattern_phase (sensor->tracker, &cur_phase_ts);
-	if (cur_led_pattern_phase != led_pattern_phase) {
-		/* The LED phase changed mid-frame. Choose which one to keep */
-		uint64_t frame_midpoint = uvc_frame->start_ts + (now - uvc_frame->start_ts)/2;
-		uint8_t chosen_phase;
+	rift_tracker_exposure_info cur_exposure_info;
+	bool cur_exposure_info_valid;
 
-		if (cur_phase_ts < frame_midpoint) {
-			chosen_phase = cur_led_pattern_phase;
-		} else {
-			chosen_phase = led_pattern_phase;
-		}
+	cur_exposure_info_valid = rift_tracker_get_exposure_info (sensor->tracker, &cur_exposure_info);
 
-		LOGV ("%f Sensor %d Frame (sof %f) phase mismatch old %d new %d (@ %f) chose %d",
+	if (!frame->exposure_info_valid && cur_exposure_info_valid) {
+		/* There wasn't previously exposure info but is now, take it */
+		LOGV ("%f Sensor %d Frame (sof %f) exposure info TS %u count %u phase %d",
 			(double) (now) / 1000000.0, sensor->id,
-			(double) (frame->led_pattern_sof_ts) / 1000000.0,
-			led_pattern_phase, cur_led_pattern_phase,
-			(double) (cur_phase_ts) / 1000000.0,
-			chosen_phase);
-		frame->led_pattern_phase = chosen_phase;
+			(double) (cur_exposure_info.local_ts) / 1000000.0,
+			cur_exposure_info.hmd_ts,
+			cur_exposure_info.count, cur_exposure_info.led_pattern_phase);
+	}
+	else if (frame->exposure_info.count != cur_exposure_info.count) {
+		/* The exposure info changed mid-frame. Choose which one to keep */
+		uint64_t frame_midpoint = uvc_frame->start_ts + (now - uvc_frame->start_ts)/2;
+
+		if (cur_exposure_info.local_ts < frame_midpoint) {
+			frame->exposure_info = cur_exposure_info;
+
+			LOGV ("%f Sensor %d Frame (sof %f) updating exposure info TS %u count %u phase %d",
+				(double) (now) / 1000000.0, sensor->id,
+				(double) (cur_exposure_info.local_ts) / 1000000.0,
+				cur_exposure_info.hmd_ts,
+				cur_exposure_info.count, cur_exposure_info.led_pattern_phase);
+		}
 	}
 
-	LOGD ("Sensor %d captured frame %d phase %d", sensor->id, frame->id, frame->led_pattern_phase);
+	LOGD ("Sensor %d captured frame %d exposure counter %u phase %d", sensor->id,
+		frame->id, frame->exposure_info.count, frame->exposure_info.led_pattern_phase);
 
 	ohmd_lock_mutex(sensor->sensor_lock);
 	/* The frame being returned must be the most recent one
@@ -697,7 +712,7 @@ static void analyse_frame_fast(rift_sensor_ctx *sensor, rift_sensor_capture_fram
 	frame->image_analysis_start_ts = now;
 
 	blobwatch_process(sensor->bw, frame->uvc.data, width, height,
-		frame->led_pattern_phase, NULL, 0, &frame->bwobs);
+		frame->exposure_info.led_pattern_phase, NULL, 0, &frame->bwobs);
 
 	frame->blob_extract_finish_ts = ohmd_monotonic_get(sensor->ohmd_ctx);
 

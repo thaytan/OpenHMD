@@ -30,7 +30,9 @@
 #define SAMSUNG_ELECTRONICS_CO_ID 0x04e8
 #define RIFT_CV1_PID 0x0031
 
-#define TICK_LEN (1.0f / 1000.0f) // 1000 Hz ticks
+#define TICK_LEN (1000000 / 1000) // 1000 Hz ticks, in uS
+#define TICK_US_TO_NS(t) ((t) * 1000)
+#define TICK_US_TO_SEC(t) ((float)(t) / 1000000.0)
 #define KEEP_ALIVE_VALUE (10 * 1000)
 #define SETFLAG(_s, _flag, _val) (_s) = ((_s) & ~(_flag)) | ((_val) ? (_flag) : 0)
 
@@ -55,6 +57,7 @@ struct rift_hmd_s {
 	rift_coordinate_frame coordinate_frame, hw_coordinate_frame;
 	pkt_sensor_config sensor_config;
 	pkt_tracker_sensor sensor;
+	bool have_imu_timestamp;
 	uint32_t last_imu_timestamp;
 	double last_keep_alive;
 	rift_tracked_device *tracked_dev;
@@ -201,7 +204,7 @@ static void set_coordinate_frame(rift_hmd_t* priv, rift_coordinate_frame coordfr
 	}
 }
 
-static void handle_tracker_sensor_msg(rift_hmd_t* priv, uint64_t ts, unsigned char* buffer, int size)
+static void handle_tracker_sensor_msg(rift_hmd_t* priv, uint64_t local_ts, unsigned char* buffer, int size)
 {
 	if (buffer[0] == RIFT_IRQ_SENSORS_DK1
 	  && !decode_tracker_sensor_msg_dk1(&priv->sensor, buffer, size)){
@@ -220,13 +223,20 @@ static void handle_tracker_sensor_msg(rift_hmd_t* priv, uint64_t ts, unsigned ch
 	int32_t mag32[] = { s->mag[0], s->mag[1], s->mag[2] };
 	vec3f_from_rift_vec(mag32, &raw_mag);
 
-	// TODO: handle overflows in a nicer way
-	float dt = TICK_LEN; // TODO: query the Rift for the sample rate
-	if (s->timestamp > priv->last_imu_timestamp)
-	{
+	uint32_t dt = TICK_LEN; // TODO: query the Rift for the sample rate
+
+	/* If we have a gap since the last sample handled, treat the
+	 * first sample here as having the full dt */
+	if (priv->have_imu_timestamp) {
 		dt = (s->timestamp - priv->last_imu_timestamp) / 1000000.0f;
 		dt -= (s->num_samples - 1) * TICK_LEN; // TODO: query the Rift for the sample rate
 	}
+
+	/* Compute the starting timestamps, in local system time and device time */
+	uint32_t total_dt = (s->num_samples-1)*TICK_LEN + dt;
+	uint32_t device_ts = s->timestamp - total_dt;
+
+	local_ts -= TICK_US_TO_NS(total_dt);
 
 	for(int i = 0; i < s->num_samples; i++){
 		vec3f gyro;
@@ -266,17 +276,25 @@ static void handle_tracker_sensor_msg(rift_hmd_t* priv, uint64_t ts, unsigned ch
 						  gyro_calibration[2][2] * gyro.z;
 		}
 
-		rift_tracked_device_imu_update(priv->tracked_dev, ts, dt, &gyro, &accel, &raw_mag);
+		rift_tracked_device_imu_update(priv->tracked_dev, local_ts, device_ts, TICK_US_TO_SEC(dt), &gyro, &accel, &raw_mag);
+
+		device_ts += dt;
+		local_ts += TICK_US_TO_NS(dt);
 		dt = TICK_LEN; // TODO: query the Rift for the sample rate
 	}
 
 	priv->last_imu_timestamp = s->timestamp;
+	priv->have_imu_timestamp = true;
 
-	if (priv->tracker_ctx != NULL)
-		rift_tracker_new_exposure (priv->tracker_ctx, priv->sensor.led_pattern_phase);
+	rift_tracker_update_exposure (priv->tracker_ctx, s->exposure_count,
+	    s->exposure_timestamp, s->led_pattern_phase);
+	if ((int32_t)(s->exposure_timestamp - s->timestamp) < -1000) {
+		LOGW("Exposure timestamp %u was more than an IMU sample earlier than IMU ts %u",
+		    s->exposure_timestamp, s->timestamp);
+	}
 }
 
-static void handle_touch_controller_message(rift_hmd_t *hmd, uint64_t ts,
+static void handle_touch_controller_message(rift_hmd_t *hmd, uint64_t local_ts,
 		rift_touch_controller_t *touch, pkt_rift_radio_message *msg)
 {
 	// The top bits are carrying something unknown. Ignore them
@@ -314,7 +332,10 @@ static void handle_touch_controller_message(rift_hmd_t *hmd, uint64_t ts,
 	if (touch->time_valid)
 		dt = msg->touch.timestamp - touch->last_timestamp;
 	else
-		dt = 0;
+		dt = 2000; /* 500Hz updates */
+
+	uint32_t device_ts = msg->touch.timestamp - dt;
+	local_ts -= TICK_US_TO_NS(dt);
 
 	const double dt_s = 1e-6 * dt;
 	double a[3] = {
@@ -358,7 +379,7 @@ static void handle_touch_controller_message(rift_hmd_t *hmd, uint64_t ts,
 			  c->gyro_calibration[7] * g[1] +
 			  c->gyro_calibration[8] * g[2];
 
-	rift_tracked_device_imu_update(touch->tracked_dev, ts, dt_s, &gyro, &accel, &mag);
+	rift_tracked_device_imu_update(touch->tracked_dev, local_ts, device_ts, dt_s, &gyro, &accel, &mag);
 	touch->last_timestamp = msg->touch.timestamp;
 	touch->time_valid = true;
 
@@ -891,6 +912,7 @@ static rift_hmd_t *open_hmd(ohmd_driver* driver, ohmd_device_desc* desc)
 	priv->use_count = 1;
 	priv->ctx = driver->ctx;
 
+	priv->have_imu_timestamp = false;
 	priv->last_imu_timestamp = -1;
 
 	// Open the HID device

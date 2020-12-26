@@ -39,8 +39,8 @@ struct rift_tracker_ctx_s
 	ohmd_thread* usb_thread;
 	int usb_completed;
 
-	uint8_t led_pattern_phase;
-	uint64_t led_pattern_phase_ts;
+	bool have_exposure_info;
+	rift_tracker_exposure_info exposure_info;
 
 	rift_sensor_ctx *sensors[MAX_SENSORS];
 	uint8_t n_sensors;
@@ -69,7 +69,6 @@ rift_tracker_add_device (rift_tracker_ctx *ctx, int device_id, posef *imu_pose, 
 	next_dev->fusion_to_model = *imu_pose;
 
 	next_dev->debug_metadata = ohmd_pw_debug_stream_new (device_name);
-
 	next_dev->leds = leds;
 	next_dev->led_search = led_search_model_new (leds);
 	ctx->n_devices++;
@@ -171,31 +170,49 @@ fail:
 	return NULL;
 }
 
-uint8_t
-rift_tracker_get_led_pattern_phase (rift_tracker_ctx *ctx, uint64_t *ts) {
-	uint8_t led_pattern_phase;
+bool rift_tracker_get_exposure_info (rift_tracker_ctx *ctx, rift_tracker_exposure_info *info)
+{
+	bool ret;
 
 	ohmd_lock_mutex (ctx->tracker_lock);
-	led_pattern_phase = ctx->led_pattern_phase;
-	if (ts)
-		*ts = ctx->led_pattern_phase_ts;
+	ret = ctx->have_exposure_info;
+	*info = ctx->exposure_info;
 	ohmd_unlock_mutex (ctx->tracker_lock);
 
-	return led_pattern_phase;
+	return ret;
 }
 
-void rift_tracker_new_exposure (rift_tracker_ctx *ctx, uint8_t led_pattern_phase)
+void rift_tracker_update_exposure (rift_tracker_ctx *ctx, uint16_t exposure_count, uint32_t exposure_hmd_ts, uint8_t led_pattern_phase)
 {
-	if (ctx->led_pattern_phase != led_pattern_phase) {
-		uint64_t now = ohmd_monotonic_get(ctx->ohmd_ctx);
-		LOGD ("%f LED pattern phase changed to %d\n",
-			(double) (now) / 1000000.0,
-			led_pattern_phase);
-		ohmd_lock_mutex (ctx->tracker_lock);
-		ctx->led_pattern_phase = led_pattern_phase;
-		ctx->led_pattern_phase_ts = now;
-		ohmd_unlock_mutex (ctx->tracker_lock);
+	ohmd_lock_mutex (ctx->tracker_lock);
+	if (ctx->exposure_info.led_pattern_phase != led_pattern_phase) {
+		LOGD ("%f LED pattern phase changed to %d",
+			(double) (now) / 1000000.0, led_pattern_phase);
+		ctx->exposure_info.led_pattern_phase = led_pattern_phase;
 	}
+
+	if (ctx->exposure_info.count != exposure_count) {
+		uint64_t now = ohmd_monotonic_get(ctx->ohmd_ctx);
+		int i;
+
+		ctx->exposure_info.local_ts = now;
+		ctx->exposure_info.count = exposure_count;
+		ctx->exposure_info.hmd_ts = exposure_hmd_ts;
+		ctx->exposure_info.led_pattern_phase = led_pattern_phase;
+		ctx->have_exposure_info = true;
+
+		LOGD ("%f Have new exposure TS %u count %d LED pattern phase %d",
+			(double) (now) / 1000000.0, exposure_count, exposure_hmd_ts, led_pattern_phase);
+
+		for (i = 0; i < RIFT_MAX_TRACKED_DEVICES; i++) {
+			rift_tracked_device *dev = ctx->devices + i;
+
+			ohmd_lock_mutex (dev->device_lock);
+			rift_tracked_device_send_imu_debug(dev);
+			ohmd_unlock_mutex (dev->device_lock);
+		}
+	}
+	ohmd_unlock_mutex (ctx->tracker_lock);
 }
 
 void
@@ -215,8 +232,8 @@ rift_tracker_free (rift_tracker_ctx *tracker_ctx)
 		rift_tracked_device *dev = tracker_ctx->devices + i;
 		if (dev->led_search)
 			led_search_model_free (dev->led_search);
-	  if (dev->debug_metadata != NULL)
-		  ohmd_pw_debug_stream_free (dev->debug_metadata);
+		if (dev->debug_metadata != NULL)
+			ohmd_pw_debug_stream_free (dev->debug_metadata);
 		ohmd_destroy_mutex (dev->device_lock);
 	}
 
@@ -231,24 +248,29 @@ rift_tracker_free (rift_tracker_ctx *tracker_ctx)
 	free (tracker_ctx);
 }
 
-void rift_tracked_device_imu_update(rift_tracked_device *dev, uint64_t ts, float dt, const vec3f* ang_vel, const vec3f* accel, const vec3f* mag_field)
+void rift_tracked_device_imu_update(rift_tracked_device *dev, uint64_t local_ts, uint32_t device_ts, float dt, const vec3f* ang_vel, const vec3f* accel, const vec3f* mag_field)
 {
-  rift_tracked_device_imu_observation *obs;
+	rift_tracked_device_imu_observation *obs;
 
 	ohmd_lock_mutex (dev->device_lock);
 	ofusion_update(&dev->fusion, dt, ang_vel, accel, mag_field);
+	dev->last_device_ts = device_ts;
 
-  obs = dev->pending_imu_observations + dev->num_pending_imu_observations;
-  obs->ts = ts;
-  obs->ang_vel = *ang_vel;
-  obs->accel = *accel;
-  obs->mag = *mag_field;
-  dev->num_pending_imu_observations++;
+	obs = dev->pending_imu_observations + dev->num_pending_imu_observations;
+	obs->local_ts = local_ts;
+	obs->device_ts = device_ts;
+	obs->dt = dt;
+	obs->ang_vel = *ang_vel;
+	obs->accel = *accel;
+	obs->mag = *mag_field;
+	obs->simple_orient = dev->fusion.orient;
 
-  if (dev->num_pending_imu_observations == RIFT_MAX_PENDING_IMU_OBSERVATIONS) {
+	dev->num_pending_imu_observations++;
+
+	if (dev->num_pending_imu_observations == RIFT_MAX_PENDING_IMU_OBSERVATIONS) {
 		/* No camera observations for a while - send our observations from here instead */
 		rift_tracked_device_send_imu_debug(dev);
-  }
+	}
 
 	ohmd_unlock_mutex (dev->device_lock);
 }
@@ -260,8 +282,10 @@ void rift_tracked_device_get_view_pose(rift_tracked_device *dev, posef *pose)
 	ohmd_unlock_mutex (dev->device_lock);
 }
 
-void rift_tracked_device_model_pose_update(rift_tracked_device *dev, double time, posef *pose)
+void rift_tracked_device_model_pose_update(rift_tracked_device *dev, uint64_t local_ts, rift_tracker_exposure_info *exposure_info, posef *pose)
 {
+	double time = (double)(exposure_info->local_ts) / 1000000000.0;
+
 	ohmd_lock_mutex (dev->device_lock);
 
 	/* Undo any IMU to device conversion */
@@ -271,6 +295,8 @@ void rift_tracked_device_model_pose_update(rift_tracked_device *dev, double time
 		/* Mirror the pose in XZ to go from device axes to view-plane */
 		oposef_mirror_XZ(pose);
 	}
+
+	rift_tracked_device_send_imu_debug(dev);
 	ofusion_tracker_update (&dev->fusion, time, &pose->pos, &pose->orient);
 	ohmd_unlock_mutex (dev->device_lock);
 }
@@ -308,38 +334,34 @@ void rift_tracked_device_get_model_pose(rift_tracked_device *dev, double ts, pos
 static void
 rift_tracked_device_send_imu_debug(rift_tracked_device *dev)
 {
+	int i;
 
 	if (dev->num_pending_imu_observations == 0)
 		return;
 
-	if (ohmd_pw_debug_stream_connected(dev->debug_metadata)) {
+	if (dev->debug_metadata && ohmd_pw_debug_stream_connected(dev->debug_metadata)) {
 		char debug_str[1024];
-		int i;
 
 		for (i = 0; i < dev->num_pending_imu_observations; i++) {
 			rift_tracked_device_imu_observation *obs = dev->pending_imu_observations + i;
 
-			snprintf (debug_str, 1024, ",\n{ \"type\"; \"imu\", \"ts\": %llu, "
+			snprintf (debug_str, 1024, ",\n{ \"type\": \"imu\", \"local-ts\": %llu, "
+				 "\"device-ts\": %u, \"dt\": %f, "
 				 "\"ang_vel\": [ %f, %f, %f ], \"accel\": [ %f, %f, %f ], "
-				 "\"mag\": [ %f, %f, %f ] }",
-				(unsigned long long) obs->ts,
+				 "\"mag\": [ %f, %f, %f ], "
+				 "\"simple-orient\" : [ %f, %f, %f, %f ] }",
+				(unsigned long long) obs->local_ts,
+				obs->device_ts, obs->dt,
 				obs->ang_vel.x, obs->ang_vel.y, obs->ang_vel.z,
 				obs->accel.x, obs->accel.y, obs->accel.z,
-				obs->mag.x, obs->mag.y, obs->mag.z);
+				obs->mag.x, obs->mag.y, obs->mag.z,
+				obs->simple_orient.x, obs->simple_orient.y, obs->simple_orient.z, obs->simple_orient.w);
 
 			debug_str[1023] = '\0';
 
-			ohmd_pw_debug_stream_push (dev->debug_metadata, obs->ts, debug_str);
+			ohmd_pw_debug_stream_push (dev->debug_metadata, obs->local_ts, debug_str);
 		}
 	}
 
 	dev->num_pending_imu_observations = 0;
 }
-
-#if 0
-		snprintf (&debug_str, "{ ts: %llu, exposure_phase: %d, position: { %f, %f, %f }, orientation: { %f, %f, %f, %f } }",
-			(unsigned long long) frame->uvc.start_ts, led_pattern_phase,
-			sensor->pose.pos.x, sensor->pose.pos.y, sensor->pose.pos.z,
-			sensor->pose.orient.x, sensor->pose.orient.y,
-			sensor->pose.orient.z, sensor->pose.orient.w);
-#endif

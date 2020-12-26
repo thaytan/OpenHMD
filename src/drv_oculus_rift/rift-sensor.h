@@ -32,10 +32,11 @@ struct rift_sensor_capture_frame {
 	/* Index of the frame in the frames array */
 	uint8_t id;
 
-	/* LED blink pattern info - in case we use
-	 * LED blinking again in the future? */
-	uint64_t led_pattern_sof_ts;
-	uint8_t led_pattern_phase;
+	/* Exposure info from the HMD - HMD time,
+	 * count and led pattern */
+	bool exposure_info_valid;
+	rift_tracker_exposure_info exposure_info;
+
 	blobservation* bwobs;
 
 	/* Device poses at capture time */
