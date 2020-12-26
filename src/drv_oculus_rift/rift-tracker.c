@@ -182,7 +182,7 @@ bool rift_tracker_get_exposure_info (rift_tracker_ctx *ctx, rift_tracker_exposur
 	return ret;
 }
 
-void rift_tracker_update_exposure (rift_tracker_ctx *ctx, uint16_t exposure_count, uint32_t exposure_hmd_ts, uint8_t led_pattern_phase)
+void rift_tracker_update_exposure (rift_tracker_ctx *ctx, uint32_t hmd_ts, uint16_t exposure_count, uint32_t exposure_hmd_ts, uint8_t led_pattern_phase)
 {
 	ohmd_lock_mutex (ctx->tracker_lock);
 	if (ctx->exposure_info.led_pattern_phase != led_pattern_phase) {
@@ -203,6 +203,11 @@ void rift_tracker_update_exposure (rift_tracker_ctx *ctx, uint16_t exposure_coun
 
 		LOGD ("%f Have new exposure TS %u count %d LED pattern phase %d",
 			(double) (now) / 1000000.0, exposure_count, exposure_hmd_ts, led_pattern_phase);
+
+		if ((int32_t)(exposure_hmd_ts - hmd_ts) < -1500) {
+			LOGW("Exposure timestamp %u was more than 1.5 IMU samples earlier than IMU ts %u by %u µS",
+					exposure_hmd_ts, hmd_ts, hmd_ts - exposure_hmd_ts);
+		}
 
 		for (i = 0; i < RIFT_MAX_TRACKED_DEVICES; i++) {
 			rift_tracked_device *dev = ctx->devices + i;

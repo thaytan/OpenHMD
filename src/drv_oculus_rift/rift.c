@@ -33,6 +33,8 @@
 #define TICK_LEN (1000000 / 1000) // 1000 Hz ticks, in uS
 #define TICK_US_TO_NS(t) ((t) * 1000)
 #define TICK_US_TO_SEC(t) ((float)(t) / 1000000.0)
+#define TICK_DIFF(a,b) ((int32_t)((a) - (b)))
+
 #define KEEP_ALIVE_VALUE (10 * 1000)
 #define SETFLAG(_s, _flag, _val) (_s) = ((_s) & ~(_flag)) | ((_val) ? (_flag) : 0)
 
@@ -228,19 +230,27 @@ static void handle_tracker_sensor_msg(rift_hmd_t* priv, uint64_t local_ts, unsig
 	/* If we have a gap since the last sample handled, treat the
 	 * first sample here as having the full dt */
 	if (priv->have_imu_timestamp) {
-		dt = (s->timestamp - priv->last_imu_timestamp) / 1000000.0f;
+		dt = (s->timestamp - priv->last_imu_timestamp);
 		dt -= (s->num_samples - 1) * TICK_LEN; // TODO: query the Rift for the sample rate
 	}
 
 	/* Compute the starting timestamps, in local system time and device time */
 	uint32_t total_dt = (s->num_samples-1)*TICK_LEN + dt;
 	uint32_t device_ts = s->timestamp - total_dt;
+	bool sent_exposure_update = false;
 
 	local_ts -= TICK_US_TO_NS(total_dt);
 
 	for(int i = 0; i < s->num_samples; i++){
 		vec3f gyro;
 		vec3f accel;
+
+		/* if the exposure timestamp is earlier than this sample, report it now */
+		if (!sent_exposure_update && TICK_DIFF(device_ts, s->exposure_timestamp) >= 0) { 
+			rift_tracker_update_exposure (priv->tracker_ctx, device_ts, s->exposure_count,
+					s->exposure_timestamp, s->led_pattern_phase);
+			sent_exposure_update = true;
+		}
 
 		vec3f_from_rift_vec(s->samples[i].accel, &accel);
 		vec3f_from_rift_vec(s->samples[i].gyro, &gyro);
@@ -282,15 +292,12 @@ static void handle_tracker_sensor_msg(rift_hmd_t* priv, uint64_t local_ts, unsig
 		local_ts += TICK_US_TO_NS(dt);
 		dt = TICK_LEN; // TODO: query the Rift for the sample rate
 	}
-
 	priv->last_imu_timestamp = s->timestamp;
 	priv->have_imu_timestamp = true;
 
-	rift_tracker_update_exposure (priv->tracker_ctx, s->exposure_count,
-	    s->exposure_timestamp, s->led_pattern_phase);
-	if ((int32_t)(s->exposure_timestamp - s->timestamp) < -1000) {
-		LOGW("Exposure timestamp %u was more than an IMU sample earlier than IMU ts %u",
-		    s->exposure_timestamp, s->timestamp);
+	if (!sent_exposure_update) {
+		rift_tracker_update_exposure (priv->tracker_ctx, s->timestamp, s->exposure_count,
+				s->exposure_timestamp, s->led_pattern_phase);
 	}
 }
 
