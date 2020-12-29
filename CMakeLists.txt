@@ -34,7 +34,10 @@ set(openhmd_source_files
 	${CMAKE_CURRENT_LIST_DIR}/src/omath.c
 	${CMAKE_CURRENT_LIST_DIR}/src/platform-posix.c
 	${CMAKE_CURRENT_LIST_DIR}/src/fusion.c
+	${CMAKE_CURRENT_LIST_DIR}/src/matrices.c
 	${CMAKE_CURRENT_LIST_DIR}/src/shaders.c
+	${CMAKE_CURRENT_LIST_DIR}/src/unscented.c
+	${CMAKE_CURRENT_LIST_DIR}/src/ukf.c
 )
 
 option(OPENHMD_DRIVER_OCULUS_RIFT "Oculus Rift DK1 and DK2" ON)

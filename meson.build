@@ -53,7 +53,10 @@ sources = [
 	'src/drv_dummy/dummy.c',
 	'src/omath.c',
 	'src/fusion.c',
+	'src/matrices.c',
 	'src/shaders.c',
+	'src/unscented.c',
+	'src/ukf.c',
 ]
 if host_machine.system() == 'windows'
 	sources += 'src/platform-win32.c'
