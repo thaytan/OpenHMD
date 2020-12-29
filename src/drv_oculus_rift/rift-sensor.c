@@ -654,35 +654,6 @@ static void frame_captured_cb(rift_sensor_uvc_stream *stream, rift_sensor_uvc_fr
 
 	frame->frame_delivered_ts = now;
 
-	/* led pattern phase comes from sensor reports */
-	rift_tracker_exposure_info cur_exposure_info;
-	bool cur_exposure_info_valid;
-
-	cur_exposure_info_valid = rift_tracker_get_exposure_info (sensor->tracker, &cur_exposure_info);
-
-	if (!frame->exposure_info_valid && cur_exposure_info_valid) {
-		/* There wasn't previously exposure info but is now, take it */
-		LOGV ("%f Sensor %d Frame (sof %f) exposure info TS %u count %u phase %d",
-			(double) (now) / 1000000.0, sensor->id,
-			(double) (cur_exposure_info.local_ts) / 1000000.0,
-			cur_exposure_info.hmd_ts,
-			cur_exposure_info.count, cur_exposure_info.led_pattern_phase);
-	}
-	else if (frame->exposure_info.count != cur_exposure_info.count) {
-		/* The exposure info changed mid-frame. Choose which one to keep */
-		uint64_t frame_midpoint = uvc_frame->start_ts + (now - uvc_frame->start_ts)/2;
-
-		if (cur_exposure_info.local_ts < frame_midpoint) {
-			frame->exposure_info = cur_exposure_info;
-
-			LOGV ("%f Sensor %d Frame (sof %f) updating exposure info TS %u count %u phase %d",
-				(double) (now) / 1000000.0, sensor->id,
-				(double) (cur_exposure_info.local_ts) / 1000000.0,
-				cur_exposure_info.hmd_ts,
-				cur_exposure_info.count, cur_exposure_info.led_pattern_phase);
-		}
-	}
-
 	LOGD ("Sensor %d captured frame %d exposure counter %u phase %d", sensor->id,
 		frame->id, frame->exposure_info.count, frame->exposure_info.led_pattern_phase);
 
@@ -991,4 +962,42 @@ static unsigned int fast_analysis_thread(void *arg)
 	ohmd_unlock_mutex (sensor->sensor_lock);
 
 	return 0;
+}
+
+void rift_sensor_update_exposure (rift_sensor_ctx *sensor, const rift_tracker_exposure_info *exposure_info)
+{
+	ohmd_lock_mutex (sensor->sensor_lock);
+	rift_sensor_capture_frame *frame = (rift_sensor_capture_frame *)(sensor->cur_capture_frame);
+
+	if (frame == NULL)
+		goto done; /* No capture frame yet */
+
+	uint64_t now = ohmd_monotonic_get(sensor->ohmd_ctx);
+
+	if (!frame->exposure_info_valid) {
+		/* There wasn't previously exposure info but is now, take it */
+		LOGV ("%f Sensor %d Frame (sof %f) exposure info TS %u count %u phase %d",
+			(double) (now) / 1000000.0, sensor->id,
+			(double) (exposure_info->local_ts) / 1000000.0,
+			exposure_info->hmd_ts,
+			exposure_info->count, exposure_info->led_pattern_phase);
+	}
+	else if (frame->exposure_info.count != exposure_info->count) {
+		/* The exposure info changed mid-frame. Update if this exposure arrived within 5 ms
+		 * of the frame start */
+		uint64_t frame_ts_threshold = frame->uvc.start_ts + 5000000;
+
+		if (exposure_info->local_ts < frame_ts_threshold) {
+			frame->exposure_info = *exposure_info;
+
+			LOGV ("%f Sensor %d Frame (sof %f) updating exposure info TS %u count %u phase %d",
+				(double) (now) / 1000000.0, sensor->id,
+				(double) (exposure_info->local_ts) / 1000000.0,
+				exposure_info->hmd_ts,
+				exposure_info->count, exposure_info->led_pattern_phase);
+		}
+	}
+
+done:
+	ohmd_unlock_mutex (sensor->sensor_lock);
 }

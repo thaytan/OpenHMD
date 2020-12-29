@@ -201,6 +201,12 @@ void rift_tracker_update_exposure (rift_tracker_ctx *ctx, uint32_t hmd_ts, uint1
 		ctx->exposure_info.led_pattern_phase = led_pattern_phase;
 		ctx->have_exposure_info = true;
 
+		/* Tell sensors about the new exposure info */
+		for (i = 0; i < ctx->n_sensors; i++) {
+			rift_sensor_ctx *sensor_ctx = ctx->sensors[i];
+			rift_sensor_update_exposure (sensor_ctx, &ctx->exposure_info);
+		}
+
 		LOGD ("%f Have new exposure TS %u count %d LED pattern phase %d",
 			(double) (now) / 1000000.0, exposure_count, exposure_hmd_ts, led_pattern_phase);
 

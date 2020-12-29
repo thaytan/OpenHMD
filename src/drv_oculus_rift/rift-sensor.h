@@ -69,5 +69,6 @@ rift_sensor_ctx *rift_sensor_new (ohmd_context* ohmd_ctx, int id, const char *se
 	libusb_context *usb_ctx, libusb_device_handle *usb_devh, rift_tracker_ctx *tracker, const uint8_t radio_id[5]);
 void rift_sensor_free (rift_sensor_ctx *sensor_ctx);
 bool rift_sensor_add_device (rift_sensor_ctx *ctx, rift_tracked_device *device);
+void rift_sensor_update_exposure (rift_sensor_ctx *sensor, const rift_tracker_exposure_info *exposure_info);
 
 #endif
