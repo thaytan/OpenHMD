@@ -5,6 +5,7 @@
  */
 
 /* Oculus Rift driver - positional tracking interface */
+#include <stdio.h>
 
 #include "rift.h"
 #include "rift-kalman-6dof.h"
@@ -19,6 +20,7 @@ typedef struct rift_tracker_ctx_s rift_tracker_ctx;
 
 #define RIFT_MAX_PENDING_IMU_OBSERVATIONS 1000
 
+typedef struct rift_tracked_device_imu_calibration rift_tracked_device_imu_calibration;
 typedef struct rift_tracked_device_imu_observation rift_tracked_device_imu_observation;
 typedef struct rift_tracker_exposure_info rift_tracker_exposure_info;
 typedef struct rift_tracked_device_exposure_info rift_tracked_device_exposure_info;
@@ -45,6 +47,14 @@ struct rift_tracker_exposure_info {
 	rift_tracked_device_exposure_info devices[RIFT_MAX_TRACKED_DEVICES];
 };
 
+struct rift_tracked_device_imu_calibration {
+	vec3f accel_offset;
+	float accel_matrix[9];
+
+	vec3f gyro_offset;
+	float gyro_matrix[9];
+};
+
 struct rift_tracked_device_imu_observation {
 	uint64_t local_ts;
 	uint64_t device_ts;
@@ -66,7 +76,7 @@ struct rift_tracked_device_s
 rift_tracker_ctx *rift_tracker_new (ohmd_context* ohmd_ctx,
 		const uint8_t radio_id[5]);
 
-rift_tracked_device *rift_tracker_add_device (rift_tracker_ctx *ctx, int device_id, posef *imu_pose, rift_leds *leds);
+rift_tracked_device *rift_tracker_add_device (rift_tracker_ctx *ctx, int device_id, posef *imu_pose, rift_leds *leds, rift_tracked_device_imu_calibration *calib);
 void rift_tracker_update_exposure (rift_tracker_ctx *ctx, uint32_t hmd_ts, uint16_t exposure_count, uint32_t exposure_hmd_ts, uint8_t led_pattern_phase);
 bool rift_tracker_get_exposure_info (rift_tracker_ctx *ctx, rift_tracker_exposure_info *info);
 uint8_t rift_tracker_get_device_list(rift_tracker_ctx *tracker_ctx, rift_tracked_device **dev_list);
