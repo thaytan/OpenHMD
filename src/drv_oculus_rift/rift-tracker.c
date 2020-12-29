@@ -65,7 +65,9 @@ rift_tracker_add_device (rift_tracker_ctx *ctx, int device_id, posef *imu_pose, 
 	next_dev = ctx->devices + ctx->n_devices;
 
 	next_dev->id = device_id;
-	ofusion_init(&next_dev->fusion);
+	ofusion_init(&next_dev->simple_fusion);
+	rift_kalman_6dof_init(&next_dev->ukf_fusion);
+
 	next_dev->fusion_to_model = *imu_pose;
 
 	next_dev->debug_metadata = ohmd_pw_debug_stream_new (device_name);
@@ -245,6 +247,8 @@ rift_tracker_free (rift_tracker_ctx *tracker_ctx)
 			led_search_model_free (dev->led_search);
 		if (dev->debug_metadata != NULL)
 			ohmd_pw_debug_stream_free (dev->debug_metadata);
+
+		rift_kalman_6dof_clear(&dev->ukf_fusion);
 		ohmd_destroy_mutex (dev->device_lock);
 	}
 
@@ -264,8 +268,18 @@ void rift_tracked_device_imu_update(rift_tracked_device *dev, uint64_t local_ts,
 	rift_tracked_device_imu_observation *obs;
 
 	ohmd_lock_mutex (dev->device_lock);
-	ofusion_update(&dev->fusion, dt, ang_vel, accel, mag_field);
+	ofusion_update(&dev->simple_fusion, dt, ang_vel, accel, mag_field);
+
+	/* Handle device_ts wrap by extending to 64-bit and working in nanoseconds */
+	if (dev->device_time_ns == 0) {
+		dev->device_time_ns = device_ts * 1000;
+	} else {
+		uint64_t dt_ns = (device_ts - dev->last_device_ts) * 1000;
+		dev->device_time_ns += dt_ns;
+	}
 	dev->last_device_ts = device_ts;
+
+	rift_kalman_6dof_imu_update (&dev->ukf_fusion, dev->device_time_ns, ang_vel, accel, mag_field);
 
 	obs = dev->pending_imu_observations + dev->num_pending_imu_observations;
 	obs->local_ts = local_ts;
@@ -274,7 +288,7 @@ void rift_tracked_device_imu_update(rift_tracked_device *dev, uint64_t local_ts,
 	obs->ang_vel = *ang_vel;
 	obs->accel = *accel;
 	obs->mag = *mag_field;
-	obs->simple_orient = dev->fusion.orient;
+	obs->simple_orient = dev->simple_fusion.orient;
 
 	dev->num_pending_imu_observations++;
 
@@ -289,7 +303,7 @@ void rift_tracked_device_imu_update(rift_tracked_device *dev, uint64_t local_ts,
 void rift_tracked_device_get_view_pose(rift_tracked_device *dev, posef *pose)
 {
 	ohmd_lock_mutex (dev->device_lock);
-	oposef_init(pose, &dev->fusion.world_position, &dev->fusion.orient);
+	oposef_init(pose, &dev->simple_fusion.world_position, &dev->simple_fusion.orient);
 	ohmd_unlock_mutex (dev->device_lock);
 }
 
@@ -308,7 +322,11 @@ void rift_tracked_device_model_pose_update(rift_tracked_device *dev, uint64_t lo
 	}
 
 	rift_tracked_device_send_imu_debug(dev);
-	ofusion_tracker_update (&dev->fusion, time, &pose->pos, &pose->orient);
+	ofusion_tracker_update (&dev->simple_fusion, time, &pose->pos, &pose->orient);
+
+	/* FIXME: Implement lagged state vector entries and use that here */
+	rift_kalman_6dof_position_update(&dev->ukf_fusion, dev->device_time_ns, pose);
+
 	ohmd_unlock_mutex (dev->device_lock);
 }
 
@@ -317,7 +335,8 @@ void rift_tracked_device_get_model_pose(rift_tracked_device *dev, double ts, pos
 	posef tmp;
 	ohmd_lock_mutex (dev->device_lock);
 
-	oposef_init(&tmp, &dev->fusion.world_position, &dev->fusion.orient);
+	rift_kalman_6dof_get_pose_at(&dev->ukf_fusion, dev->device_time_ns, &tmp);
+
 	if (dev->id == 0) {
 		/* Mirror the pose in XZ to go from view-plane to device axes for the HMD */
 		oposef_mirror_XZ(&tmp);
@@ -329,9 +348,9 @@ void rift_tracked_device_get_model_pose(rift_tracked_device *dev, double ts, pos
 	/* FIXME: Return a real value based on orientation covariance, when the filtering can supply that.
 	 * For now, check that there was a recent gravity update and it was small */
 	if (gravity_error_rad) {
-		double time_since_gravity = (ts - dev->fusion.last_gravity_vector_time);
+		double time_since_gravity = (ts - dev->simple_fusion.last_gravity_vector_time);
 		if (time_since_gravity > -0.5 && time_since_gravity < 0.5) {
-			*gravity_error_rad = dev->fusion.grav_error_angle;
+			*gravity_error_rad = dev->simple_fusion.grav_error_angle;
 		}
 		else {
 			*gravity_error_rad = M_PI;

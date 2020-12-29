@@ -7,6 +7,7 @@
 /* Oculus Rift driver - positional tracking interface */
 
 #include "rift.h"
+#include "rift-kalman-6dof.h"
 #include "correspondence_search.h"
 #include "ohmd-pipewire.h"
 
@@ -49,7 +50,11 @@ struct rift_tracked_device_s
 	led_search_model_t *led_search;
 
 	ohmd_mutex *device_lock;
-	fusion fusion;
+	fusion simple_fusion;
+
+	/* 6DOF Kalman Filter */
+	rift_kalman_6dof_filter ukf_fusion;
+
 	/* Transform from the fusion pose (which tracks the IMU, oriented to the screens/view)
 	 * to the model the camera will see, which is offset and rotated 180 degrees */
 	posef fusion_to_model;
@@ -58,6 +63,7 @@ struct rift_tracked_device_s
 	posef pose;
 
 	uint32_t last_device_ts;
+  uint64_t device_time_ns;
 
 	int num_pending_imu_observations;
 	rift_tracked_device_imu_observation pending_imu_observations[RIFT_MAX_PENDING_IMU_OBSERVATIONS];

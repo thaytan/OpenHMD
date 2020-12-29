@@ -79,6 +79,7 @@ if(OPENHMD_DRIVER_OCULUS_RIFT)
 	${CMAKE_CURRENT_LIST_DIR}/src/drv_oculus_rift/rift-sensor-blobwatch.c
 	${CMAKE_CURRENT_LIST_DIR}/src/drv_oculus_rift/rift-sensor-opencv.cpp
 	${CMAKE_CURRENT_LIST_DIR}/src/drv_oculus_rift/rift-tracker.c
+	${CMAKE_CURRENT_LIST_DIR}/src/drv_oculus_rift/rift-kalman-6dof.c
 	)
 	add_definitions(-DDRIVER_OCULUS_RIFT)
   add_definitions(-DHAVE_OPENCV=1)
