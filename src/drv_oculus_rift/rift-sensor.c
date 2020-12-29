@@ -462,9 +462,10 @@ static void dump_bin(const char* label, const unsigned char* data, int length)
 static void
 release_capture_frame(rift_sensor_ctx *sensor, rift_sensor_capture_frame *frame)
 {
+	uint64_t now = ohmd_monotonic_get(sensor->ohmd_ctx);
 	LOGD("Sensor %d Frame %d analysis done after %u ms. Captured %" PRIu64 " USB delivery %u ms fast: queued %f ms analysis %u ms (%ums blob extraction) long: queued %f ms analysis %u ms",
 		 sensor->id, frame->id,
-		 (uint32_t) (ohmd_monotonic_get(sensor->ohmd_ctx) - frame->uvc.start_ts) / 1000000,
+		 (uint32_t) (now - frame->uvc.start_ts) / 1000000,
 		 frame->uvc.start_ts,
 		 (uint32_t) (frame->frame_delivered_ts - frame->uvc.start_ts) / 1000000,
 		 (double) (frame->image_analysis_start_ts - frame->frame_delivered_ts) / 1000000.0,
@@ -472,6 +473,8 @@ release_capture_frame(rift_sensor_ctx *sensor, rift_sensor_capture_frame *frame)
 		 (uint32_t) (frame->blob_extract_finish_ts - frame->image_analysis_start_ts) / 1000000,
 		 (double) (frame->long_analysis_start_ts - frame->image_analysis_finish_ts) / 1000000.0,
 		 (uint32_t) (frame->long_analysis_finish_ts - frame->long_analysis_start_ts) / 1000000);
+
+	rift_tracker_frame_release (sensor->tracker, now, frame->uvc.start_ts, &frame->exposure_info, sensor->serial_no);
 
 	if (frame->bwobs) {
 		blobwatch_release_observation(sensor->bw, frame->bwobs, frame->long_analysis_found_new_blobs);
@@ -496,6 +499,8 @@ static void new_frame_start_cb(struct rift_sensor_uvc_stream *stream, uint64_t s
 	else {
 		LOGD("%f ms Sensor %d SOF no phase info", (double) (start_time) / 1000000.0, sensor->id);
 	}
+
+	rift_tracker_frame_start (sensor->tracker, start_time, sensor->serial_no);
 
 	ohmd_lock_mutex(sensor->sensor_lock);
 	if (sensor->cur_capture_frame != NULL) {
@@ -606,7 +611,7 @@ update_device_pose (rift_sensor_ctx *sensor_ctx, rift_tracked_device *dev,
 				dev->id, pose.orient.x, pose.orient.y, pose.orient.z, pose.orient.w,
 				pose.pos.x, pose.pos.y, pose.pos.z);
 
-			rift_tracked_device_model_pose_update(dev, now, frame->uvc.start_ts, &frame->exposure_info, &pose, sensor_ctx->serial_no);	
+			rift_tracked_device_model_pose_update(dev, now, frame->uvc.start_ts, &frame->exposure_info, &pose, sensor_ctx->serial_no);
 
 #if 0
 		  rift_tracked_device_get_model_pose(dev, (double) (frame->uvc.start_ts) / 1000000000.0, &pose, NULL);
@@ -695,6 +700,8 @@ static void frame_captured_cb(rift_sensor_uvc_stream *stream, rift_sensor_uvc_fr
 	uint64_t now = ohmd_monotonic_get(sensor->ohmd_ctx);
 
 	frame->frame_delivered_ts = now;
+
+	rift_tracker_frame_captured (sensor->tracker, now, frame->uvc.start_ts, &frame->exposure_info, sensor->serial_no);
 
 	LOGD ("Sensor %d captured frame %d exposure counter %u phase %d", sensor->id,
 		frame->id, frame->exposure_info.count, frame->exposure_info.led_pattern_phase);

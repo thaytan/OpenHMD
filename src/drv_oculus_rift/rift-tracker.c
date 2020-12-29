@@ -12,6 +12,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <assert.h>
+#include <stdarg.h>
 
 #include "rift-tracker.h"
 #include "rift-sensor.h"
@@ -97,6 +98,8 @@ struct rift_tracker_ctx_s
 };
 
 static void rift_tracked_device_send_imu_debug(rift_tracked_device_priv *dev);
+static void rift_tracked_device_send_debug_printf(rift_tracked_device_priv *dev, uint64_t local_ts, const char *fmt, ...);
+
 static void rift_tracked_device_update_exposure (rift_tracked_device_priv *dev, rift_tracked_device_exposure_info *dev_info);
 static void rift_tracked_device_frame_captured(rift_tracked_device_priv *dev, rift_tracked_device_exposure_info *dev_info);
 static void rift_tracked_device_frame_released(rift_tracked_device_priv *dev, rift_tracked_device_exposure_info *dev_info);
@@ -314,6 +317,11 @@ rift_tracker_frame_start (rift_tracker_ctx *ctx, uint64_t local_ts, const char *
 		ohmd_lock_mutex (dev->device_lock);
 		rift_tracked_device_send_imu_debug(dev);
 
+		if (dev->debug_file != NULL) {
+			fprintf(dev->debug_file, ",\n{ \"type\": \"frame-start\", \"local-ts\": %llu, "
+				"\"source\": \"%s\" }",
+				(unsigned long long) local_ts, source);
+		}
 		ohmd_unlock_mutex (dev->device_lock);
 	}
 	ohmd_unlock_mutex (ctx->tracker_lock);
@@ -337,6 +345,12 @@ rift_tracker_frame_captured (rift_tracker_ctx *ctx, uint64_t local_ts, uint64_t 
 		}
 
 		rift_tracked_device_send_imu_debug(dev);
+
+		if (dev->debug_file != NULL) {
+			fprintf(dev->debug_file, ",\n{ \"type\": \"frame-captured\", \"local-ts\": %llu, "
+				"\"frame-start-local-ts\": %llu, \"source\": \"%s\" }",
+				(unsigned long long) local_ts, (unsigned long long) frame_start_local_ts, source);
+		}
 		ohmd_unlock_mutex (dev->device_lock);
 	}
 	ohmd_unlock_mutex (ctx->tracker_lock);
@@ -360,6 +374,12 @@ rift_tracker_frame_release (rift_tracker_ctx *ctx, uint64_t local_ts, uint64_t f
 		}
 
 		rift_tracked_device_send_imu_debug(dev);
+
+		if (dev->debug_file != NULL) {
+			fprintf(dev->debug_file, ",\n{ \"type\": \"frame-release\", \"local-ts\": %llu, "
+				"\"frame-local-ts\": %llu, \"source\": \"%s\" }",
+				(unsigned long long) local_ts, (unsigned long long) frame_local_ts, source);
+		}
 		ohmd_unlock_mutex (dev->device_lock);
 	}
 	ohmd_unlock_mutex (ctx->tracker_lock);
@@ -486,6 +506,18 @@ void rift_tracked_device_model_pose_update(rift_tracked_device *dev_base, uint64
 
 	dev->have_pose_observation = true;
 
+	rift_tracked_device_send_debug_printf(dev, local_ts, ",\n{ \"type\": \"pose\", \"local-ts\": %llu, "
+			"\"device-ts\": %u, \"frame-start-local-ts\": %llu, "
+			"\"frame-local-ts\": %llu, \"frame-hmd-ts\": %u, "
+			"\"frame-exposure-count\": %u, \"source\": \"%s\", "
+			"\"pos\" : [ %f, %f, %f ], "
+			"\"orient\" : [ %f, %f, %f, %f ] }",
+			(unsigned long long) local_ts, dev->last_device_ts,
+			(unsigned long long) frame_start_local_ts,
+			(unsigned long long) exposure_info->local_ts, exposure_info->hmd_ts,
+			exposure_info->count, source,
+			pose->pos.x, pose->pos.y, pose->pos.z,
+			pose->orient.x, pose->orient.y, pose->orient.z, pose->orient.w);
 	ohmd_unlock_mutex (dev->device_lock);
 }
 
@@ -558,6 +590,27 @@ rift_tracked_device_send_imu_debug(rift_tracked_device_priv *dev)
 	}
 
 	dev->num_pending_imu_observations = 0;
+}
+
+static void
+rift_tracked_device_send_debug_printf(rift_tracked_device_priv *dev, uint64_t local_ts, const char *fmt, ...)
+{
+	if (dev->debug_metadata && ohmd_pw_debug_stream_connected(dev->debug_metadata)) {
+		char debug_str[1024];
+		va_list args;
+
+		/* Send any pending IMU debug first */
+		rift_tracked_device_send_imu_debug(dev);
+
+		/* Print output string and send */
+		va_start(args, fmt);
+		vsnprintf(debug_str, 1024, fmt, args);
+		va_end(args);
+
+		debug_str[1023] = '\0';
+
+		ohmd_pw_debug_stream_push (dev->debug_metadata, local_ts, debug_str);
+	}
 }
 
 static rift_tracker_pose_delay_slot *
