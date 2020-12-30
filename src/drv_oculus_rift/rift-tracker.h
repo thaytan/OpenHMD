@@ -55,6 +55,8 @@ struct rift_tracked_device_imu_observation {
 
 struct rift_tracked_device_s
 {
+	int index; /* Index of this entry in the devices array for the tracker and exposures */
+
 	int id;
 	rift_leds *leds;
 	led_search_model_t *led_search;

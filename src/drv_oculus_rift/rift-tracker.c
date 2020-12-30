@@ -112,6 +112,7 @@ rift_tracker_new (ohmd_context* ohmd_ctx,
 
 	for (i = 0; i < RIFT_MAX_TRACKED_DEVICES; i++) {
 		rift_tracked_device *dev = tracker_ctx->devices + i;
+		dev->index = i;
 		dev->device_lock = ohmd_create_mutex(ohmd_ctx);
 	}
 
