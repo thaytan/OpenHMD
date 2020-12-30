@@ -93,6 +93,45 @@ void omat4x4f_init_translate(mat4x4f* me, float x, float y, float z);
 void omat4x4f_mult(const mat4x4f* left, const mat4x4f* right, mat4x4f* out_mat);
 void omat4x4f_transpose(const mat4x4f* me, mat4x4f* out_mat);
 
+// High-precision vec
+typedef union {
+	struct {
+		double x, y, z;
+	};
+	double arr[3];
+} vec3d;
+
+void ovec3d_set(vec3d* me, double x, double y, double z);
+void ovec3d_normalize_me(vec3d* me);
+double ovec3d_get_length(const vec3d* me);
+double ovec3d_get_angle(const vec3d* me, const vec3d* vec);
+double ovec3d_get_dot(const vec3d* me, const vec3d* vec);
+void ovec3d_cross(const vec3d* a, const vec3d* b, vec3d *out);
+void ovec3d_subtract(const vec3d* a, const vec3d* b, vec3d* out);
+void ovec3d_add(const vec3d* a, const vec3d* b, vec3d* out);
+void ovec3d_inverse(vec3d *me);
+void ovec3d_multiply_scalar (const vec3d* a, const double s, vec3d* out);
+
+// High precision quat
+typedef union {
+	struct {
+		double x, y, z, w;
+	};
+	double arr[4];
+} quatd;
+
+void oquatd_init_axis(quatd* me, const vec3d* vec, double angle);
+
+void oquatd_get_rotated(const quatd* me, const vec3d* vec, vec3d* out_vec);
+void oquatd_from_rotation(quatd *me, const vec3d *rot);
+void oquatd_to_rotation(const quatd *me, vec3d *rot);
+void oquatd_mult_me(quatd* me, const quatd* q);
+void oquatd_mult(const quatd* me, const quatd* q, quatd* out_q);
+void oquatd_diff(const quatd* me, const quatd* q, quatd* out_q);
+void oquatd_normalize_me(quatd* me);
+double oquatd_get_length(const quatd* me);
+double oquatd_get_dot(const quatd* me, const quatd* q);
+void oquatd_inverse(quatd* me);
 
 // filter queue
 #define FILTER_QUEUE_MAX_SIZE 256

@@ -507,7 +507,214 @@ void omat4x4f_mult(const mat4x4f* l, const mat4x4f* r, mat4x4f *o)
 		o->m[i][3] = a0 * r->m[0][3] + a1 * r->m[1][3] + a2 * r->m[2][3] + a3 * r->m[3][3];
 	}
 }
+// High-precision vector
+void ovec3d_set(vec3d* me, double x, double y, double z)
+{
+	me->x = x;
+	me->y = y;
+	me->z = z;
+}
 
+double ovec3d_get_length(const vec3d* me)
+{
+	return sqrt(POW2(me->x) + POW2(me->y) + POW2(me->z));
+}
+
+void ovec3d_normalize_me(vec3d* me)
+{
+	if(me->x == 0 && me->y == 0 && me->z == 0)
+		return;
+
+	double len = ovec3d_get_length(me);
+	me->x /= len;
+	me->y /= len;
+	me->z /= len;
+}
+
+void ovec3d_cross(const vec3d* a, const vec3d* b, vec3d *out)
+{
+	out->x = a->y * b->z - a->z * b->y;
+	out->y = a->z * b->x - a->x * b->z;
+	out->z = a->x * b->y - a->y * b->x;
+}
+
+void ovec3d_subtract(const vec3d* a, const vec3d* b, vec3d* out)
+{
+	for(int i = 0; i < 3; i++)
+		out->arr[i] = a->arr[i] - b->arr[i];
+}
+
+void ovec3d_add(const vec3d* a, const vec3d* b, vec3d* out)
+{
+	for(int i = 0; i < 3; i++)
+		out->arr[i] = a->arr[i] + b->arr[i];
+}
+
+void ovec3d_inverse(vec3d *me)
+{
+	for(int i = 0; i < 3; i++)
+		me->arr[i] = -me->arr[i];
+}
+
+double ovec3d_get_dot(const vec3d* me, const vec3d* vec)
+{
+	return me->x * vec->x + me->y * vec->y + me->z * vec->z;
+}
+
+double ovec3d_get_angle(const vec3d* me, const vec3d* vec)
+{
+	double dot = ovec3d_get_dot(me, vec);
+	double lengths = ovec3d_get_length(me) * ovec3d_get_length(vec);
+
+	if(lengths == 0)
+		return 0;
+
+	dot /= lengths;
+
+	if (dot >= 1.0 || dot <= -1.0)
+		return 0.0;
+
+	return acos(dot);
+}
+
+void ovec3d_multiply_scalar (const vec3d* a, const double s, vec3d* out)
+{
+	out->x = a->x * s;
+	out->y = a->y * s;
+	out->z = a->z * s;
+}
+
+// High-precision quaternion
+void oquatd_init_axis(quatd* me, const vec3d* vec, double angle)
+{
+	vec3d norm = *vec;
+	ovec3d_normalize_me(&norm);
+
+	me->x = norm.x * sin(angle / 2.0f);
+	me->y = norm.y * sin(angle / 2.0f);
+	me->z = norm.z * sin(angle / 2.0f);
+	me->w = cos(angle / 2.0f);
+}
+
+void oquatd_get_rotated(const quatd* me, const vec3d* vec, vec3d* out_vec)
+{
+	quatd q = {{vec->x * me->w + vec->z * me->y - vec->y * me->z,
+	            vec->y * me->w + vec->x * me->z - vec->z * me->x,
+	            vec->z * me->w + vec->y * me->x - vec->x * me->y,
+	            vec->x * me->x + vec->y * me->y + vec->z * me->z}};
+
+	out_vec->x = me->w * q.x + me->x * q.w + me->y * q.z - me->z * q.y;
+	out_vec->y = me->w * q.y + me->y * q.w + me->z * q.x - me->x * q.z;
+	out_vec->z = me->w * q.z + me->z * q.w + me->x * q.y - me->y * q.x;
+}
+
+/* Map a rotation parameterisation to a quaternion */
+void oquatd_from_rotation(quatd *me, const vec3d *rot)
+{
+  double theta = ovec3d_get_length(rot);
+  double c_t = cos(theta / 2.0f);
+  double sinc_t;
+
+  /* magic number for numerical stability */
+  if (theta > 1e-10) {
+    sinc_t = sin(theta / 2.0f) / theta;
+  }
+  else {
+    /* Use Taylor series expansion, as suggested by Grassia -
+     * "Practical Parameterization of Rotations Using the Exponential Map"
+     */
+    sinc_t = 0.5 + theta * theta / 48.0f;
+  }
+
+	me->x = rot->x * sinc_t;
+	me->y = rot->y * sinc_t;
+	me->z = rot->z * sinc_t;
+	me->w = c_t;
+
+	oquatd_normalize_me(me);
+}
+
+/* Map a quaternion into rotation parameterisation */
+void oquatd_to_rotation(const quatd *me, vec3d *rot)
+{
+  double theta;
+  /* FIXME: Consider other parameterisation vectors */
+
+  if (me->w < 0)
+    theta = -2*acos(-me->w);
+  else
+    theta = 2*acos(me->w);
+
+  vec3d v = {{ me->x, me->y, me->z }};
+  double v_len = ovec3d_get_length(&v);
+
+  if (v_len > 1e-10) {
+    ovec3d_multiply_scalar (&v, theta / v_len, rot);
+  }
+  else {
+    /* quaternion is approximately the identity rotation */
+    ovec3d_multiply_scalar (&v, 2.0, rot);
+  }
+
+  assert(!isnan(rot->x));
+  assert(!isnan(rot->y));
+  assert(!isnan(rot->z));
+}
+
+void oquatd_mult(const quatd* me, const quatd* q, quatd* out_q)
+{
+	assert (out_q != me);
+	assert (out_q != q);
+
+	out_q->x = me->w * q->x + me->x * q->w + me->y * q->z - me->z * q->y;
+	out_q->y = me->w * q->y - me->x * q->z + me->y * q->w + me->z * q->x;
+	out_q->z = me->w * q->z + me->x * q->y - me->y * q->x + me->z * q->w;
+	out_q->w = me->w * q->w - me->x * q->x - me->y * q->y - me->z * q->z;
+}
+
+void oquatd_mult_me(quatd* me, const quatd* q)
+{
+	quatd tmp = *me;
+	oquatd_mult(&tmp, q, me);
+}
+
+void oquatd_normalize_me(quatd* me)
+{
+	double len = oquatd_get_length(me);
+	me->x /= len;
+	me->y /= len;
+	me->z /= len;
+	me->w /= len;
+}
+
+double oquatd_get_length(const quatd* me)
+{
+	return sqrt(me->x * me->x + me->y * me->y + me->z * me->z + me->w * me->w);
+}
+
+double oquatd_get_dot(const quatd* me, const quatd* q)
+{
+	return me->x * q->x + me->y * q->y + me->z * q->z + me->w * q->w;
+}
+
+void oquatd_inverse(quatd* me)
+{
+	double dot = oquatd_get_dot(me, me);
+
+	// conjugate
+	for(int i = 0; i < 3; i++)
+		me->arr[i] = -me->arr[i];
+	
+	for(int i = 0; i < 4; i++)
+		me->arr[i] /= dot;
+}
+
+void oquatd_diff(const quatd* me, const quatd* q, quatd* out_q)
+{
+	quatd inv = *me;
+	oquatd_inverse(&inv);
+	oquatd_mult(&inv, q, out_q);
+}
 
 // filter queue
 
