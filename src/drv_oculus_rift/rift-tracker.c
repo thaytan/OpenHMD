@@ -324,6 +324,8 @@ void rift_tracked_device_get_view_pose(rift_tracked_device *dev, posef *pose)
 void rift_tracked_device_model_pose_update(rift_tracked_device *dev, uint64_t local_ts, rift_tracker_exposure_info *exposure_info, posef *pose)
 {
 	double time = (double)(exposure_info->local_ts) / 1000000000.0;
+	uint64_t frame_device_time_ns = 0;
+	int frame_fusion_slot = -1;
 
 	ohmd_lock_mutex (dev->device_lock);
 
@@ -336,6 +338,14 @@ void rift_tracked_device_model_pose_update(rift_tracked_device *dev, uint64_t lo
 	}
 
 	rift_tracked_device_send_imu_debug(dev);
+
+	if (dev->index < exposure_info->n_devices) {
+		/* This device existed when the exposure was taken and therefore has info */
+		rift_tracked_device_exposure_info *exposure_dev_info = exposure_info->devices + dev->index;
+		frame_device_time_ns = exposure_dev_info->device_time_ns;
+		frame_fusion_slot = exposure_dev_info->fusion_slot;
+	}
+
 	ofusion_tracker_update (&dev->simple_fusion, time, &pose->pos, &pose->orient);
 
 	/* FIXME: Implement lagged state vector entries and use that here */
