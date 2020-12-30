@@ -22,6 +22,12 @@ typedef struct rift_tracker_ctx_s rift_tracker_ctx;
 
 typedef struct rift_tracked_device_imu_observation rift_tracked_device_imu_observation;
 typedef struct rift_tracker_exposure_info rift_tracker_exposure_info;
+typedef struct rift_tracked_device_exposure_info rift_tracked_device_exposure_info;
+
+struct rift_tracked_device_exposure_info {
+	uint64_t device_time_ns; /* Device time this sensor exposure was captured */
+	int fusion_slot; /* Fusion slot assigned to the exposure, or -1 */
+};
 
 struct rift_tracker_exposure_info {
 	uint64_t local_ts;
@@ -29,6 +35,10 @@ struct rift_tracker_exposure_info {
 
 	uint16_t count;
 	uint8_t led_pattern_phase;
+
+	/* Per device info */
+	uint8_t n_devices;
+	rift_tracked_device_exposure_info devices[RIFT_MAX_TRACKED_DEVICES];
 };
 
 struct rift_tracked_device_imu_observation {

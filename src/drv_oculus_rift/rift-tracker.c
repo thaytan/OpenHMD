@@ -186,6 +186,9 @@ bool rift_tracker_get_exposure_info (rift_tracker_ctx *ctx, rift_tracker_exposur
 
 void rift_tracker_update_exposure (rift_tracker_ctx *ctx, uint32_t hmd_ts, uint16_t exposure_count, uint32_t exposure_hmd_ts, uint8_t led_pattern_phase)
 {
+	bool exposure_changed = false;
+	int i;
+
 	ohmd_lock_mutex (ctx->tracker_lock);
 	if (ctx->exposure_info.led_pattern_phase != led_pattern_phase) {
 		LOGD ("%f LED pattern phase changed to %d",
@@ -195,19 +198,14 @@ void rift_tracker_update_exposure (rift_tracker_ctx *ctx, uint32_t hmd_ts, uint1
 
 	if (ctx->exposure_info.count != exposure_count) {
 		uint64_t now = ohmd_monotonic_get(ctx->ohmd_ctx);
-		int i;
+
+		exposure_changed = true;
 
 		ctx->exposure_info.local_ts = now;
 		ctx->exposure_info.count = exposure_count;
 		ctx->exposure_info.hmd_ts = exposure_hmd_ts;
 		ctx->exposure_info.led_pattern_phase = led_pattern_phase;
 		ctx->have_exposure_info = true;
-
-		/* Tell sensors about the new exposure info */
-		for (i = 0; i < ctx->n_sensors; i++) {
-			rift_sensor_ctx *sensor_ctx = ctx->sensors[i];
-			rift_sensor_update_exposure (sensor_ctx, &ctx->exposure_info);
-		}
 
 		LOGD ("%f Have new exposure TS %u count %d LED pattern phase %d",
 			(double) (now) / 1000000.0, exposure_count, exposure_hmd_ts, led_pattern_phase);
@@ -217,15 +215,30 @@ void rift_tracker_update_exposure (rift_tracker_ctx *ctx, uint32_t hmd_ts, uint1
 					exposure_hmd_ts, hmd_ts, hmd_ts - exposure_hmd_ts);
 		}
 
-		for (i = 0; i < RIFT_MAX_TRACKED_DEVICES; i++) {
+		ctx->exposure_info.n_devices = ctx->n_devices;
+
+		for (i = 0; i < ctx->n_devices; i++) {
 			rift_tracked_device *dev = ctx->devices + i;
+			rift_tracked_device_exposure_info *dev_info = ctx->exposure_info.devices + i;
 
 			ohmd_lock_mutex (dev->device_lock);
+			dev_info->device_time_ns = dev->device_time_ns;
+			dev_info->fusion_slot = -1; /* FIXME: Allocate a fusion slot from the UKF */
+
 			rift_tracked_device_send_imu_debug(dev);
 			ohmd_unlock_mutex (dev->device_lock);
 		}
 	}
 	ohmd_unlock_mutex (ctx->tracker_lock);
+
+	if (exposure_changed) {
+		/* Tell sensors about the new exposure info, outside the lock to avoid
+		 * deadlocks from callbacks */
+		for (i = 0; i < ctx->n_sensors; i++) {
+			rift_sensor_ctx *sensor_ctx = ctx->sensors[i];
+			rift_sensor_update_exposure (sensor_ctx, &ctx->exposure_info);
+		}
+	}
 }
 
 void
