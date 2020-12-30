@@ -291,6 +291,14 @@ void rift_tracker_update_exposure (rift_tracker_ctx *ctx, uint32_t hmd_ts, uint1
 			rift_tracked_device_update_exposure(dev, dev_info);
 
 			rift_tracked_device_send_imu_debug(dev);
+
+			rift_tracked_device_send_debug_printf(dev, now,
+					",\n{ \"type\": \"exposure\", \"local-ts\": %llu, "
+					"\"hmd-ts\": %u, \"exposure-ts\": %u, \"count\": %u, \"device-ts\": %llu, "
+					"\"delay-slot\": %d	}",
+					(unsigned long long) now,
+					hmd_ts, exposure_hmd_ts, exposure_count,
+					(unsigned long long) dev_info->device_time_ns, dev_info->fusion_slot);
 			ohmd_unlock_mutex (dev->device_lock);
 		}
 	}
@@ -476,7 +484,9 @@ void rift_tracked_device_model_pose_update(rift_tracked_device *dev_base, uint64
 {
 	rift_tracked_device_priv *dev = (rift_tracked_device_priv *) (dev_base);
 	double time = (double)(exposure_info->local_ts) / 1000000000.0;
+	uint64_t frame_device_time_ns = 0;
 	rift_tracker_pose_delay_slot *slot = NULL;
+	int frame_fusion_slot = -1;
 
 	ohmd_lock_mutex (dev->device_lock);
 
@@ -495,11 +505,13 @@ void rift_tracked_device_model_pose_update(rift_tracked_device *dev_base, uint64
 	if (dev->index < exposure_info->n_devices) {
 		/* This device existed when the exposure was taken and therefore has info */
 		rift_tracked_device_exposure_info *dev_info = exposure_info->devices + dev->index;
+		frame_device_time_ns = dev_info->device_time_ns;
 
 		slot = get_matching_delay_slot(dev, dev_info);
 		if (slot != NULL) {
 			LOGD ("Got pose update for delay slot %d for dev %d, ts %llu (delay %f)", slot->slot_id, dev->base.id,
 					(unsigned long long) frame_device_time_ns, (double) (dev->device_time_ns - frame_device_time_ns) / 1000000000.0 );
+			frame_fusion_slot = slot->slot_id;
 			rift_kalman_6dof_position_update(&dev->ukf_fusion, dev->device_time_ns, pose, slot->slot_id);
 		}
 	}
@@ -509,13 +521,16 @@ void rift_tracked_device_model_pose_update(rift_tracked_device *dev_base, uint64
 	rift_tracked_device_send_debug_printf(dev, local_ts, ",\n{ \"type\": \"pose\", \"local-ts\": %llu, "
 			"\"device-ts\": %u, \"frame-start-local-ts\": %llu, "
 			"\"frame-local-ts\": %llu, \"frame-hmd-ts\": %u, "
-			"\"frame-exposure-count\": %u, \"source\": \"%s\", "
+			"\"frame-exposure-count\": %u, \"frame-device-ts\": %llu, \"frame-fusion-slot\": %d, "
+			"\"source\": \"%s\", "
 			"\"pos\" : [ %f, %f, %f ], "
 			"\"orient\" : [ %f, %f, %f, %f ] }",
 			(unsigned long long) local_ts, dev->last_device_ts,
 			(unsigned long long) frame_start_local_ts,
 			(unsigned long long) exposure_info->local_ts, exposure_info->hmd_ts,
-			exposure_info->count, source,
+			exposure_info->count,
+			(unsigned long long) frame_device_time_ns, frame_fusion_slot,
+			source,
 			pose->pos.x, pose->pos.y, pose->pos.z,
 			pose->orient.x, pose->orient.y, pose->orient.z, pose->orient.w);
 	ohmd_unlock_mutex (dev->device_lock);
