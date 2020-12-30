@@ -24,17 +24,17 @@
 
 // vector
 
-typedef union { 
-	struct { 
-		float x, y, z; 
-	}; 
-	float arr[3]; 
+typedef union {
+	struct {
+		float x, y, z;
+	};
+	float arr[3];
 } vec3f;
 
 void ovec3f_set(vec3f* me, float x, float y, float z);
 void ovec3f_normalize_me(vec3f* me);
 float ovec3f_get_length(const vec3f* me);
-float ovec3f_get_angle(const vec3f* me, const vec3f* vec); 
+float ovec3f_get_angle(const vec3f* me, const vec3f* vec);
 float ovec3f_get_dot(const vec3f* me, const vec3f* vec);
 void ovec3f_cross(const vec3f* a, const vec3f* b, vec3f *out);
 void ovec3f_subtract(const vec3f* a, const vec3f* b, vec3f* out);
@@ -45,11 +45,11 @@ void ovec3f_multiply_scalar (const vec3f* a, const float s, vec3f* out);
 
 // quaternion
 
-typedef union { 
-	struct { 
-		float x, y, z, w; 
-	}; 
-	float arr[4]; 
+typedef union {
+	struct {
+		float x, y, z, w;
+	};
+	float arr[4];
 } quatf;
 
 void oquatf_init_axis(quatf* me, const vec3f* vec, float angle);
