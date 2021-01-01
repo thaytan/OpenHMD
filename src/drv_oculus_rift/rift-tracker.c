@@ -67,6 +67,7 @@ rift_tracker_add_device (rift_tracker_ctx *ctx, int device_id, posef *imu_pose, 
 	next_dev->id = device_id;
 	ofusion_init(&next_dev->simple_fusion);
 	rift_kalman_6dof_init(&next_dev->ukf_fusion);
+	next_dev->device_time_ns = 0;
 
 	next_dev->fusion_to_model = *imu_pose;
 
@@ -297,7 +298,7 @@ void rift_tracked_device_imu_update(rift_tracked_device *dev, uint64_t local_ts,
 
 	obs = dev->pending_imu_observations + dev->num_pending_imu_observations;
 	obs->local_ts = local_ts;
-	obs->device_ts = device_ts;
+	obs->device_ts = dev->device_time_ns;
 	obs->dt = dt;
 	obs->ang_vel = *ang_vel;
 	obs->accel = *accel;
@@ -400,12 +401,13 @@ rift_tracked_device_send_imu_debug(rift_tracked_device *dev)
 			rift_tracked_device_imu_observation *obs = dev->pending_imu_observations + i;
 
 			snprintf (debug_str, 1024, ",\n{ \"type\": \"imu\", \"local-ts\": %llu, "
-				 "\"device-ts\": %u, \"dt\": %f, "
+				 "\"device-ts\": %llu, \"dt\": %f, "
 				 "\"ang_vel\": [ %f, %f, %f ], \"accel\": [ %f, %f, %f ], "
 				 "\"mag\": [ %f, %f, %f ], "
 				 "\"simple-orient\" : [ %f, %f, %f, %f ] }",
 				(unsigned long long) obs->local_ts,
-				obs->device_ts, obs->dt,
+				(unsigned long long) obs->device_ts,
+				obs->dt,
 				obs->ang_vel.x, obs->ang_vel.y, obs->ang_vel.z,
 				obs->accel.x, obs->accel.y, obs->accel.z,
 				obs->mag.x, obs->mag.y, obs->mag.z,

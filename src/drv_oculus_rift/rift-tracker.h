@@ -43,7 +43,7 @@ struct rift_tracker_exposure_info {
 
 struct rift_tracked_device_imu_observation {
 	uint64_t local_ts;
-	uint32_t device_ts;
+	uint64_t device_ts;
 	float dt;
 
 	vec3f ang_vel;
