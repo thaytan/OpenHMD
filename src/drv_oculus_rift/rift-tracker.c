@@ -289,7 +289,7 @@ void rift_tracked_device_imu_update(rift_tracked_device *dev, uint64_t local_ts,
 	if (dev->device_time_ns == 0) {
 		dev->device_time_ns = device_ts * 1000;
 	} else {
-		uint64_t dt_ns = (device_ts - dev->last_device_ts) * 1000;
+		uint64_t dt_ns = ((uint32_t)(device_ts - dev->last_device_ts)) * 1000;
 		dev->device_time_ns += dt_ns;
 	}
 	dev->last_device_ts = device_ts;
