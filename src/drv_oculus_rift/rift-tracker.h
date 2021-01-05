@@ -55,32 +55,10 @@ struct rift_tracked_device_imu_observation {
 
 struct rift_tracked_device_s
 {
-	int index; /* Index of this entry in the devices array for the tracker and exposures */
-
 	int id;
+
 	rift_leds *leds;
 	led_search_model_t *led_search;
-
-	ohmd_mutex *device_lock;
-	fusion simple_fusion;
-
-	/* 6DOF Kalman Filter */
-	rift_kalman_6dof_filter ukf_fusion;
-
-	/* Transform from the fusion pose (which tracks the IMU, oriented to the screens/view)
-	 * to the model the camera will see, which is offset and rotated 180 degrees */
-	posef fusion_to_model;
-
-	/* The model (HMD/controller) pose -> world transform */
-	posef pose;
-
-	uint32_t last_device_ts;
-  uint64_t device_time_ns;
-
-	int num_pending_imu_observations;
-	rift_tracked_device_imu_observation pending_imu_observations[RIFT_MAX_PENDING_IMU_OBSERVATIONS];
-
-	ohmd_pw_debug_stream *debug_metadata;
 };
 
 rift_tracker_ctx *rift_tracker_new (ohmd_context* ohmd_ctx,
@@ -96,7 +74,7 @@ void rift_tracker_free (rift_tracker_ctx *ctx);
 void rift_tracked_device_imu_update(rift_tracked_device *dev, uint64_t local_ts, uint32_t device_ts, float dt, const vec3f* ang_vel, const vec3f* accel, const vec3f* mag_field);
 void rift_tracked_device_get_view_pose(rift_tracked_device *dev, posef *pose);
 
-void rift_tracked_device_model_pose_update(rift_tracked_device *dev, uint64_t local_ts, rift_tracker_exposure_info *exposure_info, posef *pose);
+void rift_tracked_device_model_pose_update(rift_tracked_device *dev_base, uint64_t local_ts, uint64_t frame_start_local_ts, rift_tracker_exposure_info *exposure_info, posef *pose, const char *source);
 void rift_tracked_device_get_model_pose(rift_tracked_device *dev, double ts, posef *pose, float *gravity_error_rad);
 
 #endif

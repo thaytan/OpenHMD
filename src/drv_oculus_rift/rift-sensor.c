@@ -575,7 +575,7 @@ update_device_pose (rift_sensor_ctx *sensor_ctx, rift_tracked_device *dev,
 				dev->id, pose.orient.x, pose.orient.y, pose.orient.z, pose.orient.w,
 				pose.pos.x, pose.pos.y, pose.pos.z);
 
-			rift_tracked_device_model_pose_update(dev, now, &frame->exposure_info, &pose);
+			rift_tracked_device_model_pose_update(dev, now, frame->uvc.start_ts, &frame->exposure_info, &pose, sensor_ctx->serial_no);	
 
 #if 0
 		  rift_tracked_device_get_model_pose(dev, (double) (frame->uvc.start_ts) / 1000000000.0, &pose, NULL);

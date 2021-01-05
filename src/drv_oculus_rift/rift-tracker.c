@@ -28,7 +28,36 @@
 
 #define MAX_SENSORS 4
 
-static void rift_tracked_device_send_imu_debug(rift_tracked_device *dev);
+typedef struct rift_tracked_device_priv rift_tracked_device_priv;
+
+/* Internal full tracked device struct */
+struct rift_tracked_device_priv {
+	rift_tracked_device base;
+
+	int index; /* Index of this entry in the devices array for the tracker and exposures */
+
+	ohmd_mutex *device_lock;
+	fusion simple_fusion;
+
+	/* 6DOF Kalman Filter */
+	rift_kalman_6dof_filter ukf_fusion;
+
+	/* Transform from the fusion pose (which tracks the IMU, oriented to the screens/view)
+	 * to the model the camera will see, which is offset and rotated 180 degrees */
+	posef fusion_to_model;
+
+	/* The model (HMD/controller) pose -> world transform */
+	posef pose;
+
+	uint32_t last_device_ts;
+	uint64_t device_time_ns;
+
+	int num_pending_imu_observations;
+	rift_tracked_device_imu_observation pending_imu_observations[RIFT_MAX_PENDING_IMU_OBSERVATIONS];
+
+	ohmd_pw_debug_stream *debug_metadata;
+	FILE *debug_file;
+};
 
 struct rift_tracker_ctx_s
 {
@@ -45,15 +74,17 @@ struct rift_tracker_ctx_s
 	rift_sensor_ctx *sensors[MAX_SENSORS];
 	uint8_t n_sensors;
 
-	rift_tracked_device devices[RIFT_MAX_TRACKED_DEVICES];
+	rift_tracked_device_priv devices[RIFT_MAX_TRACKED_DEVICES];
 	uint8_t n_devices;
 };
+
+static void rift_tracked_device_send_imu_debug(rift_tracked_device_priv *dev);
 
 rift_tracked_device *
 rift_tracker_add_device (rift_tracker_ctx *ctx, int device_id, posef *imu_pose, rift_leds *leds)
 {
 	int i;
-	rift_tracked_device *next_dev;
+	rift_tracked_device_priv *next_dev;
 	char device_name[64];
 
 	snprintf(device_name,64,"openhmd-rift-device-%d", device_id);
@@ -64,7 +95,7 @@ rift_tracker_add_device (rift_tracker_ctx *ctx, int device_id, posef *imu_pose, 
 	ohmd_lock_mutex (ctx->tracker_lock);
 	next_dev = ctx->devices + ctx->n_devices;
 
-	next_dev->id = device_id;
+	next_dev->base.id = device_id;
 	ofusion_init(&next_dev->simple_fusion);
 	rift_kalman_6dof_init(&next_dev->ukf_fusion);
 	next_dev->device_time_ns = 0;
@@ -72,21 +103,21 @@ rift_tracker_add_device (rift_tracker_ctx *ctx, int device_id, posef *imu_pose, 
 	next_dev->fusion_to_model = *imu_pose;
 
 	next_dev->debug_metadata = ohmd_pw_debug_stream_new (device_name);
-	next_dev->leds = leds;
-	next_dev->led_search = led_search_model_new (leds);
+	next_dev->base.leds = leds;
+	next_dev->base.led_search = led_search_model_new (leds);
 	ctx->n_devices++;
 	ohmd_unlock_mutex (ctx->tracker_lock);
 
 	/* Tell the sensors about the new device */
 	for (i = 0; i < ctx->n_sensors; i++) {
 		rift_sensor_ctx *sensor_ctx = ctx->sensors[i];
-		if (!rift_sensor_add_device (sensor_ctx, next_dev)) {
+		if (!rift_sensor_add_device (sensor_ctx, (rift_tracked_device *) next_dev)) {
 			LOGE("Failed to configure object tracking for device %d\n", device_id);
 		}
 	}
 
 	printf("device %d online. Now tracking.\n", device_id);
-	return next_dev;
+	return (rift_tracked_device *) next_dev;
 }
 
 static unsigned int uvc_handle_events(void *arg)
@@ -112,7 +143,7 @@ rift_tracker_new (ohmd_context* ohmd_ctx,
 	tracker_ctx->tracker_lock = ohmd_create_mutex(ohmd_ctx);
 
 	for (i = 0; i < RIFT_MAX_TRACKED_DEVICES; i++) {
-		rift_tracked_device *dev = tracker_ctx->devices + i;
+		rift_tracked_device_priv *dev = tracker_ctx->devices + i;
 		dev->index = i;
 		dev->device_lock = ohmd_create_mutex(ohmd_ctx);
 	}
@@ -220,7 +251,7 @@ void rift_tracker_update_exposure (rift_tracker_ctx *ctx, uint32_t hmd_ts, uint1
 		ctx->exposure_info.n_devices = ctx->n_devices;
 
 		for (i = 0; i < ctx->n_devices; i++) {
-			rift_tracked_device *dev = ctx->devices + i;
+			rift_tracked_device_priv *dev = ctx->devices + i;
 			rift_tracked_device_exposure_info *dev_info = ctx->exposure_info.devices + i;
 
 			ohmd_lock_mutex (dev->device_lock);
@@ -244,6 +275,54 @@ void rift_tracker_update_exposure (rift_tracker_ctx *ctx, uint32_t hmd_ts, uint1
 }
 
 void
+rift_tracker_frame_start (rift_tracker_ctx *ctx, uint64_t local_ts, const char *source)
+{
+	int i;
+	ohmd_lock_mutex (ctx->tracker_lock);
+	for (i = 0; i < RIFT_MAX_TRACKED_DEVICES; i++) {
+		rift_tracked_device_priv *dev = ctx->devices + i;
+
+		ohmd_lock_mutex (dev->device_lock);
+		rift_tracked_device_send_imu_debug(dev);
+
+		ohmd_unlock_mutex (dev->device_lock);
+	}
+	ohmd_unlock_mutex (ctx->tracker_lock);
+}
+
+void
+rift_tracker_frame_captured (rift_tracker_ctx *ctx, uint64_t local_ts, uint64_t frame_start_local_ts, rift_tracker_exposure_info *info, const char *source)
+{
+	int i;
+	ohmd_lock_mutex (ctx->tracker_lock);
+	for (i = 0; i < RIFT_MAX_TRACKED_DEVICES; i++) {
+		rift_tracked_device_priv *dev = ctx->devices + i;
+
+		ohmd_lock_mutex (dev->device_lock);
+		rift_tracked_device_send_imu_debug(dev);
+
+		ohmd_unlock_mutex (dev->device_lock);
+	}
+	ohmd_unlock_mutex (ctx->tracker_lock);
+}
+
+void
+rift_tracker_frame_release (rift_tracker_ctx *ctx, uint64_t local_ts, uint64_t frame_local_ts, rift_tracker_exposure_info *info, const char *source)
+{
+	int i;
+	ohmd_lock_mutex (ctx->tracker_lock);
+	for (i = 0; i < RIFT_MAX_TRACKED_DEVICES; i++) {
+		rift_tracked_device_priv *dev = ctx->devices + i;
+
+		ohmd_lock_mutex (dev->device_lock);
+		rift_tracked_device_send_imu_debug(dev);
+
+		ohmd_unlock_mutex (dev->device_lock);
+	}
+	ohmd_unlock_mutex (ctx->tracker_lock);
+}
+
+void
 rift_tracker_free (rift_tracker_ctx *tracker_ctx)
 {
 	int i;
@@ -257,9 +336,9 @@ rift_tracker_free (rift_tracker_ctx *tracker_ctx)
 	}
 
 	for (i = 0; i < RIFT_MAX_TRACKED_DEVICES; i++) {
-		rift_tracked_device *dev = tracker_ctx->devices + i;
-		if (dev->led_search)
-			led_search_model_free (dev->led_search);
+		rift_tracked_device_priv *dev = tracker_ctx->devices + i;
+		if (dev->base.led_search)
+			led_search_model_free (dev->base.led_search);
 		if (dev->debug_metadata != NULL)
 			ohmd_pw_debug_stream_free (dev->debug_metadata);
 
@@ -278,8 +357,9 @@ rift_tracker_free (rift_tracker_ctx *tracker_ctx)
 	free (tracker_ctx);
 }
 
-void rift_tracked_device_imu_update(rift_tracked_device *dev, uint64_t local_ts, uint32_t device_ts, float dt, const vec3f* ang_vel, const vec3f* accel, const vec3f* mag_field)
+void rift_tracked_device_imu_update(rift_tracked_device *dev_base, uint64_t local_ts, uint32_t device_ts, float dt, const vec3f* ang_vel, const vec3f* accel, const vec3f* mag_field)
 {
+	rift_tracked_device_priv *dev = (rift_tracked_device_priv *) (dev_base);
 	rift_tracked_device_imu_observation *obs;
 
 	ohmd_lock_mutex (dev->device_lock);
@@ -315,25 +395,25 @@ void rift_tracked_device_imu_update(rift_tracked_device *dev, uint64_t local_ts,
 	ohmd_unlock_mutex (dev->device_lock);
 }
 
-void rift_tracked_device_get_view_pose(rift_tracked_device *dev, posef *pose)
+void rift_tracked_device_get_view_pose(rift_tracked_device *dev_base, posef *pose)
 {
+	rift_tracked_device_priv *dev = (rift_tracked_device_priv *) (dev_base);
 	ohmd_lock_mutex (dev->device_lock);
 	oposef_init(pose, &dev->simple_fusion.world_position, &dev->simple_fusion.orient);
 	ohmd_unlock_mutex (dev->device_lock);
 }
 
-void rift_tracked_device_model_pose_update(rift_tracked_device *dev, uint64_t local_ts, rift_tracker_exposure_info *exposure_info, posef *pose)
+void rift_tracked_device_model_pose_update(rift_tracked_device *dev_base, uint64_t local_ts, uint64_t frame_start_local_ts, rift_tracker_exposure_info *exposure_info, posef *pose, const char *source)
 {
+	rift_tracked_device_priv *dev = (rift_tracked_device_priv *) (dev_base);
 	double time = (double)(exposure_info->local_ts) / 1000000000.0;
-	uint64_t frame_device_time_ns = 0;
-	int frame_fusion_slot = -1;
 
 	ohmd_lock_mutex (dev->device_lock);
 
 	/* Undo any IMU to device conversion */
 	oposef_apply_inverse(pose, &dev->fusion_to_model, pose);
 
-	if (dev->id == 0) {
+	if (dev_base->id == 0) {
 		/* Mirror the pose in XZ to go from device axes to view-plane */
 		oposef_mirror_XZ(pose);
 	}
@@ -343,8 +423,6 @@ void rift_tracked_device_model_pose_update(rift_tracked_device *dev, uint64_t lo
 	if (dev->index < exposure_info->n_devices) {
 		/* This device existed when the exposure was taken and therefore has info */
 		rift_tracked_device_exposure_info *exposure_dev_info = exposure_info->devices + dev->index;
-		frame_device_time_ns = exposure_dev_info->device_time_ns;
-		frame_fusion_slot = exposure_dev_info->fusion_slot;
 	}
 
 	ofusion_tracker_update (&dev->simple_fusion, time, &pose->pos, &pose->orient);
@@ -355,14 +433,15 @@ void rift_tracked_device_model_pose_update(rift_tracked_device *dev, uint64_t lo
 	ohmd_unlock_mutex (dev->device_lock);
 }
 
-void rift_tracked_device_get_model_pose(rift_tracked_device *dev, double ts, posef *pose, float *gravity_error_rad)
+void rift_tracked_device_get_model_pose(rift_tracked_device *dev_base, double ts, posef *pose, float *gravity_error_rad)
 {
+	rift_tracked_device_priv *dev = (rift_tracked_device_priv *) (dev_base);
 	posef tmp;
 	ohmd_lock_mutex (dev->device_lock);
 
 	rift_kalman_6dof_get_pose_at(&dev->ukf_fusion, dev->device_time_ns, &tmp);
 
-	if (dev->id == 0) {
+	if (dev_base->id == 0) {
 		/* Mirror the pose in XZ to go from view-plane to device axes for the HMD */
 		oposef_mirror_XZ(&tmp);
 	}
@@ -387,7 +466,7 @@ void rift_tracked_device_get_model_pose(rift_tracked_device *dev, double ts, pos
 
 /* Called with the device lock held */
 static void
-rift_tracked_device_send_imu_debug(rift_tracked_device *dev)
+rift_tracked_device_send_imu_debug(rift_tracked_device_priv *dev)
 {
 	int i;
 
