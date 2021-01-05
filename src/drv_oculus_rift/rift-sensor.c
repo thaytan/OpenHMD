@@ -489,6 +489,9 @@ static void new_frame_start_cb(struct rift_sensor_uvc_stream *stream, uint64_t s
 	rift_tracker_exposure_info exposure_info;
 	bool exposure_info_valid;
 	rift_sensor_capture_frame *next_frame;
+	bool release_old_frame = false;
+	uint64_t old_frame_ts;
+	rift_tracker_exposure_info old_exposure_info;
 
 	exposure_info_valid = rift_tracker_get_exposure_info (sensor->tracker, &exposure_info);
 
@@ -500,8 +503,6 @@ static void new_frame_start_cb(struct rift_sensor_uvc_stream *stream, uint64_t s
 		LOGD("%f ms Sensor %d SOF no phase info", (double) (start_time) / 1000000.0, sensor->id);
 	}
 
-	rift_tracker_frame_start (sensor->tracker, start_time, sensor->serial_no);
-
 	ohmd_lock_mutex(sensor->sensor_lock);
 	if (sensor->cur_capture_frame != NULL) {
 		/* Previous frame never completed - some USB problem,
@@ -509,6 +510,11 @@ static void new_frame_start_cb(struct rift_sensor_uvc_stream *stream, uint64_t s
 		 * timestamp)
 		 */
 		next_frame = sensor->cur_capture_frame;
+
+		/* This frame was announced as started, make sure to announce its release */
+		release_old_frame = true;
+		old_frame_ts = next_frame->uvc.start_ts;
+		old_exposure_info = next_frame->exposure_info;
 	}
 	else {
 		next_frame = POP_QUEUE(&sensor->capture_frame_q);
@@ -529,6 +535,11 @@ static void new_frame_start_cb(struct rift_sensor_uvc_stream *stream, uint64_t s
 		assert (next_frame != NULL);
 		LOGD("Sensor %d reclaimed frame %d from fast analysis for capture", sensor->id, next_frame->id);
 		sensor->dropped_frames++;
+
+		/* This frame was announced as started, make sure to announce its release */
+		release_old_frame = true;
+		old_frame_ts = next_frame->uvc.start_ts;
+		old_exposure_info = next_frame->exposure_info;
 	}
 
 	next_frame->exposure_info = exposure_info;
@@ -537,6 +548,10 @@ static void new_frame_start_cb(struct rift_sensor_uvc_stream *stream, uint64_t s
 	sensor->cur_capture_frame = next_frame;
 	rift_sensor_uvc_stream_set_frame(stream, (rift_sensor_uvc_frame *)next_frame);
 	ohmd_unlock_mutex(sensor->sensor_lock);
+
+	if (release_old_frame)
+		rift_tracker_frame_release (sensor->tracker, start_time, old_frame_ts, &old_exposure_info, sensor->serial_no);
+	rift_tracker_frame_start (sensor->tracker, start_time, sensor->serial_no);
 }
 
 static void
