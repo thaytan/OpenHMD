@@ -28,7 +28,19 @@
 
 #define MAX_SENSORS 4
 
+/* Number of state slots to use for quat/position updates */
+#define NUM_POSE_DELAY_SLOTS 5
+
 typedef struct rift_tracked_device_priv rift_tracked_device_priv;
+typedef struct rift_tracker_pose_delay_slot rift_tracker_pose_delay_slot;
+
+struct rift_tracker_pose_delay_slot {
+	int slot_id;		/* Index of the slot */
+	bool valid;			/* true if the exposure info was set */
+	int use_count;	/* Number of frames using this slot */
+
+	uint64_t device_time_ns; /* Device time this slot is currently tracking */
+};
 
 /* Internal full tracked device struct */
 struct rift_tracked_device_priv {
@@ -41,6 +53,10 @@ struct rift_tracked_device_priv {
 
 	/* 6DOF Kalman Filter */
 	rift_kalman_6dof_filter ukf_fusion;
+
+	/* Account keeping for UKF fusion slots */
+	int delay_slot_index;
+	rift_tracker_pose_delay_slot delay_slots[NUM_POSE_DELAY_SLOTS];
 
 	/* Transform from the fusion pose (which tracks the IMU, oriented to the screens/view)
 	 * to the model the camera will see, which is offset and rotated 180 degrees */
@@ -79,11 +95,14 @@ struct rift_tracker_ctx_s
 };
 
 static void rift_tracked_device_send_imu_debug(rift_tracked_device_priv *dev);
+static void rift_tracked_device_update_exposure (rift_tracked_device_priv *dev, rift_tracked_device_exposure_info *dev_info);
+static void rift_tracked_device_frame_captured(rift_tracked_device_priv *dev, rift_tracked_device_exposure_info *dev_info);
+static void rift_tracked_device_frame_released(rift_tracked_device_priv *dev, rift_tracked_device_exposure_info *dev_info);
 
 rift_tracked_device *
 rift_tracker_add_device (rift_tracker_ctx *ctx, int device_id, posef *imu_pose, rift_leds *leds)
 {
-	int i;
+	int i, s;
 	rift_tracked_device_priv *next_dev;
 	char device_name[64];
 
@@ -99,6 +118,14 @@ rift_tracker_add_device (rift_tracker_ctx *ctx, int device_id, posef *imu_pose, 
 	ofusion_init(&next_dev->simple_fusion);
 	rift_kalman_6dof_init(&next_dev->ukf_fusion);
 	next_dev->device_time_ns = 0;
+
+	/* Init delay slot bookkeeping */
+	for (s = 0; s < NUM_POSE_DELAY_SLOTS; s++) {
+		rift_tracker_pose_delay_slot *slot = next_dev->delay_slots + s;
+
+		slot->slot_id = s;
+		slot->valid = false;
+	}
 
 	next_dev->fusion_to_model = *imu_pose;
 
@@ -255,8 +282,7 @@ void rift_tracker_update_exposure (rift_tracker_ctx *ctx, uint32_t hmd_ts, uint1
 			rift_tracked_device_exposure_info *dev_info = ctx->exposure_info.devices + i;
 
 			ohmd_lock_mutex (dev->device_lock);
-			dev_info->device_time_ns = dev->device_time_ns;
-			dev_info->fusion_slot = -1; /* FIXME: Allocate a fusion slot from the UKF */
+			rift_tracked_device_update_exposure(dev, dev_info);
 
 			rift_tracked_device_send_imu_debug(dev);
 			ohmd_unlock_mutex (dev->device_lock);
@@ -279,7 +305,7 @@ rift_tracker_frame_start (rift_tracker_ctx *ctx, uint64_t local_ts, const char *
 {
 	int i;
 	ohmd_lock_mutex (ctx->tracker_lock);
-	for (i = 0; i < RIFT_MAX_TRACKED_DEVICES; i++) {
+	for (i = 0; i < ctx->n_devices; i++) {
 		rift_tracked_device_priv *dev = ctx->devices + i;
 
 		ohmd_lock_mutex (dev->device_lock);
@@ -295,12 +321,21 @@ rift_tracker_frame_captured (rift_tracker_ctx *ctx, uint64_t local_ts, uint64_t 
 {
 	int i;
 	ohmd_lock_mutex (ctx->tracker_lock);
-	for (i = 0; i < RIFT_MAX_TRACKED_DEVICES; i++) {
+	for (i = 0; i < ctx->n_devices; i++) {
 		rift_tracked_device_priv *dev = ctx->devices + i;
+		int fusion_slot = -1;
 
 		ohmd_lock_mutex (dev->device_lock);
-		rift_tracked_device_send_imu_debug(dev);
 
+		/* This device might not have exposure info for this frame if it
+		 * recently came online */
+		if (i < info->n_devices) {
+			rift_tracked_device_exposure_info *dev_info = info->devices + i;
+			rift_tracked_device_frame_captured(dev, dev_info);
+			fusion_slot = dev_info->fusion_slot;
+		}
+
+		rift_tracked_device_send_imu_debug(dev);
 		ohmd_unlock_mutex (dev->device_lock);
 	}
 	ohmd_unlock_mutex (ctx->tracker_lock);
@@ -311,12 +346,21 @@ rift_tracker_frame_release (rift_tracker_ctx *ctx, uint64_t local_ts, uint64_t f
 {
 	int i;
 	ohmd_lock_mutex (ctx->tracker_lock);
-	for (i = 0; i < RIFT_MAX_TRACKED_DEVICES; i++) {
+	for (i = 0; i < ctx->n_devices; i++) {
 		rift_tracked_device_priv *dev = ctx->devices + i;
+		int fusion_slot = -1;
 
 		ohmd_lock_mutex (dev->device_lock);
-		rift_tracked_device_send_imu_debug(dev);
 
+		/* This device might not have exposure info for this frame if it
+		 * recently came online */
+		if (i < info->n_devices) {
+			rift_tracked_device_exposure_info *dev_info = info->devices + i;
+			rift_tracked_device_frame_released(dev, dev_info);
+			fusion_slot = dev_info->fusion_slot;
+		}
+
+		rift_tracked_device_send_imu_debug(dev);
 		ohmd_unlock_mutex (dev->device_lock);
 	}
 	ohmd_unlock_mutex (ctx->tracker_lock);
@@ -407,6 +451,7 @@ void rift_tracked_device_model_pose_update(rift_tracked_device *dev_base, uint64
 {
 	rift_tracked_device_priv *dev = (rift_tracked_device_priv *) (dev_base);
 	double time = (double)(exposure_info->local_ts) / 1000000000.0;
+	int frame_fusion_slot = -1;
 
 	ohmd_lock_mutex (dev->device_lock);
 
@@ -423,12 +468,18 @@ void rift_tracked_device_model_pose_update(rift_tracked_device *dev_base, uint64
 	if (dev->index < exposure_info->n_devices) {
 		/* This device existed when the exposure was taken and therefore has info */
 		rift_tracked_device_exposure_info *exposure_dev_info = exposure_info->devices + dev->index;
+		frame_fusion_slot = exposure_dev_info->fusion_slot;
 	}
+
 
 	ofusion_tracker_update (&dev->simple_fusion, time, &pose->pos, &pose->orient);
 
 	/* FIXME: Implement lagged state vector entries and use that here */
-	rift_kalman_6dof_position_update(&dev->ukf_fusion, dev->device_time_ns, pose);
+	if (frame_fusion_slot != -1) {
+		LOGD ("Got pose update for delay slot %d for dev %d, ts %llu (delay %f)", frame_fusion_slot, dev->base.id,
+				(unsigned long long) frame_device_time_ns, (double) (dev->device_time_ns - frame_device_time_ns) / 1000000000.0 );
+		rift_kalman_6dof_position_update(&dev->ukf_fusion, dev->device_time_ns, pose);
+	}
 
 	ohmd_unlock_mutex (dev->device_lock);
 }
@@ -499,4 +550,91 @@ rift_tracked_device_send_imu_debug(rift_tracked_device_priv *dev)
 	}
 
 	dev->num_pending_imu_observations = 0;
+}
+
+static rift_tracker_pose_delay_slot *
+find_free_delay_slot(rift_tracked_device_priv *dev)
+{
+	/* Pose observation delay slots */
+	for (int i = 0; i < NUM_POSE_DELAY_SLOTS; i++) {
+		int slot_no = dev->delay_slot_index;
+		rift_tracker_pose_delay_slot *slot = dev->delay_slots + slot_no;
+
+		/* Cycle through the free delay slots */
+		dev->delay_slot_index = (slot_no+1) % NUM_POSE_DELAY_SLOTS;
+
+		if (slot->use_count == 0)
+			return slot;
+	}
+
+	/* Failed to find a free slot */
+	return NULL;
+}
+
+static rift_tracker_pose_delay_slot *
+get_matching_delay_slot(rift_tracked_device_priv *dev, rift_tracked_device_exposure_info *dev_info)
+{
+	rift_tracker_pose_delay_slot *slot = NULL;
+	int slot_no = dev_info->fusion_slot;
+
+	if (slot_no != -1) {
+		assert (slot_no < NUM_POSE_DELAY_SLOTS);
+		slot = dev->delay_slots + slot_no;
+	}
+
+	if (slot && slot->valid && slot->device_time_ns == dev_info->device_time_ns)
+		return slot;
+
+	return NULL;
+}
+
+/* Called with the device lock held */
+static void
+rift_tracked_device_update_exposure(rift_tracked_device_priv *dev, rift_tracked_device_exposure_info *dev_info) {
+	rift_tracker_pose_delay_slot *slot = find_free_delay_slot(dev);
+
+	dev_info->device_time_ns = dev->device_time_ns;
+
+	if (slot) {
+		slot->device_time_ns = dev_info->device_time_ns;
+		slot->valid = true;
+		dev_info->fusion_slot = slot->slot_id;
+
+		LOGD ("Assigning free delay slot %d for dev %d, ts %llu", slot->slot_id, dev->base.id, (unsigned long long) dev->device_time_ns);
+
+		/* FIXME Update the UKF fusion to actually track this slot */
+	}
+	else {
+		LOGW ("No free delay slot for dev %d, ts %llu", dev->base.id, (unsigned long long) dev->device_time_ns);
+		dev_info->fusion_slot = -1;
+	}
+}
+
+static void
+rift_tracked_device_frame_captured(rift_tracked_device_priv *dev, rift_tracked_device_exposure_info *dev_info)
+{
+	rift_tracker_pose_delay_slot *slot = get_matching_delay_slot(dev, dev_info);
+
+	/* There is a delay slot for this frame, claim it */
+	if (slot) {
+		slot->use_count++;
+		dev_info->fusion_slot = slot->slot_id;
+	}
+	else {
+		/* The slot was not allocated (we missed the exposure event), or it
+		 * was overridden by a later exposure because there's no enough slots */
+		dev_info->fusion_slot = -1;
+		LOGW ("Lost delay slot for dev %d, ts %llu", dev->base.id, (unsigned long long) dev_info->device_time_ns);
+	}
+}
+
+static void
+rift_tracked_device_frame_released(rift_tracked_device_priv *dev, rift_tracked_device_exposure_info *dev_info)
+{
+	rift_tracker_pose_delay_slot *slot = get_matching_delay_slot(dev, dev_info);
+
+	/* There is a delay slot for this frame, release it */
+	if (slot && slot->use_count > 0) {
+		slot->use_count--;
+	}
 }
