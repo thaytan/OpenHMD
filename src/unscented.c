@@ -3,6 +3,7 @@
 #include <stddef.h>
 #include <stdio.h>
 #include <assert.h>
+#include <stdlib.h>
 
 #include "unscented.h"
 
@@ -12,14 +13,14 @@ static void print_mat(const char *label, const matrix2d *mat)
     int i, j;
 
     if (label)
-        printf ("%s: %u rows, %u cols [\n", label, mat->m, mat->n);
+        printf ("%s: %u rows, %u cols [\n", label, mat->rows, mat->cols);
 
-    for (i = 0; i < mat->m; i++) {
+    for (i = 0; i < mat->rows; i++) {
         printf ("  [");
-        for (j = 0; j < mat->n-1; j++) {
-            printf ("%8.4f, ", mat->mat[j][i]);
+        for (j = 0; j < mat->cols-1; j++) {
+            printf ("%8.4g, ", MATRIX2D_XY(mat, i, j));
         }
-        printf ("%10.4f ],\n", mat->mat[j][i]);
+        printf ("%10.4g ],\n", MATRIX2D_XY(mat, i, j));
     }
     printf("]\n");
 #endif
@@ -64,11 +65,11 @@ ut_init_van_der_merwe(unscented_transform *ut, uint16_t N_state, uint16_t N_cov,
   ut->P_var = matrix2d_alloc (ut->N_cov, 1);
   ut->X_tmp = matrix2d_alloc (ut->N_state, 1);
 
-  ut->w_means->mat1D[0] = ut->lambda / (L_d + ut->lambda);
-  ut->w_cov->mat1D[0] = ut->lambda / (L_d + ut->lambda) + (1.0 - alpha*alpha + beta);
+  MATRIX2D_Y(ut->w_means, 0) = ut->lambda / (L_d + ut->lambda);
+  MATRIX2D_Y(ut->w_cov, 0) = ut->lambda / (L_d + ut->lambda) + (1.0 - alpha*alpha + beta);
 
   for (i = 1; i < N_sigma; i++)
-    ut->w_means->mat1D[i] = ut->w_cov->mat1D[i] = w_C;
+    MATRIX2D_Y(ut->w_means, i) = MATRIX2D_Y(ut->w_cov, i) = w_C;
 }
 
 /*
@@ -110,9 +111,9 @@ ut_init_julier(unscented_transform *ut, uint16_t N_state, uint16_t N_cov, double
   ut->P_var = matrix2d_alloc (ut->N_cov, 1);
   ut->X_tmp = matrix2d_alloc (ut->N_state, 1);
 
-  ut->w_cov->mat1D[0] = ut->w_means->mat1D[0] = ut->lambda;
+  MATRIX2D_Y(ut->w_cov, 0) = MATRIX2D_Y(ut->w_means, 0) = ut->lambda;
   for (i = 1; i < N_sigma; i++)
-    ut->w_means->mat1D[i] = ut->w_cov->mat1D[i] = w_C;
+    MATRIX2D_Y(ut->w_means, i) = MATRIX2D_Y(ut->w_cov, i) = w_C;
 }
 
 /* Set up a UT from an existing one, with the same sigma points distribution but
@@ -163,22 +164,24 @@ ut_compute_sigma_points(const unscented_transform *ut, matrix2d *sigmas, const m
   double L_d = ut->N_cov;
 
   /* Means is a single column of L values */
-  if (mean->m != ut->N_state || mean->n != 1)
+  if (mean->rows != ut->N_state || mean->cols != 1)
     return false;
 
   /* Covariance matrix must be square */
-  if (cov->m != ut->N_cov || cov->n != ut->N_cov)
+  if (cov->rows != ut->N_cov || cov->cols != ut->N_cov)
     return false;
 
   /* We need space for 2*n + 1 sigma point columns, each N_state rows */
-  if (sigmas->m != ut->N_state || sigmas->n != ut->N_sigma)
+  if (sigmas->rows != ut->N_state || sigmas->cols != ut->N_sigma)
     return false;
 
   if (matrix2d_multiply_scalar (ut->P_root, cov, ut->lambda + L_d) != MATRIX_RESULT_OK)
     return false;
 
   if (matrix2d_cholesky_in_place (ut->P_root) != MATRIX_RESULT_OK) {
+		print_mat("covariance", cov);
     print_mat("Cholesky decomposition failed on P_root", ut->P_root);
+		abort();
     return false;
   }
 
@@ -187,7 +190,7 @@ ut_compute_sigma_points(const unscented_transform *ut, matrix2d *sigmas, const m
   if (ut->sum_fn != NULL) {
     /* zero-th entry is the unmodified state vector */
     for (int i = 0; i < ut->N_state; i++) {
-      sigmas->mat[0][i] = mean->mat1D[i];
+      MATRIX2D_XY(sigmas, i, 0) = MATRIX2D_Y(mean, i);
     }
 
     for (int i = 0; i < ut->N_cov; i++) {
@@ -195,7 +198,7 @@ ut_compute_sigma_points(const unscented_transform *ut, matrix2d *sigmas, const m
        * cholesky calc generates the lower-triangular matrix. */
       /* Generate X = X_prior + P_var sigma points */
       for (int j = 0; j < ut->N_cov; j++) {
-        ut->P_var->mat1D[j] = ut->P_root->mat[i][j];
+        MATRIX2D_Y(ut->P_var, j) = MATRIX2D_XY(ut->P_root, j, i);
       }
       if (!ut->sum_fn(ut, mean, ut->P_var, ut->X_tmp))
         return false;
@@ -204,7 +207,7 @@ ut_compute_sigma_points(const unscented_transform *ut, matrix2d *sigmas, const m
 
       /* Repeat for X = X_prior - P_var */
       for (int j = 0; j < ut->N_cov; j++) {
-        ut->P_var->mat1D[j] = -ut->P_root->mat[i][j];
+        MATRIX2D_Y(ut->P_var, j) = -MATRIX2D_XY(ut->P_root, j, i);
       }
       if (!ut->sum_fn(ut, mean, ut->P_var, ut->X_tmp))
         return false;
@@ -213,13 +216,13 @@ ut_compute_sigma_points(const unscented_transform *ut, matrix2d *sigmas, const m
     }
   } else {
     for (int i = 0; i < ut->N_cov; i++) {
-      sigmas->mat[0][i] = mean->mat1D[i];
+      MATRIX2D_XY(sigmas, i, 0) = MATRIX2D_Y(mean, i);
 
       for (int j = 0; j < ut->N_cov; j++) {
         /* Implicit transpose of the P_root matrix here, because the
          * cholesky calc generates the lower-triangular matrix. */
-        sigmas->mat[j+1][i] = mean->mat1D[i] + ut->P_root->mat[j][i];
-        sigmas->mat[ut->N_cov+j+1][i] = mean->mat1D[i] - ut->P_root->mat[j][i];
+        MATRIX2D_XY(sigmas, i, j+1) = MATRIX2D_Y(mean, i) + MATRIX2D_XY(ut->P_root, i, j);
+        MATRIX2D_XY(sigmas, i, ut->N_cov+j+1) = MATRIX2D_Y(mean, i) - MATRIX2D_XY(ut->P_root, i, j);
       }
     }
   }
@@ -254,14 +257,14 @@ ut_compute_sigma_points(const unscented_transform *ut, matrix2d *sigmas, const m
 bool
 ut_compute_transform (const unscented_transform *ut, const matrix2d *sigmas, matrix2d *mean, matrix2d *cov, matrix2d *noise)
 {
-  if (sigmas->m != mean->m || sigmas->n != ut->N_sigma)
+  if (sigmas->rows != mean->rows || sigmas->cols != ut->N_sigma)
     return false;
 
-  if (cov->m != ut->N_cov || cov->n != ut->N_cov)
+  if (cov->rows != ut->N_cov || cov->cols != ut->N_cov)
     return false;
 
   if (noise) {
-    if (cov->m != noise->m || cov->n != noise->n)
+    if (cov->rows != noise->rows || cov->cols != noise->cols)
       return false;
   }
 
@@ -285,14 +288,14 @@ ut_compute_transform (const unscented_transform *ut, const matrix2d *sigmas, mat
    * on the first loop. Not sure if that'll be any
    * quicker for small matrices */
   for (i = 0; i < ut->N_cov * ut->N_cov; i++) {
-    cov->mat1D[i] = 0.0;
+    MATRIX2D_Y(cov, i) = 0.0;
   }
 
   for (k = 0; k < ut->N_sigma; k++) {
     /* Compute residual for this sigma point */
     if (ut->residual_fn == NULL) {
       for (j = 0; j < ut->N_cov; j++) {
-        ut->P_var->mat1D[j] = sigmas->mat[k][j] - mean->mat1D[j];
+        MATRIX2D_Y(ut->P_var, j) = MATRIX2D_XY(sigmas, j, k) - MATRIX2D_Y(mean, j);
       }
     } else {
       /* Use external residual func ptr, to compute residuals with
@@ -305,17 +308,23 @@ ut_compute_transform (const unscented_transform *ut, const matrix2d *sigmas, mat
 
     /* Add the weighted version to the covariance matrix using
      * outer product */
-    double w_C = ut->w_cov->mat1D[k];
-    double *P_var = ut->P_var->mat1D;
+    double w_C = MATRIX2D_Y(ut->w_cov, k);
 
     /* Optimised by looping over the cov array directly instead
-     * of via pointers */
-    double *cov_ptr = cov->mat1D;
+     * of via pointers, compute the lower half triangle */
     for (i = 0; i < ut->N_cov; i++) {
-      for (j = 0; j < ut->N_cov; j++) {
-        cov_ptr[0] += w_C * P_var[j] * P_var[i];
-        cov_ptr++;
-      }
+      double *cov_ptr = &MATRIX2D_XY(cov, 0, i);
+      double P_var_i = w_C * MATRIX2D_Y(ut->P_var, i);
+
+      for (j = i; j < ut->N_cov; j++)
+        cov_ptr[j] += MATRIX2D_Y(ut->P_var, j) * P_var_i;
+    }
+  }
+
+  for (i = 0; i < ut->N_cov; i++) {
+    for (j = i; j < ut->N_cov; j++) {
+      /* Copy to the upper half triangle */
+      MATRIX2D_XY(cov, i, j) = MATRIX2D_XY(cov, j, i);
     }
   }
 
@@ -335,7 +344,7 @@ static bool compute_one_residual(unscented_transform *ut, const matrix2d *sigmas
 
   if (ut->residual_fn == NULL) {
     for (j = 0; j < ut->N_cov; j++) {
-      dest->mat1D[j] = sigmas->mat[i][j] - mean->mat1D[j];
+      MATRIX2D_Y(dest, j) = MATRIX2D_XY(sigmas, j, i) - MATRIX2D_Y(mean, j);
     }
   } else {
     /* Use external residual func ptr, to compute residuals with
@@ -351,7 +360,7 @@ static bool compute_one_residual(unscented_transform *ut, const matrix2d *sigmas
 bool ut_compute_crossvariance(unscented_transform *utX, unscented_transform *utZ, const matrix2d *sigmasX, const matrix2d *meanX, const matrix2d *sigmasZ, const matrix2d *meanZ, matrix2d *Pxz)
 {
   int i, j, k;
-  double *Pxz_ptr = Pxz->mat1D;
+  double *Pxz_ptr = &MATRIX2D_Y(Pxz, 0);
   double *P_var_X, *P_var_Z;
 
   /* Clear the Pxz matrix */
@@ -367,13 +376,13 @@ bool ut_compute_crossvariance(unscented_transform *utX, unscented_transform *utZ
 
     /* Add the weighted version to the cross-variance matrix using
      * outer product */
-    double w_C = utX->w_cov->mat1D[k];
+    double w_C = MATRIX2D_Y(utX->w_cov, k);
 
     /* Optimise by looping over the Pxz and input arrays directly instead
      * of via pointers */
-    Pxz_ptr = Pxz->mat1D;
-    P_var_X = utX->P_var->mat1D;
-    P_var_Z = utZ->P_var->mat1D;
+    Pxz_ptr = &MATRIX2D_Y(Pxz, 0);
+    P_var_X = &MATRIX2D_Y(utX->P_var, 0);
+    P_var_Z = &MATRIX2D_Y(utZ->P_var, 0);
 
     for (j = 0; j < utZ->N_cov; j++) {
       for (i = 0; i < utX->N_cov; i++) {

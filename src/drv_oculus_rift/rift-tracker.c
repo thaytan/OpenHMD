@@ -29,7 +29,7 @@
 #define MAX_SENSORS 4
 
 /* Number of state slots to use for quat/position updates */
-#define NUM_POSE_DELAY_SLOTS 5
+#define NUM_POSE_DELAY_SLOTS 3
 
 typedef struct rift_tracked_device_priv rift_tracked_device_priv;
 typedef struct rift_tracker_pose_delay_slot rift_tracker_pose_delay_slot;
@@ -116,7 +116,7 @@ rift_tracker_add_device (rift_tracker_ctx *ctx, int device_id, posef *imu_pose, 
 
 	next_dev->base.id = device_id;
 	ofusion_init(&next_dev->simple_fusion);
-	rift_kalman_6dof_init(&next_dev->ukf_fusion);
+	rift_kalman_6dof_init(&next_dev->ukf_fusion, NUM_POSE_DELAY_SLOTS);
 	next_dev->device_time_ns = 0;
 
 	/* Init delay slot bookkeeping */
@@ -357,6 +357,7 @@ rift_tracker_frame_release (rift_tracker_ctx *ctx, uint64_t local_ts, uint64_t f
 		if (i < info->n_devices) {
 			rift_tracked_device_exposure_info *dev_info = info->devices + i;
 			rift_tracked_device_frame_released(dev, dev_info);
+
 			fusion_slot = dev_info->fusion_slot;
 		}
 
@@ -447,10 +448,14 @@ void rift_tracked_device_get_view_pose(rift_tracked_device *dev_base, posef *pos
 	ohmd_unlock_mutex (dev->device_lock);
 }
 
+static rift_tracker_pose_delay_slot *get_matching_delay_slot(rift_tracked_device_priv *dev, rift_tracked_device_exposure_info *dev_info);
+
 void rift_tracked_device_model_pose_update(rift_tracked_device *dev_base, uint64_t local_ts, uint64_t frame_start_local_ts, rift_tracker_exposure_info *exposure_info, posef *pose, const char *source)
 {
 	rift_tracked_device_priv *dev = (rift_tracked_device_priv *) (dev_base);
 	double time = (double)(exposure_info->local_ts) / 1000000000.0;
+	uint64_t frame_device_time_ns = 0;
+	rift_tracker_pose_delay_slot *slot = NULL;
 	int frame_fusion_slot = -1;
 
 	ohmd_lock_mutex (dev->device_lock);
@@ -474,11 +479,18 @@ void rift_tracked_device_model_pose_update(rift_tracked_device *dev_base, uint64
 
 	ofusion_tracker_update (&dev->simple_fusion, time, &pose->pos, &pose->orient);
 
-	/* FIXME: Implement lagged state vector entries and use that here */
-	if (frame_fusion_slot != -1) {
-		LOGD ("Got pose update for delay slot %d for dev %d, ts %llu (delay %f)", frame_fusion_slot, dev->base.id,
-				(unsigned long long) frame_device_time_ns, (double) (dev->device_time_ns - frame_device_time_ns) / 1000000000.0 );
-		rift_kalman_6dof_position_update(&dev->ukf_fusion, dev->device_time_ns, pose);
+	if (dev->index < exposure_info->n_devices) {
+		/* This device existed when the exposure was taken and therefore has info */
+		rift_tracked_device_exposure_info *dev_info = exposure_info->devices + dev->index;
+		frame_device_time_ns = dev_info->device_time_ns;
+
+		slot = get_matching_delay_slot(dev, dev_info);
+		if (slot != NULL) {
+			LOGD ("Got pose update for delay slot %d for dev %d, ts %llu (delay %f)", frame_fusion_slot, dev->base.id,
+					(unsigned long long) frame_device_time_ns, (double) (dev->device_time_ns - frame_device_time_ns) / 1000000000.0 );
+			frame_fusion_slot = slot->slot_id;
+			rift_kalman_6dof_position_update(&dev->ukf_fusion, dev->device_time_ns, pose, slot->slot_id);
+		}
 	}
 
 	ohmd_unlock_mutex (dev->device_lock);
@@ -602,7 +614,8 @@ rift_tracked_device_update_exposure(rift_tracked_device_priv *dev, rift_tracked_
 
 		LOGD ("Assigning free delay slot %d for dev %d, ts %llu", slot->slot_id, dev->base.id, (unsigned long long) dev->device_time_ns);
 
-		/* FIXME Update the UKF fusion to actually track this slot */
+		/* Tell the kalman filter to prepare the delay slot */
+		rift_kalman_6dof_prepare_delay_slot(&dev->ukf_fusion, dev_info->device_time_ns, slot->slot_id);
 	}
 	else {
 		LOGW ("No free delay slot for dev %d, ts %llu", dev->base.id, (unsigned long long) dev->device_time_ns);
@@ -622,9 +635,11 @@ rift_tracked_device_frame_captured(rift_tracked_device_priv *dev, rift_tracked_d
 	}
 	else {
 		/* The slot was not allocated (we missed the exposure event), or it
-		 * was overridden by a later exposure because there's no enough slots */
+		 * was overridden by a later exposure because there's not enough slots */
+		if (dev_info->fusion_slot != -1) {
+			LOGW ("Lost delay slot for dev %d, ts %llu", dev->base.id, (unsigned long long) dev_info->device_time_ns);
+		}
 		dev_info->fusion_slot = -1;
-		LOGW ("Lost delay slot for dev %d, ts %llu", dev->base.id, (unsigned long long) dev_info->device_time_ns);
 	}
 }
 
@@ -634,7 +649,15 @@ rift_tracked_device_frame_released(rift_tracked_device_priv *dev, rift_tracked_d
 	rift_tracker_pose_delay_slot *slot = get_matching_delay_slot(dev, dev_info);
 
 	/* There is a delay slot for this frame, release it */
-	if (slot && slot->use_count > 0) {
-		slot->use_count--;
+	if (slot) {
+		if (slot->use_count > 0)
+			slot->use_count--;
+
+		if (slot->use_count == 0) {
+			slot->valid = false;
+
+			/* Tell the kalman filter the slot is invalid */
+			rift_kalman_6dof_release_delay_slot(&dev->ukf_fusion, slot->slot_id);
+		}
 	}
 }

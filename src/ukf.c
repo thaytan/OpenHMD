@@ -10,14 +10,14 @@ static void print_mat(const char *label, const matrix2d *mat)
     int i, j;
 
     if (label)
-        printf ("%s: %u rows, %u cols [\n", label, mat->m, mat->n);
+        printf ("%s: %u rows, %u cols [\n", label, mat->rows, mat->cols);
 
-    for (i = 0; i < mat->m; i++) {
+    for (i = 0; i < mat->rows; i++) {
         printf ("  [");
-        for (j = 0; j < mat->n-1; j++) {
-            printf ("%8.4f, ", mat->mat[j][i]);
+        for (j = 0; j < mat->cols-1; j++) {
+            printf ("%8.4f, ", MATRIX2D_XY(mat, i, j));
         }
-        printf ("%10.4f ],\n", mat->mat[j][i]);
+        printf ("%10.4f ],\n", MATRIX2D_XY(mat, i, j));
     }
     printf("]\n");
 #endif
@@ -56,6 +56,9 @@ void ukf_base_init(ukf_base *u, int N_state, int N_cov, matrix2d *Q, ukf_process
 
 void ukf_base_clear(ukf_base *u)
 {
+  matrix2d_free(u->x_prior);
+  matrix2d_free(u->P_prior);
+
   matrix2d_free(u->x);
   matrix2d_free(u->P);
   if (u->Q)
@@ -87,13 +90,14 @@ bool ukf_base_predict_with_process(ukf_base *u, double dt, ukf_process_fn proces
   /* Loop over each sigma point state vector and transform
    * it through the process function */
   for (int i = 0; i < u->num_sigmas; i++) {
-    if (matrix2d_extract_column(u->X_tmp_prior, u->sigmas, i) != MATRIX_RESULT_OK)
+    matrix2d X_tmp;
+
+    if (matrix2d_column_ref(u->sigmas, i, &X_tmp) != MATRIX_RESULT_OK)
       return false;
 
-    if (!process_fn(u, dt, u->X_tmp_prior, u->X_tmp))
-      return false;
-
-    if (matrix2d_replace_column(u->sigmas, i, u->X_tmp) != MATRIX_RESULT_OK)
+    /* FIXME:_only pass a single matrix to the process func and make it
+     * its responsibility to not modify inputs it needs */
+    if (!process_fn(u, dt, &X_tmp, &X_tmp))
       return false;
   }
 
@@ -135,13 +139,16 @@ ukf_base_update(ukf_base *u, ukf_measurement *m)
    * it through the measurement function and into the measurement
    * sigmas matrix */
   for (i = 0; i < u->num_sigmas; i++) {
-    if (matrix2d_extract_column(u->X_tmp, u->sigmas, i) != MATRIX_RESULT_OK)
+    matrix2d X_tmp;
+    matrix2d Z_est;
+
+    if (matrix2d_column_ref(u->sigmas, i, &X_tmp) != MATRIX_RESULT_OK)
       return false;
 
-    if (!m->measurement_fn(u, m, u->X_tmp, m->Z_est))
+    if (matrix2d_column_ref(m->sigmas, i, &Z_est) != MATRIX_RESULT_OK)
       return false;
 
-    if (matrix2d_replace_column(m->sigmas, i, m->Z_est) != MATRIX_RESULT_OK)
+    if (!m->measurement_fn(u, m, &X_tmp, &Z_est))
       return false;
   }
 

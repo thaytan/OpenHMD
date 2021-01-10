@@ -12,6 +12,10 @@
 #include "rift.h"
 #include "../ukf.h"
 
+
+/* Maximum Number of extra lagged state slots to allow for */
+#define MAX_DELAY_SLOTS 5
+
 typedef struct rift_kalman_6dof_filter rift_kalman_6dof_filter;
 
 struct rift_kalman_6dof_filter {
@@ -28,6 +32,11 @@ struct rift_kalman_6dof_filter {
    *
    *  vec3d accel-bias; (16:18)
    *  vec3d gyro-bias (19:21)
+   *
+   *  + N lagged slots each:
+   *    quatf orientation (quaternion) (0:3)
+   *    vec3f position (4:6)
+   *
    */
   /* ukf_base needs to be the first element in the struct */
   ukf_base ukf;
@@ -52,13 +61,22 @@ struct rift_kalman_6dof_filter {
    *  quatd orientation
    */
   ukf_measurement m2;
+
+  int pose_slot; /* slot number to use for pose update */
+  int reset_slot; /* slot number to reset during process_func if != -1 */
+
+  int num_delay_slots;
+  bool slot_inuse[MAX_DELAY_SLOTS];
 };
 
-void rift_kalman_6dof_init(rift_kalman_6dof_filter *state);
+void rift_kalman_6dof_init(rift_kalman_6dof_filter *state, int num_delay_slots);
 void rift_kalman_6dof_clear(rift_kalman_6dof_filter *state);
 
+void rift_kalman_6dof_prepare_delay_slot(rift_kalman_6dof_filter *state, uint64_t time, int delay_slot);
+void rift_kalman_6dof_release_delay_slot(rift_kalman_6dof_filter *state, int delay_slot);
+
 void rift_kalman_6dof_imu_update (rift_kalman_6dof_filter *state, uint64_t time, const vec3f* ang_vel, const vec3f* accel, const vec3f* mag_field);
-void rift_kalman_6dof_position_update(rift_kalman_6dof_filter *state, uint64_t time, posef *pose);
+void rift_kalman_6dof_position_update(rift_kalman_6dof_filter *state, uint64_t time, posef *pose, int delay_slot);
 
 void rift_kalman_6dof_get_pose_at(rift_kalman_6dof_filter *state, uint64_t time, posef *pose);
 

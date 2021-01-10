@@ -11,13 +11,18 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <assert.h>
 
 #include "rift-kalman-6dof.h"
 
 /* 0 = constant acceleration
  * 1 = constant velocity
+ * 2 = hybrid constant acccel / constant velocity
  */
-#define MOTION_MODEL 0
+#define MOTION_MODEL 2
+
+/* threshold for hybrid motion model switching */
+#define HYBRID_MOTION_THRESHOLD (3 / 1000.0)
 
 /* IMU biases noise levels */
 #define IMU_GYRO_BIAS_NOISE 1e-7 /* gyro bias (rad/s)^2 */
@@ -26,13 +31,21 @@
 #define IMU_ACCEL_BIAS_NOISE_INITIAL 0.25 /* accelerometer bias (m/s^2)^2 */
 
 const double GRAVITY_MAG = 9.80665;
+/* Maximum sensible acceleration */
+const double MAX_ACCEL = 16 * GRAVITY_MAG;
+
+typedef struct imu_filter_state imu_filter_state;
 
 /* The state vector is bigger than the covariance
  * matrices, because it includes the quaternion, but
  * the covariance is parameterised with an exponential
  * map */
-const int STATE_SIZE = 19;
-const int COV_SIZE = 18;
+const int BASE_STATE_SIZE = 19;
+const int BASE_COV_SIZE = 18;
+
+/* A lagged slot consists of orientation + position */
+const int DELAY_SLOT_STATE_SIZE = 7;
+const int DELAY_SLOT_COV_SIZE = 6;
 
 #define STATE_ORIENTATION 0
 #define STATE_POSITION 4
@@ -48,6 +61,12 @@ const int COV_SIZE = 18;
 #define COV_ACCEL 9
 #define COV_ACCEL_BIAS 12
 #define COV_GYRO_BIAS 15
+/* Indices into a delay slot for orientation and posiion */
+#define DELAY_SLOT_STATE_ORIENTATION 0
+#define DELAY_SLOT_STATE_POSITION 4
+
+#define DELAY_SLOT_COV_ORIENTATION 0
+#define DELAY_SLOT_COV_POSITION 3
 
 /* Indices into the IMU measurement vector */
 #define IMU_MEAS_ACCEL 0
@@ -79,24 +98,23 @@ static bool process_func(const ukf_base *ukf, const double dt, const matrix2d *X
 	matrix2d_copy(X, X_prior);
 
 	/* Compute orientation update correctly using a delta quat from ang_vel */
-	quatd orient = {{ X_prior->mat1D[STATE_ORIENTATION],
-										X_prior->mat1D[STATE_ORIENTATION+1],
-										X_prior->mat1D[STATE_ORIENTATION+2],
-										X_prior->mat1D[STATE_ORIENTATION+3]
-								 }};
+	quatd orient = {{ MATRIX2D_Y(X_prior, STATE_ORIENTATION),
+	                  MATRIX2D_Y(X_prior, STATE_ORIENTATION+1),
+	                  MATRIX2D_Y(X_prior, STATE_ORIENTATION+2),
+	                  MATRIX2D_Y(X_prior, STATE_ORIENTATION+3) }};
 
 	vec3d imu_ang_vel;
 	vec3d ang_vel_bias;
 
-	ang_vel_bias.x = X->mat1D[STATE_GYRO_BIAS];
-	ang_vel_bias.y = X->mat1D[STATE_GYRO_BIAS+1];
-	ang_vel_bias.z = X->mat1D[STATE_GYRO_BIAS+2];
+	ang_vel_bias.x = MATRIX2D_Y(X, STATE_GYRO_BIAS);
+	ang_vel_bias.y = MATRIX2D_Y(X, STATE_GYRO_BIAS+1);
+	ang_vel_bias.z = MATRIX2D_Y(X, STATE_GYRO_BIAS+2);
 
 	/* Subtract estimated IMU bias from the ang vel */
 	ovec3d_subtract (&filter_state->ang_vel, &ang_vel_bias, &imu_ang_vel);
 
-	float ang_vel_length = ovec3d_get_length (&imu_ang_vel);
-	float rot_angle = ang_vel_length * dt;
+	double ang_vel_length = ovec3d_get_length (&imu_ang_vel);
+	double rot_angle = ang_vel_length * dt;
 
 	/* Update the orientation from angular velocity */
 	if (rot_angle != 0) {
@@ -107,42 +125,91 @@ static bool process_func(const ukf_base *ukf, const double dt, const matrix2d *X
 		oquatd_mult_me(&orient, &delta_orient);
 	}
 
-	X->mat1D[STATE_ORIENTATION] = orient.x;
-	X->mat1D[STATE_ORIENTATION+1] = orient.y;
-	X->mat1D[STATE_ORIENTATION+2] = orient.z;
-	X->mat1D[STATE_ORIENTATION+3] = orient.w;
+	MATRIX2D_Y(X, STATE_ORIENTATION) = orient.x;
+	MATRIX2D_Y(X, STATE_ORIENTATION+1) = orient.y;
+	MATRIX2D_Y(X, STATE_ORIENTATION+2) = orient.z;
+	MATRIX2D_Y(X, STATE_ORIENTATION+3) = orient.w;
+
+	vec3d global_accel = {{ MATRIX2D_Y(X_prior, STATE_ACCEL),
+	                        MATRIX2D_Y(X_prior, STATE_ACCEL+1),
+	                        MATRIX2D_Y(X_prior, STATE_ACCEL+2) }};
+
+	/* Clamp accel to the measurable +/- 16g to restrict variance */
+	global_accel.x = OHMD_CLAMP(global_accel.x, -MAX_ACCEL, MAX_ACCEL);
+	global_accel.y = OHMD_CLAMP(global_accel.y, -MAX_ACCEL, MAX_ACCEL);
+	global_accel.z = OHMD_CLAMP(global_accel.z, -MAX_ACCEL, MAX_ACCEL);
 
 #if MOTION_MODEL == 0
 	/* Constant acceleration model */
-	vec3d global_accel = {{ X_prior->mat1D[STATE_ACCEL],
-													X_prior->mat1D[STATE_ACCEL+1],
-													X_prior->mat1D[STATE_ACCEL+2] }};
 
 	/* Position */
 	if (dt >= 0) {
-		X->mat1D[STATE_POSITION]	 += dt * X_prior->mat1D[STATE_VELOCITY]	 + 0.5 * dt * dt * global_accel.x;
-		X->mat1D[STATE_POSITION+1] += dt * X_prior->mat1D[STATE_VELOCITY+1] + 0.5 * dt * dt * global_accel.y;
-		X->mat1D[STATE_POSITION+2] += dt * X_prior->mat1D[STATE_VELOCITY+2] + 0.5 * dt * dt * global_accel.z;
+		MATRIX2D_Y(X, STATE_POSITION)   += dt * MATRIX2D_Y(X_prior, STATE_VELOCITY)   + 0.5 * dt * dt * global_accel.x;
+		MATRIX2D_Y(X, STATE_POSITION+1) += dt * MATRIX2D_Y(X_prior, STATE_VELOCITY+1) + 0.5 * dt * dt * global_accel.y;
+		MATRIX2D_Y(X, STATE_POSITION+2) += dt * MATRIX2D_Y(X_prior, STATE_VELOCITY+2) + 0.5 * dt * dt * global_accel.z;
 	} else {
 		/* If predicting backward, make sure to decelerate */
-		X->mat1D[STATE_POSITION]	 += dt * X_prior->mat1D[STATE_VELOCITY]	 - 0.5 * dt * dt * global_accel.x;
-		X->mat1D[STATE_POSITION+1] += dt * X_prior->mat1D[STATE_VELOCITY+1] - 0.5 * dt * dt * global_accel.y;
-		X->mat1D[STATE_POSITION+2] += dt * X_prior->mat1D[STATE_VELOCITY+2] - 0.5 * dt * dt * global_accel.z;
+		MATRIX2D_Y(X, STATE_POSITION)   += dt * MATRIX2D_Y(X_prior, STATE_VELOCITY)   - 0.5 * dt * dt * global_accel.x;
+		MATRIX2D_Y(X, STATE_POSITION+1) += dt * MATRIX2D_Y(X_prior, STATE_VELOCITY+1) - 0.5 * dt * dt * global_accel.y;
+		MATRIX2D_Y(X, STATE_POSITION+2) += dt * MATRIX2D_Y(X_prior, STATE_VELOCITY+2) - 0.5 * dt * dt * global_accel.z;
 	}
 
 	/* Velocity */
-	X->mat1D[STATE_VELOCITY]	 += dt * global_accel.x;
-	X->mat1D[STATE_VELOCITY+1] += dt * global_accel.y;
-	X->mat1D[STATE_VELOCITY+2] += dt * global_accel.z;
-
+	MATRIX2D_Y(X, STATE_VELOCITY)   += dt * global_accel.x;
+	MATRIX2D_Y(X, STATE_VELOCITY+1) += dt * global_accel.y;
+	MATRIX2D_Y(X, STATE_VELOCITY+2) += dt * global_accel.z;
 #elif MOTION_MODEL == 1
-	/* Position - constant velocity model */
-	X->mat1D[STATE_POSITION]	 += dt * X_prior->mat1D[STATE_VELOCITY];
-	X->mat1D[STATE_POSITION+1] += dt * X_prior->mat1D[STATE_VELOCITY+1];
-	X->mat1D[STATE_POSITION+2] += dt * X_prior->mat1D[STATE_VELOCITY+2];
+
+	MATRIX2D_Y(X, STATE_POSITION)   += dt * MATRIX2D_Y(X_prior, STATE_VELOCITY);
+	MATRIX2D_Y(X, STATE_POSITION+1) += dt * MATRIX2D_Y(X_prior, STATE_VELOCITY+1);
+	MATRIX2D_Y(X, STATE_POSITION+2) += dt * MATRIX2D_Y(X_prior, STATE_VELOCITY+2);
+#elif MOTION_MODEL == 2
+	/* Position - hybrid model using constant-V for IMU data gaps */
+	/* If dt is < the threshold, use constant accel, otherwise switch to constant velocity,
+	 * because we are missing some IMU updates and acceleration vals are definitely wrong */
+	if (dt < HYBRID_MOTION_THRESHOLD) {
+		/* Constant acceleration model */
+		if (dt >= 0) {
+			MATRIX2D_Y(X, STATE_POSITION)   += dt * MATRIX2D_Y(X_prior, STATE_VELOCITY)   + 0.5 * dt * dt * global_accel.x;
+			MATRIX2D_Y(X, STATE_POSITION+1) += dt * MATRIX2D_Y(X_prior, STATE_VELOCITY+1) + 0.5 * dt * dt * global_accel.y;
+			MATRIX2D_Y(X, STATE_POSITION+2) += dt * MATRIX2D_Y(X_prior, STATE_VELOCITY+2) + 0.5 * dt * dt * global_accel.z;
+		} else {
+			/* If predicting backward, make sure to decelerate */
+			MATRIX2D_Y(X, STATE_POSITION)   += dt * MATRIX2D_Y(X_prior, STATE_VELOCITY)   - 0.5 * dt * dt * global_accel.x;
+			MATRIX2D_Y(X, STATE_POSITION+1) += dt * MATRIX2D_Y(X_prior, STATE_VELOCITY+1) - 0.5 * dt * dt * global_accel.y;
+			MATRIX2D_Y(X, STATE_POSITION+2) += dt * MATRIX2D_Y(X_prior, STATE_VELOCITY+2) - 0.5 * dt * dt * global_accel.z;
+		}
+
+		/* Velocity */
+		MATRIX2D_Y(X, STATE_VELOCITY)   += dt * global_accel.x;
+		MATRIX2D_Y(X, STATE_VELOCITY+1) += dt * global_accel.y;
+		MATRIX2D_Y(X, STATE_VELOCITY+2) += dt * global_accel.z;
+
+	} else {
+		/* Constant Velocity mode */
+		MATRIX2D_Y(X, STATE_POSITION)   += dt * MATRIX2D_Y(X_prior, STATE_VELOCITY);
+		MATRIX2D_Y(X, STATE_POSITION+1) += dt * MATRIX2D_Y(X_prior, STATE_VELOCITY+1);
+		MATRIX2D_Y(X, STATE_POSITION+2) += dt * MATRIX2D_Y(X_prior, STATE_VELOCITY+2);
+	}
 #else
 #error "Invalid motion model. MOTION_MODEL must be 0 or 1"
 #endif
+
+	/* Clamped accel */
+	MATRIX2D_Y(X, STATE_ACCEL)   = global_accel.x;
+	MATRIX2D_Y(X, STATE_ACCEL+1) = global_accel.y;
+	MATRIX2D_Y(X, STATE_ACCEL+2) = global_accel.z;
+
+	if (filter_state->reset_slot != -1) {
+		/* One of the lagged slot states needs resetting - assign the current orientation and position */
+		int out_index = BASE_STATE_SIZE + (DELAY_SLOT_STATE_SIZE * filter_state->reset_slot);
+		int in_index = STATE_ORIENTATION;
+
+		for (int i = 0; i < DELAY_SLOT_STATE_SIZE; i++) {
+			MATRIX2D_Y(X, out_index) = MATRIX2D_Y(X, in_index);
+			out_index++; in_index++;
+		}
+	}
 
 	return true;
 }
@@ -153,19 +220,22 @@ static bool calc_quat_mean(const matrix2d *sigmas, int quat_index, const matrix2
 	vec3d error_s;
 
 	/* Start with the prior mean as the initial quat */
-	quatd mean_orient = {{ sigmas->mat[0][quat_index], sigmas->mat[0][quat_index+1],
-										sigmas->mat[0][quat_index+2], sigmas->mat[0][quat_index+3] }};
+	quatd mean_orient = {{ MATRIX2D_XY(sigmas, quat_index, 0),
+	                       MATRIX2D_XY(sigmas, quat_index+1, 0),
+	                       MATRIX2D_XY(sigmas, quat_index+2, 0),
+	                       MATRIX2D_XY(sigmas, quat_index+3, 0) }};
 	quatd delta_q;
 	int s, iters = 0;
 
 	do {
 		error_s.x = error_s.y = error_s.z = 0.0;
+		double w_M = 1.0 / sigmas->cols;
 
-		double w_M = 1.0 / sigmas->n;
-
-		for (s = 0; s < sigmas->n; s++) {
-			quatd cur_q = {{ sigmas->mat[s][quat_index], sigmas->mat[s][quat_index+1],
-											 sigmas->mat[s][quat_index+2], sigmas->mat[s][quat_index+3] }};
+		for (s = 1; s < sigmas->cols; s++) {
+			quatd cur_q = {{ MATRIX2D_XY(sigmas, quat_index, s),
+			                 MATRIX2D_XY(sigmas, quat_index+1, s),
+			                 MATRIX2D_XY(sigmas, quat_index+2, s),
+			                 MATRIX2D_XY(sigmas, quat_index+3, s) }};
 			vec3d delta_rot;
 
 			oquatd_diff(&mean_orient, &cur_q, &delta_q);
@@ -189,10 +259,10 @@ static bool calc_quat_mean(const matrix2d *sigmas, int quat_index, const matrix2
 		}
 	} while (ovec3d_get_length(&error_s) > (1e-4));
 
-	mean->mat1D[quat_index]	 = mean_orient.x;
-	mean->mat1D[quat_index+1] = mean_orient.y;
-	mean->mat1D[quat_index+2] = mean_orient.z;
-	mean->mat1D[quat_index+3] = mean_orient.w;
+	MATRIX2D_Y(mean, quat_index)   = mean_orient.x;
+	MATRIX2D_Y(mean, quat_index+1) = mean_orient.y;
+	MATRIX2D_Y(mean, quat_index+2) = mean_orient.z;
+	MATRIX2D_Y(mean, quat_index+3) = mean_orient.w;
 
 	return true;
 }
@@ -200,6 +270,9 @@ static bool calc_quat_mean(const matrix2d *sigmas, int quat_index, const matrix2
 /* Callback function that takes a set of sigma points (N_sigmaxN_state) and weights (1xN_sigma) and computes the mean (1xN_state) */
 static bool state_mean_func(const unscented_transform *ut, const matrix2d *sigmas, const matrix2d *weights, matrix2d *mean)
 {
+	rift_kalman_6dof_filter *filter_state = (rift_kalman_6dof_filter *)(ut);
+	int i;
+
 	/* Compute euclidean barycentric mean, then fix up the quaternion component */
 	/* FIXME: Skip the quaternion part of this multiplication to save some cycles */
 	if (matrix2d_multiply (mean, sigmas, weights) != MATRIX_RESULT_OK) {
@@ -209,68 +282,142 @@ static bool state_mean_func(const unscented_transform *ut, const matrix2d *sigma
 	if (!calc_quat_mean(sigmas, STATE_ORIENTATION, weights, mean))
 		return false;
 
+	/* Delay slots */
+	for (i = 0; i < filter_state->num_delay_slots; i++) {
+		int slot_index = BASE_STATE_SIZE + (DELAY_SLOT_STATE_SIZE * i);
+
+		if (filter_state->slot_inuse[i]) {
+			/* Quaternion */
+			if (!calc_quat_mean(sigmas, slot_index + DELAY_SLOT_STATE_ORIENTATION, weights, mean))
+				return false;
+		}
+		else {
+			MATRIX2D_Y(mean, slot_index + DELAY_SLOT_STATE_ORIENTATION) = 0.0;
+			MATRIX2D_Y(mean, slot_index + DELAY_SLOT_STATE_ORIENTATION+1) = 0.0;
+			MATRIX2D_Y(mean, slot_index + DELAY_SLOT_STATE_ORIENTATION+2) = 0.0;
+			MATRIX2D_Y(mean, slot_index + DELAY_SLOT_STATE_ORIENTATION+3) = 1.0;
+		}
+	}
 	return true;
 }
 
-static bool state_residual_func(const unscented_transform *ut, const matrix2d *X, const matrix2d *Y, matrix2d *residual)
+static void calc_quat_residual(const matrix2d *X, const matrix2d *Y, int state_index, matrix2d *residual, int cov_index)
 {
-	int i;
 	quatd X_q, Y_q, delta_q;
 	vec3d delta_rot;
 
-	/* Quaternion component */
-	X_q.x = X->mat1D[STATE_ORIENTATION];
-	X_q.y = X->mat1D[STATE_ORIENTATION+1];
-	X_q.z = X->mat1D[STATE_ORIENTATION+2];
-	X_q.w = X->mat1D[STATE_ORIENTATION+3];
+	X_q.x = MATRIX2D_Y(X, state_index);
+	X_q.y = MATRIX2D_Y(X, state_index+1);
+	X_q.z = MATRIX2D_Y(X, state_index+2);
+	X_q.w = MATRIX2D_Y(X, state_index+3);
 
-	Y_q.x = Y->mat1D[STATE_ORIENTATION];
-	Y_q.y = Y->mat1D[STATE_ORIENTATION+1];
-	Y_q.z = Y->mat1D[STATE_ORIENTATION+2];
-	Y_q.w = Y->mat1D[STATE_ORIENTATION+3];
+	Y_q.x = MATRIX2D_Y(Y, state_index);
+	Y_q.y = MATRIX2D_Y(Y, state_index+1);
+	Y_q.z = MATRIX2D_Y(Y, state_index+2);
+	Y_q.w = MATRIX2D_Y(Y, state_index+3);
 
 	oquatd_diff(&Y_q, &X_q, &delta_q);
 	oquatd_normalize_me(&delta_q);
 	oquatd_to_rotation(&delta_q, &delta_rot);
 
-	residual->mat1D[0] = delta_rot.x;
-	residual->mat1D[1] = delta_rot.y;
-	residual->mat1D[2] = delta_rot.z;
+	MATRIX2D_Y(residual, cov_index+0) = delta_rot.x;
+	MATRIX2D_Y(residual, cov_index+1) = delta_rot.y;
+	MATRIX2D_Y(residual, cov_index+2) = delta_rot.z;
+}
+
+static bool state_residual_func(const unscented_transform *ut, const matrix2d *X, const matrix2d *Y, matrix2d *residual)
+{
+	rift_kalman_6dof_filter *filter_state = (rift_kalman_6dof_filter *)(ut);
+	int i, j;
+
+	/* Quaternion component */
+	calc_quat_residual(X, Y, STATE_ORIENTATION, residual, COV_ORIENTATION);
 
 	/* Euclidean portion */
-	for (i = STATE_POSITION; i < STATE_SIZE; i++)
-		residual->mat1D[i-1] = X->mat1D[i] - Y->mat1D[i];
+	for (i = STATE_POSITION, j = COV_POSITION; i < BASE_STATE_SIZE; i++, j++)
+		MATRIX2D_Y(residual, j) = MATRIX2D_Y(X, i) - MATRIX2D_Y(Y, i);
+
+	/* Delay slots */
+	for (i = 0; i < filter_state->num_delay_slots; i++) {
+		int slot_index = BASE_STATE_SIZE + (DELAY_SLOT_STATE_SIZE * i);
+		int cov_index = BASE_COV_SIZE + (DELAY_SLOT_COV_SIZE * i);
+
+		if (filter_state->slot_inuse[i]) {
+			/* Quaternion */
+			calc_quat_residual(X, Y, slot_index + DELAY_SLOT_STATE_ORIENTATION, residual, cov_index + DELAY_SLOT_COV_ORIENTATION);
+
+			/* Position */
+			for (j = 0; j < 3; j++) {
+				MATRIX2D_Y(residual, cov_index+DELAY_SLOT_COV_POSITION+j) =
+					MATRIX2D_Y(X, slot_index+DELAY_SLOT_STATE_POSITION+j) - MATRIX2D_Y(Y, slot_index+DELAY_SLOT_STATE_POSITION+j);
+			}
+		}
+		else {
+			for (j = 0; j < DELAY_SLOT_COV_SIZE; j++)
+				MATRIX2D_Y(residual, cov_index + j) = 0.0;
+		}
+	}
 
 	return true;
 }
 
-static bool state_sum_func(const unscented_transform *ut, const matrix2d *Y, const matrix2d *addend, matrix2d *X)
+static void calc_quat_sum(const matrix2d *Y, int state_index, const matrix2d *addend, int cov_index, matrix2d *X)
 {
-	int i;
 	quatd out_q, delta_q;
 	vec3d delta_rot;
 
 	/* Quaternion component */
-	out_q.x = Y->mat1D[STATE_ORIENTATION];
-	out_q.y = Y->mat1D[STATE_ORIENTATION+1];
-	out_q.z = Y->mat1D[STATE_ORIENTATION+2];
-	out_q.w = Y->mat1D[STATE_ORIENTATION+3];
+	out_q.x = MATRIX2D_Y(Y, state_index);
+	out_q.y = MATRIX2D_Y(Y, state_index+1);
+	out_q.z = MATRIX2D_Y(Y, state_index+2);
+	out_q.w = MATRIX2D_Y(Y, state_index+3);
 
-	delta_rot.x = addend->mat1D[0];
-	delta_rot.y = addend->mat1D[1];
-	delta_rot.z = addend->mat1D[2];
+	delta_rot.x = MATRIX2D_Y(addend, cov_index);
+	delta_rot.y = MATRIX2D_Y(addend, cov_index+1);
+	delta_rot.z = MATRIX2D_Y(addend, cov_index+2);
 
 	oquatd_from_rotation(&delta_q, &delta_rot);
 	oquatd_mult_me(&out_q, &delta_q);
 
-	X->mat1D[STATE_ORIENTATION] = out_q.x;
-	X->mat1D[STATE_ORIENTATION+1] = out_q.y;
-	X->mat1D[STATE_ORIENTATION+2] = out_q.z;
-	X->mat1D[STATE_ORIENTATION+3] = out_q.w;
+	MATRIX2D_Y(X, state_index) = out_q.x;
+	MATRIX2D_Y(X, state_index+1) = out_q.y;
+	MATRIX2D_Y(X, state_index+2) = out_q.z;
+	MATRIX2D_Y(X, state_index+3) = out_q.w;
+}
+
+static bool state_sum_func(const unscented_transform *ut, const matrix2d *Y, const matrix2d *addend, matrix2d *X)
+{
+	rift_kalman_6dof_filter *filter_state = (rift_kalman_6dof_filter *)(ut);
+	int i, j;
+
+	/* Quaternion component */
+	calc_quat_sum(Y, STATE_ORIENTATION, addend, COV_ORIENTATION, X);
 
 	/* Euclidean portion */
-	for (i = STATE_POSITION; i < STATE_SIZE; i++)
-		X->mat1D[i] = Y->mat1D[i] + addend->mat1D[i-1];
+	for (i = STATE_POSITION, j = COV_POSITION; i < BASE_STATE_SIZE; i++, j++)
+		MATRIX2D_Y(X, i) = MATRIX2D_Y(Y, i) + MATRIX2D_Y(addend, j);
+
+	/* Delay slots */
+	for (i = 0; i < filter_state->num_delay_slots; i++) {
+		int slot_index = BASE_STATE_SIZE + (DELAY_SLOT_STATE_SIZE * i);
+		int cov_index = BASE_COV_SIZE + (DELAY_SLOT_COV_SIZE * i);
+
+		if (filter_state->slot_inuse[i]) {
+			/* Quaternion */
+			calc_quat_sum(Y, slot_index + DELAY_SLOT_STATE_ORIENTATION, addend, cov_index + DELAY_SLOT_COV_ORIENTATION, X);
+
+			/* Position */
+			for (j = 0; j < 3; j++) {
+				MATRIX2D_Y(X, slot_index+DELAY_SLOT_STATE_POSITION+j) =
+					MATRIX2D_Y(Y, slot_index+DELAY_SLOT_STATE_POSITION+j) + MATRIX2D_Y(addend, cov_index+DELAY_SLOT_COV_POSITION+j);
+			}
+		}
+		else {
+			for (j = 0; j < DELAY_SLOT_STATE_SIZE; j++)
+				MATRIX2D_Y(X, slot_index + j) = 0.0;
+			MATRIX2D_Y(X, slot_index + DELAY_SLOT_STATE_ORIENTATION + 3) = 1.0;
+		}
+	}
 
 	return true;
 }
@@ -279,38 +426,52 @@ static bool imu_measurement_func(const ukf_base *ukf, const ukf_measurement *m, 
 {
 	/* Measure accel and gyro, plus biases, plus gravity vector from orientation */
 	/* Accel + bias + gravity vector */
-	quatd orient = {{ X->mat1D[STATE_ORIENTATION],
-										X->mat1D[STATE_ORIENTATION+1],
-										X->mat1D[STATE_ORIENTATION+2],
-										X->mat1D[STATE_ORIENTATION+3] }};
+	quatd orient = {{ MATRIX2D_Y(X, STATE_ORIENTATION),
+	                  MATRIX2D_Y(X, STATE_ORIENTATION+1),
+	                  MATRIX2D_Y(X, STATE_ORIENTATION+2),
+	                  MATRIX2D_Y(X, STATE_ORIENTATION+3) }};
 
-	vec3d global_accel = {{ X->mat1D[STATE_ACCEL],
-													X->mat1D[STATE_ACCEL+1] + GRAVITY_MAG,
-													X->mat1D[STATE_ACCEL+2] }};
+	vec3d global_accel = {{ MATRIX2D_Y(X, STATE_ACCEL),
+	                        MATRIX2D_Y(X, STATE_ACCEL+1) + GRAVITY_MAG,
+	                        MATRIX2D_Y(X, STATE_ACCEL+2) }};
 	vec3d local_accel;
 
 	/* Move global accel into the IMU body frame, and add bias */
 	oquatd_inverse(&orient);
 	oquatd_get_rotated(&orient, &global_accel, &local_accel);
 
-	z->mat1D[IMU_MEAS_ACCEL]	 = local_accel.x + X->mat1D[STATE_ACCEL_BIAS];
-	z->mat1D[IMU_MEAS_ACCEL+1] = local_accel.y + X->mat1D[STATE_ACCEL_BIAS+1];
-	z->mat1D[IMU_MEAS_ACCEL+2] = local_accel.z + X->mat1D[STATE_ACCEL_BIAS+2];
+	MATRIX2D_Y(z, IMU_MEAS_ACCEL)   = local_accel.x + MATRIX2D_Y(X, STATE_ACCEL_BIAS);
+	MATRIX2D_Y(z, IMU_MEAS_ACCEL+1) = local_accel.y + MATRIX2D_Y(X, STATE_ACCEL_BIAS+1);
+	MATRIX2D_Y(z, IMU_MEAS_ACCEL+2) = local_accel.z + MATRIX2D_Y(X, STATE_ACCEL_BIAS+2);
+
+	// print_col_vec("IMU measurement prediction (z_bar)", z);
 
 	return true;
 }
 
-bool pose_measurement_func(const ukf_base *ukf, const ukf_measurement *m, const matrix2d *x, matrix2d *z)
+static bool pose_measurement_func(const ukf_base *ukf, const ukf_measurement *m, const matrix2d *x, matrix2d *z)
 {
-	/* Measure position and orientation */
-	z->mat1D[POSE_MEAS_POSITION]	 = x->mat1D[STATE_POSITION];
-	z->mat1D[POSE_MEAS_POSITION+1] = x->mat1D[STATE_POSITION+1];
-	z->mat1D[POSE_MEAS_POSITION+2] = x->mat1D[STATE_POSITION+2];
+	rift_kalman_6dof_filter *filter_state = (rift_kalman_6dof_filter *)(ukf);
+	int state_position_index = STATE_POSITION;
+	int state_orientation_index = STATE_ORIENTATION;
 
-	z->mat1D[POSE_MEAS_ORIENTATION]	 = x->mat1D[STATE_ORIENTATION];
-	z->mat1D[POSE_MEAS_ORIENTATION+1] = x->mat1D[STATE_ORIENTATION+1];
-	z->mat1D[POSE_MEAS_ORIENTATION+2] = x->mat1D[STATE_ORIENTATION+2];
-	z->mat1D[POSE_MEAS_ORIENTATION+3] = x->mat1D[STATE_ORIENTATION+3];
+	if (filter_state->pose_slot != -1) {
+		/* A delay slot was set, get the measurement from it */
+		int slot_index = BASE_STATE_SIZE + (DELAY_SLOT_STATE_SIZE * filter_state->pose_slot);
+		state_position_index = slot_index + DELAY_SLOT_STATE_POSITION;
+		state_orientation_index = slot_index + DELAY_SLOT_STATE_ORIENTATION;
+	}
+	/* Measure position and orientation */
+	MATRIX2D_Y(z, POSE_MEAS_POSITION)   = MATRIX2D_Y(x, state_position_index);
+	MATRIX2D_Y(z, POSE_MEAS_POSITION+1) = MATRIX2D_Y(x, state_position_index+1);
+	MATRIX2D_Y(z, POSE_MEAS_POSITION+2) = MATRIX2D_Y(x, state_position_index+2);
+
+	MATRIX2D_Y(z, POSE_MEAS_ORIENTATION)   = MATRIX2D_Y(x, state_orientation_index);
+	MATRIX2D_Y(z, POSE_MEAS_ORIENTATION+1) = MATRIX2D_Y(x, state_orientation_index+1);
+	MATRIX2D_Y(z, POSE_MEAS_ORIENTATION+2) = MATRIX2D_Y(x, state_orientation_index+2);
+	MATRIX2D_Y(z, POSE_MEAS_ORIENTATION+3) = MATRIX2D_Y(x, state_orientation_index+3);
+
+	// print_col_vec("Pose measurement prediction (z_bar)", -1, z);
 
 	return true;
 }
@@ -337,29 +498,29 @@ static bool pose_residual_func(const unscented_transform *ut, const matrix2d *X,
 
 	/* Euclidean portion */
 	for (i = POSE_MEAS_POSITION; i < POSE_MEAS_ORIENTATION; i++)
-		residual->mat1D[i] = X->mat1D[i] - Y->mat1D[i];
+		MATRIX2D_Y(residual, i) = MATRIX2D_Y(X, i) - MATRIX2D_Y(Y, i);
 
 	quatd X_q, Y_q, delta_q;
 	vec3d delta_rot;
 
 	/* Quaternion component */
-	X_q.x = X->mat1D[POSE_MEAS_ORIENTATION];
-	X_q.y = X->mat1D[POSE_MEAS_ORIENTATION+1];
-	X_q.z = X->mat1D[POSE_MEAS_ORIENTATION+2];
-	X_q.w = X->mat1D[POSE_MEAS_ORIENTATION+3];
+	X_q.x = MATRIX2D_Y(X, POSE_MEAS_ORIENTATION);
+	X_q.y = MATRIX2D_Y(X, POSE_MEAS_ORIENTATION+1);
+	X_q.z = MATRIX2D_Y(X, POSE_MEAS_ORIENTATION+2);
+	X_q.w = MATRIX2D_Y(X, POSE_MEAS_ORIENTATION+3);
 
-	Y_q.x = Y->mat1D[POSE_MEAS_ORIENTATION];
-	Y_q.y = Y->mat1D[POSE_MEAS_ORIENTATION+1];
-	Y_q.z = Y->mat1D[POSE_MEAS_ORIENTATION+2];
-	Y_q.w = Y->mat1D[POSE_MEAS_ORIENTATION+3];
+	Y_q.x = MATRIX2D_Y(Y, POSE_MEAS_ORIENTATION);
+	Y_q.y = MATRIX2D_Y(Y, POSE_MEAS_ORIENTATION+1);
+	Y_q.z = MATRIX2D_Y(Y, POSE_MEAS_ORIENTATION+2);
+	Y_q.w = MATRIX2D_Y(Y, POSE_MEAS_ORIENTATION+3);
 
 	oquatd_diff(&Y_q, &X_q, &delta_q);
 	oquatd_normalize_me(&delta_q);
 	oquatd_to_rotation(&delta_q, &delta_rot);
 
-	residual->mat1D[3] = delta_rot.x;
-	residual->mat1D[4] = delta_rot.y;
-	residual->mat1D[5] = delta_rot.z;
+	MATRIX2D_Y(residual, 3) = delta_rot.x;
+	MATRIX2D_Y(residual, 4) = delta_rot.y;
+	MATRIX2D_Y(residual, 5) = delta_rot.z;
 
 	return true;
 }
@@ -372,90 +533,107 @@ static bool pose_sum_func(const unscented_transform *ut, const matrix2d *Y, cons
 
 	/* Euclidean portion */
 	for (i = POSE_MEAS_POSITION; i < POSE_MEAS_ORIENTATION; i++)
-		X->mat1D[i] = Y->mat1D[i] + addend->mat1D[i];
+		MATRIX2D_Y(X, i) = MATRIX2D_Y(Y, i) + MATRIX2D_Y(addend, i);
 
 	quatd out_q, delta_q;
 	vec3d delta_rot;
 
 	/* Quaternion component */
-	out_q.x = Y->mat1D[POSE_MEAS_ORIENTATION];
-	out_q.y = Y->mat1D[POSE_MEAS_ORIENTATION+1];
-	out_q.z = Y->mat1D[POSE_MEAS_ORIENTATION+2];
-	out_q.w = Y->mat1D[POSE_MEAS_ORIENTATION+3];
+	out_q.x = MATRIX2D_Y(Y, POSE_MEAS_ORIENTATION);
+	out_q.y = MATRIX2D_Y(Y, POSE_MEAS_ORIENTATION+1);
+	out_q.z = MATRIX2D_Y(Y, POSE_MEAS_ORIENTATION+2);
+	out_q.w = MATRIX2D_Y(Y, POSE_MEAS_ORIENTATION+3);
 
-	delta_rot.x = addend->mat1D[3];
-	delta_rot.y = addend->mat1D[4];
-	delta_rot.z = addend->mat1D[5];
+	delta_rot.x = MATRIX2D_Y(addend, 3);
+	delta_rot.y = MATRIX2D_Y(addend, 4);
+	delta_rot.z = MATRIX2D_Y(addend, 5);
 
 	oquatd_from_rotation(&delta_q, &delta_rot);
 	oquatd_mult_me(&out_q, &delta_q);
 
-	X->mat1D[POSE_MEAS_ORIENTATION] = out_q.x;
-	X->mat1D[POSE_MEAS_ORIENTATION+1] = out_q.y;
-	X->mat1D[POSE_MEAS_ORIENTATION+2] = out_q.z;
-	X->mat1D[POSE_MEAS_ORIENTATION+3] = out_q.w;
+	MATRIX2D_Y(X, POSE_MEAS_ORIENTATION) = out_q.x;
+	MATRIX2D_Y(X, POSE_MEAS_ORIENTATION+1) = out_q.y;
+	MATRIX2D_Y(X, POSE_MEAS_ORIENTATION+2) = out_q.z;
+	MATRIX2D_Y(X, POSE_MEAS_ORIENTATION+3) = out_q.w;
 
 	return true;
 }
 
-void rift_kalman_6dof_init(rift_kalman_6dof_filter *state)
+void rift_kalman_6dof_init(rift_kalman_6dof_filter *state, int num_delay_slots)
 {
 	int i;
 
+	assert(num_delay_slots <= MAX_DELAY_SLOTS);
+
 	state->first_update = true;
+	state->num_delay_slots = num_delay_slots;
+
+	const int STATE_SIZE = BASE_STATE_SIZE + (num_delay_slots * DELAY_SLOT_STATE_SIZE);
+	const int COV_SIZE = BASE_COV_SIZE + (num_delay_slots * DELAY_SLOT_COV_SIZE);
 
 	/* FIXME: These process noise values are pretty randomly chosen */
 	state->Q_noise = matrix2d_alloc0 (COV_SIZE, COV_SIZE);
 	for (i = COV_ORIENTATION; i < COV_ORIENTATION + 3; i++)
-		state->Q_noise->mat[i][i] = 1e-5;
+		MATRIX2D_XY(state->Q_noise, i, i) = 1e-5;
 
 	for (i = COV_POSITION; i < COV_POSITION + 3; i++)
-		state->Q_noise->mat[i][i] = 1e-4;
+		MATRIX2D_XY(state->Q_noise, i, i) = 1e-4;
 	for (i = COV_VELOCITY; i < COV_VELOCITY + 3; i++)
-		state->Q_noise->mat[i][i] = 2e-4;
+		MATRIX2D_XY(state->Q_noise, i, i) = 2e-4;
 
 	/* Accelerometer and Gyro estimates can change sharply -
 	 * even "gentle" motion leads to +/- 5g in a millisecond,
 	 * and gyro can easily change 10dps in a millisecond */
 	for (i = COV_ACCEL; i < COV_ACCEL + 3; i++)
-		state->Q_noise->mat[i][i] = sqrt(3) * 10.0 * 10.0;
+		MATRIX2D_XY(state->Q_noise, i, i) = sqrt(3) * 10.0 * 10.0;
 
 	/* Gyro and accel bias have very small variance, since we
 	 * want them to change slowly */
 	for (i = COV_ACCEL_BIAS; i < COV_ACCEL_BIAS + 3; i++)
-		state->Q_noise->mat[i][i] = IMU_ACCEL_BIAS_NOISE;
+		MATRIX2D_XY(state->Q_noise, i, i) = IMU_ACCEL_BIAS_NOISE;
 
 	for (i = COV_GYRO_BIAS; i < COV_GYRO_BIAS + 3; i++)
-		state->Q_noise->mat[i][i] = IMU_GYRO_BIAS_NOISE;
+		MATRIX2D_XY(state->Q_noise, i, i) = IMU_GYRO_BIAS_NOISE;
 
 	/* Takes ownership of Q_noise */
 	ukf_base_init(&state->ukf, STATE_SIZE, COV_SIZE, state->Q_noise, process_func, state_mean_func, state_residual_func, state_sum_func);
 
-	/* Init unit quaternion in the state */
-	state->ukf.x_prior->mat1D[STATE_ORIENTATION + 3] = 1.0;
+		/* Init unit quaternion in the state */
+	MATRIX2D_Y(state->ukf.x_prior, STATE_ORIENTATION + 3) = 1.0;
+
+	for (i = 0; i < num_delay_slots; i++) {
+		int slot_index = BASE_STATE_SIZE + (DELAY_SLOT_STATE_SIZE * i);
+		MATRIX2D_Y(state->ukf.x_prior, slot_index + DELAY_SLOT_STATE_ORIENTATION + 3) = 1.0;
+		state->slot_inuse[i] = false;
+	}
 
 	/* Initialise the prior covariance / uncertainty - particularly around the biases,
 	 * where we assume they are close to 0 somewhere */
 	for (i = COV_ACCEL_BIAS; i < COV_ACCEL_BIAS + 3; i++)
-		state->ukf.P_prior->mat[i][i] = IMU_ACCEL_BIAS_NOISE_INITIAL;
+		MATRIX2D_XY(state->ukf.P_prior, i, i) = IMU_ACCEL_BIAS_NOISE_INITIAL;
 
 	for (i = COV_GYRO_BIAS; i < COV_GYRO_BIAS + 3; i++)
-		state->ukf.P_prior->mat[i][i] = IMU_GYRO_BIAS_NOISE_INITIAL;
+		MATRIX2D_XY(state->ukf.P_prior, i, i) = IMU_GYRO_BIAS_NOISE_INITIAL;
 
 	/* m1 is for IMU measurement - accel */
 	ukf_measurement_init(&state->m1, 3, 3, &state->ukf, imu_measurement_func, NULL, NULL, NULL);
 
 	/* FIXME: Set R matrix to something based on IMU noise */
 	for (int i = 0; i < 3; i++)
-		state->m1.R->mat[i][i] = 1e-6;
+	 MATRIX2D_XY(state->m1.R, i, i) = 1e-6;
 
 	/* m2 is for pose measurements - position and orientation. We trust the position more than
 	 * the orientation. */
 	ukf_measurement_init(&state->m2, 7, 6, &state->ukf, pose_measurement_func, pose_mean_func, pose_residual_func, pose_sum_func);
 	for (int i = 0; i < 3; i++)
-		state->m2.R->mat[i][i] = 2.5e-6;
+		MATRIX2D_XY(state->m2.R, i, i) = 2.5e-6;
 	for (int i = 3; i < 6; i++)
-		state->m2.R->mat[i][i] = 0.25;
+		MATRIX2D_XY(state->m2.R, i, i) = 0.25;
+
+	state->reset_slot = -1;
+	state->pose_slot = -1;
+
+	ovec3d_set(&state->ang_vel, 0.0, 0.0, 0.0);
 }
 
 void rift_kalman_6dof_clear(rift_kalman_6dof_filter *state)
@@ -484,13 +662,38 @@ rift_kalman_6dof_update(rift_kalman_6dof_filter *state, uint64_t time, ukf_measu
 			return;
 	}
 
-	if (!ukf_base_update(&state->ukf, m)) {
-		LOGE ("Failed to perform %s UKF update at time %llu (dt %f)",
-					m == &state->m1 ? "IMU" : "Pose", (unsigned long long) state->current_ts, NS_TO_SEC(dt));
-		return;
+	if (m) {
+		if (!ukf_base_update(&state->ukf, m)) {
+			LOGE ("Failed to perform %s UKF update at time %llu (dt %f)",
+						m == &state->m1 ? "IMU" : "Pose", (unsigned long long) state->current_ts, NS_TO_SEC(dt));
+			return;
+		}
+	}
+	else {
+		/* Pseudo-measurement - just commit the predicted state */
+		if (!ukf_base_commit(&state->ukf)) {
+			LOGE ("Failed to commit UKF prediction at time %llu (dt %f)",
+					(unsigned long long) state->current_ts, NS_TO_SEC(dt));
+			return;
+		}
 	}
 
 	// print_col_vec ("UKF Mean after update", state->current_ts, state->ukf.x_prior);
+}
+
+void rift_kalman_6dof_prepare_delay_slot(rift_kalman_6dof_filter *state, uint64_t time, int delay_slot)
+{
+	/* Predict state forward to the timestamp, and set the
+	 * assigned lagged slot state */
+	state->slot_inuse[delay_slot] = true;
+	state->reset_slot = delay_slot;
+	rift_kalman_6dof_update(state, time, NULL);
+	state->reset_slot = -1;
+}
+
+void rift_kalman_6dof_release_delay_slot(rift_kalman_6dof_filter *state, int delay_slot)
+{
+	state->slot_inuse[delay_slot] = false;
 }
 
 void rift_kalman_6dof_imu_update (rift_kalman_6dof_filter *state, uint64_t time, const vec3f* ang_vel, const vec3f* accel, const vec3f* mag_field)
@@ -505,27 +708,34 @@ void rift_kalman_6dof_imu_update (rift_kalman_6dof_filter *state, uint64_t time,
 	/* and acceleration in the measurement vector to correct the orientation by gravity */
 	/* FIXME: Use mag if set? */
 	m = &state->m1;
-	m->z->mat1D[IMU_MEAS_ACCEL+0] = accel->x;
-	m->z->mat1D[IMU_MEAS_ACCEL+1] = accel->y;
-	m->z->mat1D[IMU_MEAS_ACCEL+2] = accel->z;
+	MATRIX2D_Y(m->z, IMU_MEAS_ACCEL+0) = accel->x;
+	MATRIX2D_Y(m->z, IMU_MEAS_ACCEL+1) = accel->y;
+	MATRIX2D_Y(m->z, IMU_MEAS_ACCEL+2) = accel->z;
 
 	rift_kalman_6dof_update(state, time, m);
 }
 
-void rift_kalman_6dof_position_update(rift_kalman_6dof_filter *state, uint64_t time, posef *pose)
+void rift_kalman_6dof_position_update(rift_kalman_6dof_filter *state, uint64_t time, posef *pose, int delay_slot)
 {
 	ukf_measurement *m;
 
-	/* FIXME: Use lagged state vector entries to correct for delay */
-	m = &state->m2;
-	m->z->mat1D[POSE_MEAS_POSITION+0] = pose->pos.x;
-	m->z->mat1D[POSE_MEAS_POSITION+1] = pose->pos.y;
-	m->z->mat1D[POSE_MEAS_POSITION+2] = pose->pos.z;
+	/* Use lagged state vector entries to correct for delay */
+	state->pose_slot = delay_slot;
 
-	m->z->mat1D[POSE_MEAS_ORIENTATION+0] = pose->orient.x;
-	m->z->mat1D[POSE_MEAS_ORIENTATION+1] = pose->orient.y;
-	m->z->mat1D[POSE_MEAS_ORIENTATION+2] = pose->orient.z;
-	m->z->mat1D[POSE_MEAS_ORIENTATION+3] = pose->orient.w;
+	/* If doing a delayed update, then the slot must be in use (
+	 * or else it contains empty data */
+	if (delay_slot != -1)
+		assert(state->slot_inuse[delay_slot]);
+
+	m = &state->m2;
+	MATRIX2D_Y(m->z, POSE_MEAS_POSITION+0) = pose->pos.x;
+	MATRIX2D_Y(m->z, POSE_MEAS_POSITION+1) = pose->pos.y;
+	MATRIX2D_Y(m->z, POSE_MEAS_POSITION+2) = pose->pos.z;
+
+	MATRIX2D_Y(m->z, POSE_MEAS_ORIENTATION+0) = pose->orient.x;
+	MATRIX2D_Y(m->z, POSE_MEAS_ORIENTATION+1) = pose->orient.y;
+	MATRIX2D_Y(m->z, POSE_MEAS_ORIENTATION+2) = pose->orient.z;
+	MATRIX2D_Y(m->z, POSE_MEAS_ORIENTATION+3) = pose->orient.w;
 
 	rift_kalman_6dof_update(state, time, m);
 }
@@ -534,14 +744,14 @@ void rift_kalman_6dof_get_pose_at(rift_kalman_6dof_filter *state, uint64_t time,
 {
 	matrix2d *x = state->ukf.x_prior;
 
-	/* FIXME: Do prediction using the time */
-	pose->pos.x = x->mat1D[STATE_POSITION];
-	pose->pos.y = x->mat1D[STATE_POSITION+1];
-	pose->pos.z = x->mat1D[STATE_POSITION+2];
+	/* FIXME: Do prediction using the time? */
+	pose->pos.x = MATRIX2D_Y(x, STATE_POSITION);
+	pose->pos.y = MATRIX2D_Y(x, STATE_POSITION+1);
+	pose->pos.z = MATRIX2D_Y(x, STATE_POSITION+2);
 
-	pose->orient.x = x->mat1D[STATE_ORIENTATION];
-	pose->orient.y = x->mat1D[STATE_ORIENTATION+1];
-	pose->orient.z = x->mat1D[STATE_ORIENTATION+2];
-	pose->orient.w = x->mat1D[STATE_ORIENTATION+3];
+	pose->orient.x = MATRIX2D_Y(x, STATE_ORIENTATION);
+	pose->orient.y = MATRIX2D_Y(x, STATE_ORIENTATION+1);
+	pose->orient.z = MATRIX2D_Y(x, STATE_ORIENTATION+2);
+	pose->orient.w = MATRIX2D_Y(x, STATE_ORIENTATION+3);
 }
 

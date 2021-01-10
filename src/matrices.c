@@ -14,74 +14,82 @@
 #endif
 
 matrix2d *
-matrix2d_alloc (uint16_t m, uint16_t n)
+matrix2d_alloc (uint16_t rows, uint16_t cols)
 {
     uint8_t *mem;
     matrix2d *mat;
     size_t mem_size;
-    int i;
 
-    MATRIX_CHECK(m > 0 && n > 0, NULL);
+    MATRIX_CHECK(rows > 0 && cols > 0, NULL);
 
-    mem_size = sizeof(matrix2d) + sizeof (double *) * n;
-    mem_size += sizeof(double)*m*n;
+    mem_size = sizeof(matrix2d);
+    mem_size += sizeof(double)*rows*cols;
     mem = malloc (mem_size);
 
     mat = (matrix2d *)(mem);
     mem += sizeof (matrix2d);
 
-    mat->mat = (double **)(mem);
-    mem += sizeof (double *) * n;
+    mat->mem = (double *)(mem);
 
-    mat->mat1D = (double *) mem;
+    mat->cols = cols;
+    mat->stride = mat->rows = rows;
 
-    for (i = 0; i < n; i++) {
-      mat->mat[i] = (double *)(mem);
-      mem += sizeof (double) * m;
+    return mat;
+}
+
+matrix2d *
+matrix2d_alloc0 (uint16_t rows, uint16_t cols)
+{
+    matrix2d *mat = matrix2d_alloc (rows, cols);
+    memset (mat->mem, 0, sizeof (double) * rows * cols);
+
+    return mat;
+}
+
+matrix2d *
+matrix2d_alloc_init (uint16_t rows, uint16_t cols, const double **init_vals)
+{
+    matrix2d *mat = matrix2d_alloc (rows, cols);
+    memcpy (mat->mem, init_vals, sizeof (double) * rows * cols);
+
+    return mat;
+}
+
+matrix2d *
+matrix2d_alloc_identity (uint16_t rows)
+{
+    matrix2d *mat = matrix2d_alloc0(rows, rows);
+    double *ptr = mat->mem;
+		int i;
+
+    for (i = 0; i < rows; i++) {
+      ptr[0] = 1.0;
+      ptr += mat->stride + 1;
     }
-
-    mat->m = m;
-    mat->n = n;
-
-    return mat;
-}
-
-matrix2d *
-matrix2d_alloc0 (uint16_t m, uint16_t n)
-{
-    matrix2d *mat = matrix2d_alloc (m, n);
-    memset (mat->mat1D, 0, sizeof (double) * m * n);
-
-    return mat;
-}
-
-matrix2d *
-matrix2d_alloc_init (uint16_t m, uint16_t n, const double **init_vals)
-{
-    matrix2d *mat = matrix2d_alloc (m, n);
-    memcpy (mat->mat1D, init_vals, sizeof (double) * m * n);
-
-    return mat;
-}
-
-matrix2d *
-matrix2d_alloc_identity (uint16_t m)
-{
-    matrix2d *mat = matrix2d_alloc (m, m);
-    int i;
-
-    memset (mat->mat[0], 0, sizeof (double)*m*m);
-    for (i = 0; i < m; i++)
-        mat->mat[i][i] = 1.0;
     return mat;
 }
 
 matrix2d *
 matrix2d_dup (const matrix2d *src)
 {
-    matrix2d *dest = matrix2d_alloc (src->m, src->n);
-    memcpy (dest->mat1D, src->mat1D, sizeof (double) * src->m * src->n);
+    matrix2d *dest = matrix2d_alloc (src->rows, src->cols);
 
+		if (dest->stride == src->stride) {
+			memcpy (dest->mem, src->mem, sizeof (double) * src->stride * src->cols);
+		}
+		else {
+			double *in_ptr = src->mem;
+			double *out_ptr = dest->mem;
+			int i;
+
+			/* Copy column by column because the stride is changing
+			* (due to dup'ing a sub-matrix */
+			for (i = 0; i < src->cols; i++) {
+				memcpy(out_ptr, in_ptr, sizeof(double) * src->rows);
+				out_ptr += dest->stride;
+				in_ptr += src->stride;
+			}
+		}
     return dest;
 }
 
@@ -93,64 +101,120 @@ void matrix2d_free (matrix2d *mat)
 matrix_result
 matrix2d_copy (matrix2d *dest, const matrix2d *src)
 {
-    MATRIX_CHECK(dest->m == src->m && dest->n == src->n, MATRIX_RESULT_INVALID);
+    MATRIX_CHECK(dest->rows == src->rows && dest->cols == src->cols, MATRIX_RESULT_INVALID);
 
-    memcpy (dest->mat1D, src->mat1D, sizeof (double) * src->m * src->n);
+		if (dest->stride == src->stride) {
+			memcpy (dest->mem, src->mem, sizeof (double) * src->stride * src->cols);
+		}
+		else {
+			double *in_ptr = src->mem;
+			double *out_ptr = dest->mem;
+			int i;
 
-    return MATRIX_RESULT_OK;
-}
-
-matrix_result
-matrix2d_extract_row (matrix2d *dest, const matrix2d *src, const uint16_t m)
-{
-    int i;
-
-    MATRIX_CHECK(dest->m == 1 && dest->n == src->n && m < src->m, MATRIX_RESULT_INVALID);
-
-    for (i = 0; i < src->n; i++)
-       dest->mat[i][0] = src->mat[i][m];
-
-    return MATRIX_RESULT_OK;
-}
-
-matrix_result
-matrix2d_replace_row (matrix2d *dest, const uint16_t m, const matrix2d *src)
-{
-    int i;
-
-    MATRIX_CHECK(src->m == 1 && dest->n == src->n && m < dest->m, MATRIX_RESULT_INVALID);
-
-    for (i = 0; i < src->n; i++)
-       dest->mat[i][m] = src->mat[i][0];
+			/* Copy column by column because the src and dest have different stride */
+			for (i = 0; i < src->cols; i++) {
+				memcpy(out_ptr, in_ptr, sizeof(double) * src->rows);
+				out_ptr += dest->stride;
+				in_ptr += src->stride;
+			}
+		}
 
     return MATRIX_RESULT_OK;
 }
 
 matrix_result
-matrix2d_extract_column (matrix2d *dest, const matrix2d *src, const uint16_t n)
+matrix2d_submatrix_ref(const matrix2d *src, uint16_t x, uint16_t y, uint16_t rows, uint16_t cols, matrix2d *dest)
 {
-    int i;
-    double *col, *d;
+    MATRIX_CHECK(x < src->rows && x + rows < src->rows, MATRIX_RESULT_INVALID);
+    MATRIX_CHECK(y < src->cols && y + cols < src->cols, MATRIX_RESULT_INVALID);
 
-    MATRIX_CHECK(dest->n == 1 && dest->m == src->m && n < src->n, MATRIX_RESULT_INVALID);
+    dest->stride = src->stride;
+    dest->rows = rows;
+    dest->cols = cols;
 
-    d = dest->mat1D;
-    col = src->mat[n];
-    for (i = 0; i < src->m; i++)
-      *d++ = *col++;
+    dest->mem = &MATRIX2D_XY(src, x, y);
 
     return MATRIX_RESULT_OK;
 }
 
 matrix_result
-matrix2d_replace_column (matrix2d *dest, const uint16_t n, const matrix2d *src)
+matrix2d_column_ref(const matrix2d *src, uint16_t col, matrix2d *dest)
+{
+    MATRIX_CHECK(col < src->cols, MATRIX_RESULT_INVALID);
+
+    dest->stride = src->stride;
+    dest->rows = src->rows;
+    dest->cols = 1;
+
+    dest->mem = &MATRIX2D_XY(src, 0, col);
+
+    return MATRIX_RESULT_OK;
+}
+
+matrix_result
+matrix2d_extract_row (matrix2d *dest, const matrix2d *src, const uint16_t row)
 {
     int i;
 
-    MATRIX_CHECK(src->n == 1 && dest->m == src->m && n < dest->n, MATRIX_RESULT_INVALID);
+    MATRIX_CHECK(dest->rows == 1 && dest->cols == src->cols && row < src->rows, MATRIX_RESULT_INVALID);
 
-    for (i = 0; i < src->m; i++)
-       dest->mat[n][i] = src->mat1D[i];
+		double *in_ptr = &MATRIX2D_XY(src, row, 0);
+		double *out_ptr = dest->mem;
+
+    for (i = 0; i < src->cols; i++) { 
+			 *out_ptr++ = *in_ptr;
+			 in_ptr += src->stride;
+		}
+
+    return MATRIX_RESULT_OK;
+}
+
+matrix_result
+matrix2d_replace_row (matrix2d *dest, const uint16_t row, const matrix2d *src)
+{
+    int i;
+
+    MATRIX_CHECK(src->rows == 1 && dest->cols == src->cols && row < dest->rows, MATRIX_RESULT_INVALID);
+
+		double *in_ptr = src->mem;
+		double *out_ptr = &MATRIX2D_XY(dest, row, 0);
+
+    for (i = 0; i < src->cols; i++) { 
+			 *out_ptr++ = *in_ptr;
+			 in_ptr += dest->stride;
+		}
+
+    return MATRIX_RESULT_OK;
+}
+
+matrix_result
+matrix2d_extract_column (matrix2d *dest, const matrix2d *src, const uint16_t col)
+{
+    int i;
+
+    MATRIX_CHECK(dest->cols == 1 && dest->rows == src->rows && col < src->cols, MATRIX_RESULT_INVALID);
+
+		double *src_ptr = &MATRIX2D_XY(src, 0, col);
+		double *out_ptr = dest->mem;
+
+    for (i = 0; i < src->rows; i++)
+      out_ptr[i] = src_ptr[i];
+
+    return MATRIX_RESULT_OK;
+}
+
+matrix_result
+matrix2d_replace_column (matrix2d *dest, const uint16_t col, const matrix2d *src)
+{
+    int i;
+
+    MATRIX_CHECK(src->cols == 1 && dest->rows == src->rows && col < dest->cols, MATRIX_RESULT_INVALID);
+
+		double *in_ptr = src->mem;
+		double *out_ptr = &MATRIX2D_XY(dest, 0, col);
+
+    for (i = 0; i < src->rows; i++)
+			out_ptr[i] = in_ptr[i];
 
     return MATRIX_RESULT_OK;
 }
@@ -160,11 +224,15 @@ matrix2d_transpose (matrix2d *dest, const matrix2d *src)
 {
     int i, j;
 
-    MATRIX_CHECK(dest->m == src->n && dest->n == src->m, MATRIX_RESULT_INVALID);
+    MATRIX_CHECK(dest->rows == src->cols && dest->cols == src->rows, MATRIX_RESULT_INVALID);
 
-    for (i = 0; i < dest->m; i++) {
-        for (j = 0; j < dest->n; j++) {
-            dest->mat[j][i] = src->mat[i][j];
+    for (i = 0; i < dest->rows; i++) {
+				double *dest_row = &MATRIX2D_XY(dest, i, 0);
+				double *src_col = &MATRIX2D_XY(src, 0, i);
+
+        for (j = 0; j < dest->cols; j++) {
+						*dest_row = *src_col++;
+						dest_row += dest->stride;
         }
     }
     return MATRIX_RESULT_OK;
@@ -176,13 +244,13 @@ matrix2d_transpose_in_place (matrix2d *dest)
     int i, j;
 
     /* Must be square */
-    MATRIX_CHECK(dest->n == dest->m, MATRIX_RESULT_INVALID);
+    MATRIX_CHECK(dest->cols == dest->rows, MATRIX_RESULT_INVALID);
 
-    for (i = 0; i < dest->m; i++) {
-        for (j = i; j < dest->n; j++) {
-            double tmp = dest->mat[j][i];
-            dest->mat[j][i] = dest->mat[i][j];
-            dest->mat[i][j] = tmp;
+    for (i = 0; i < dest->rows; i++) {
+        for (j = i; j < dest->cols; j++) {
+            double tmp = MATRIX2D_XY(dest, j, i);
+            MATRIX2D_XY(dest, j, i) = MATRIX2D_XY(dest, i, j);
+            MATRIX2D_XY(dest, i, j) = tmp;
         }
     }
     return MATRIX_RESULT_OK;
@@ -193,13 +261,20 @@ matrix2d_add (matrix2d *dest, const matrix2d *src1, const matrix2d *src2)
 {
     int i, j;
 
-    MATRIX_CHECK(dest->m == src1->m && src1->m == src2->m &&
-        dest->n == src1->n && src1->n == src2->n, MATRIX_RESULT_INVALID);
+    MATRIX_CHECK(dest->rows == src1->rows && src1->rows == src2->rows &&
+        dest->cols == src1->cols && src1->cols == src2->cols, MATRIX_RESULT_INVALID);
 
-    for (j = 0; j < dest->n; j++) {
-        for (i = 0; i < dest->m; i++) {
-            dest->mat[j][i] = src1->mat[j][i] + src2->mat[j][i];
+		double *dest_ptr = dest->mem;
+		double *src1_ptr = src1->mem;
+		double *src2_ptr = src2->mem;
+
+    for (j = 0; j < dest->cols; j++) {
+        for (i = 0; i < dest->rows; i++) {
+						dest_ptr[i] = src1_ptr[i] + src2_ptr[i];
         }
+				dest_ptr += dest->stride;
+				src1_ptr += src1->stride;
+				src2_ptr += src2->stride;
     }
 
     return MATRIX_RESULT_OK;
@@ -210,12 +285,17 @@ matrix2d_add_in_place (matrix2d *dest, const matrix2d *src)
 {
     int i, j;
 
-    MATRIX_CHECK(dest->m == src->m && dest->n && src->n, MATRIX_RESULT_INVALID);
+    MATRIX_CHECK(dest->rows == src->rows && dest->cols && src->cols, MATRIX_RESULT_INVALID);
 
-    for (j = 0; j < dest->n; j++) {
-      for (i = 0; i < dest->m; i++) {
-            dest->mat[j][i] += src->mat[j][i];
-        }
+		double *dest_ptr = dest->mem;
+		double *src_ptr = src->mem;
+
+    for (j = 0; j < dest->cols; j++) {
+      for (i = 0; i < dest->rows; i++) {
+        dest_ptr[i] += src_ptr[i];
+      }
+			dest_ptr += dest->stride;
+			src_ptr += src->stride;
     }
 
     return MATRIX_RESULT_OK;
@@ -224,18 +304,23 @@ matrix2d_add_in_place (matrix2d *dest, const matrix2d *src)
 matrix_result
 matrix2d_subtract (matrix2d *dest, const matrix2d *src1, const matrix2d *src2)
 {
-    int i;
-    double *d, *s1, *s2;
+    int i, j;
 
-    MATRIX_CHECK(dest->m == src1->m && src1->m == src2->m &&
-        dest->n == src1->n && src1->n && src2->n, MATRIX_RESULT_INVALID);
+    MATRIX_CHECK(dest->rows == src1->rows && src1->rows == src2->rows &&
+        dest->cols == src1->cols && src1->cols && src2->cols, MATRIX_RESULT_INVALID);
 
-    d = dest->mat1D;
-    s1 = src1->mat1D;
-    s2 = src2->mat1D;
+		double *dest_ptr = dest->mem;
+		double *src1_ptr = src1->mem;
+		double *src2_ptr = src2->mem;
 
-    for (i = 0; i < dest->m * dest->n; i++)
-      *d++ = *s1++ - *s2++;
+    for (j = 0; j < dest->cols; j++) {
+        for (i = 0; i < dest->rows; i++) {
+						dest_ptr[i] = src1_ptr[i] - src2_ptr[i];
+        }
+				dest_ptr += dest->stride;
+				src1_ptr += src1->stride;
+				src2_ptr += src2->stride;
+    }
 
     return MATRIX_RESULT_OK;
 }
@@ -243,16 +328,20 @@ matrix2d_subtract (matrix2d *dest, const matrix2d *src1, const matrix2d *src2)
 matrix_result
 matrix2d_subtract_in_place (matrix2d *dest, const matrix2d *src)
 {
-    int i;
-    double *d, *s;
+    int i, j;
 
-    MATRIX_CHECK(dest->n == src->m && dest->n == src->n, MATRIX_RESULT_INVALID);
+    MATRIX_CHECK(dest->cols == src->rows && dest->cols == src->cols, MATRIX_RESULT_INVALID);
 
-    d = dest->mat1D;
-    s = src->mat1D;
+		double *dest_ptr = dest->mem;
+		double *src_ptr = src->mem;
 
-    for (i = 0; i < dest->m * dest->n; i++)
-      *d++ -= *s++;
+    for (j = 0; j < dest->cols; j++) {
+      for (i = 0; i < dest->rows; i++) {
+        dest_ptr[i] -= src_ptr[i];
+      }
+			dest_ptr += dest->stride;
+			src_ptr += src->stride;
+    }
 
     return MATRIX_RESULT_OK;
 }
@@ -263,16 +352,16 @@ matrix2d_multiply (matrix2d *dest, const matrix2d *src1, const matrix2d *src2)
     int i, j, k;
 
     /* Number of columns in src1 must equal number of rows in src2,
-     * and dest must be src1->m x src2->n */
-    MATRIX_CHECK(src1->n == src2->m && dest->m == src1->m && dest->n == src2->n,
+     * and dest must be src1->rows x src2->cols */
+    MATRIX_CHECK(src1->cols == src2->rows && dest->rows == src1->rows && dest->cols == src2->cols,
         MATRIX_RESULT_INVALID);
 
-    for (j = 0; j < dest->n; j++) {
-        for (i = 0; i < dest->m; i++) {
+    for (j = 0; j < dest->cols; j++) {
+        for (i = 0; i < dest->rows; i++) {
             double s = 0.0;
-            for (k = 0; k < src1->n; k++)
-                s += src1->mat[k][i] * src2->mat[j][k];
-            dest->mat[j][i] = s;
+            for (k = 0; k < src1->cols; k++)
+                s += MATRIX2D_XY(src1, i, k) * MATRIX2D_XY(src2, k, j);
+            MATRIX2D_XY(dest, i, j) = s;
         }
     }
 
@@ -285,11 +374,11 @@ matrix2d_multiply_scalar (matrix2d *dest, const matrix2d *src, double s)
     int i, j;
 
     /* Dest and src must be the same dimensions */
-    MATRIX_CHECK(dest->m == src->m && dest->n == src->n, MATRIX_RESULT_INVALID);
+    MATRIX_CHECK(dest->rows == src->rows && dest->cols == src->cols, MATRIX_RESULT_INVALID);
 
-    for (j = 0; j < dest->n; j++) {
-        for (i = 0; i < dest->m; i++) {
-            dest->mat[j][i] = s * src->mat[j][i];
+    for (j = 0; j < dest->cols; j++) {
+        for (i = 0; i < dest->rows; i++) {
+            MATRIX2D_XY(dest, i, j) = s * MATRIX2D_XY(src, i, j);
         }
     }
 
@@ -301,28 +390,29 @@ matrix2d_cholesky (matrix2d *dest, const matrix2d *src)
 {
     int i, j, k;
 
-    MATRIX_CHECK(dest->m == dest->n && src->m == src->n && dest->m == src->m, MATRIX_RESULT_INVALID);
+    MATRIX_CHECK(dest->rows == dest->cols && src->rows == src->cols && dest->rows == src->rows, MATRIX_RESULT_INVALID);
 
-    for (i = 0; i < src->m; i++) {
-        for (j = i; j < src->n; j++) {
-            double s = src->mat[j][i];
+    for (i = 0; i < src->rows; i++) {
+        for (j = i; j < src->cols; j++) {
+            double s = MATRIX2D_XY(src, i, j);
             for (k = 0; k < i; k++)
-                s -= dest->mat[k][i]*dest->mat[k][j];
+                s -= MATRIX2D_XY(dest, i, k) * MATRIX2D_XY(dest, j, k);
             if (j == i) {
                 if (s > 0)
-                    dest->mat[j][i] = sqrt(s);
+										MATRIX2D_XY(dest, i, j) = sqrt(s);
                 else
                     return MATRIX_RESULT_FAILED; /* Input was not positive-definite */
             }
-            else
-                dest->mat[i][j] = s / dest->mat[i][i];
+            else {
+								MATRIX2D_XY(dest, j, i) = s / MATRIX2D_XY(dest, i, i);
+						}
         }
     }
 
     /* Clear the upper-right triangle */
-    for (i = 0; i < src->m; i++) {
+    for (i = 0; i < src->rows; i++) {
         for (j = 0; j < i; j++) {
-            dest->mat[i][j] = 0.0;
+						MATRIX2D_XY(dest, j, i) = 0.0;
         }
     }
 
@@ -340,11 +430,11 @@ bool matrix2d_equal (const matrix2d *src1, const matrix2d *src2, const double ep
 {
     int i, j;
 
-    MATRIX_CHECK(src1->m == src2->m && src1->n == src2->n, false);
+    MATRIX_CHECK(src1->rows == src2->rows && src1->cols == src2->cols, false);
 
-    for (j = 0; j < src1->n; j++) {
-        for (i = 0; i < src1->m; i++) {
-            double delta = src1->mat[j][i] - src2->mat[j][i];
+    for (j = 0; j < src1->cols; j++) {
+        for (i = 0; i < src1->rows; i++) {
+            double delta = MATRIX2D_XY(src1, i, j) - MATRIX2D_XY(src2, i, j);
             if (delta < -epsilon || delta > epsilon)
                 return false;
         }
@@ -358,34 +448,34 @@ matrix_result matrix2d_invert (matrix2d *dest, matrix2d *src)
   int i, j, k;
   double s;
 
-  MATRIX_CHECK(dest->m == dest->n && dest->m == src->m && dest->n == src->n, MATRIX_RESULT_INVALID);
+  MATRIX_CHECK(dest->rows == dest->cols && dest->rows == src->rows && dest->cols == src->cols, MATRIX_RESULT_INVALID);
 
   /* Initialise output to the identity matrix */
-  for (j = 0; j < dest->n; j++) {
-    for (i = 0; i < dest->m; i++) {
+  for (j = 0; j < dest->cols; j++) {
+    for (i = 0; i < dest->rows; i++) {
       if (i == j)
-        dest->mat[j][i] = 1.0;
+        MATRIX2D_XY(dest, i, j) = 1.0;
       else
-        dest->mat[j][i] = 0.0;
+        MATRIX2D_XY(dest, i, j) = 0.0;
     }
   }
 
   /* Gauss-Jordan elimination */
-  for (k = 0; k < dest->m; k++) {
-    s = src->mat[k][k];
+  for (k = 0; k < dest->rows; k++) {
+    s = MATRIX2D_XY(src, k, k);
     if (s == 0)
       return MATRIX_RESULT_FAILED; /* Inversion failed */
 
-    for (j = 0; j < dest->n; j++) {
-      src->mat[j][k] /= s;
-      dest->mat[j][k] /= s;
+    for (j = 0; j < dest->cols; j++) {
+      MATRIX2D_XY(src,k,j) /= s;
+      MATRIX2D_XY(dest,k,j) /= s;
     }
 
-    for (i = 0; i < dest->m; i++) {
-      s = src->mat[k][i];
-      for (j = 0; j < dest->n && i != k; j++) {
-        src->mat[j][i]  -= s * src->mat[j][k];
-        dest->mat[j][i] -= s * dest->mat[j][k];
+    for (i = 0; i < dest->rows; i++) {
+      s = MATRIX2D_XY(src,i,k);
+      for (j = 0; j < dest->cols && i != k; j++) {
+        MATRIX2D_XY(src,i,j)  -= s * MATRIX2D_XY(src,k,j);
+        MATRIX2D_XY(dest,i,j) -= s * MATRIX2D_XY(dest,k,j);
       }
     }
   }
@@ -402,22 +492,22 @@ matrix_result matrix2d_multiplyXYXt (matrix2d *dest, const matrix2d *X, const ma
 
   /* Dest and X must be square matrices, with dimensions that match correspondingly
    * to Y */
-  MATRIX_CHECK(Y->n == Y->m && dest->m == dest->n &&
-       dest->n == X->m && X->n == Y->m, MATRIX_RESULT_INVALID);
+  MATRIX_CHECK(Y->cols == Y->rows && dest->rows == dest->cols &&
+       dest->cols == X->rows && X->cols == Y->rows, MATRIX_RESULT_INVALID);
 
-  tmp = matrix2d_alloc(X->m, X->n);
+  tmp = matrix2d_alloc(X->rows, X->cols);
 
   ret = matrix2d_multiply(tmp, X, Y);
   if (ret != MATRIX_RESULT_OK)
     goto out;
 
   /* Multiply tmp by the transpose of X */
-  for (j = 0; j < dest->n; j++) {
-    for (i = 0; i < dest->m; i++) {
+  for (j = 0; j < dest->cols; j++) {
+    for (i = 0; i < dest->rows; i++) {
       double s = 0.0;
-      for (k = 0; k < tmp->n; k++)
-        s += tmp->mat[k][i] * X->mat[k][j];
-      dest->mat[j][i] = s;
+      for (k = 0; k < tmp->cols; k++)
+        s += MATRIX2D_XY(tmp,i,k) * MATRIX2D_XY(X,j,k);
+      MATRIX2D_XY(dest,i,j) = s;
     }
   }
 
@@ -435,15 +525,15 @@ matrix_result matrix2d_condition_symmetry (matrix2d *mat, double epsilon)
     double *m1, *m2;
 
     /* Must be square */
-    MATRIX_CHECK(mat->n == mat->m, MATRIX_RESULT_INVALID);
+    MATRIX_CHECK(mat->cols == mat->rows, MATRIX_RESULT_INVALID);
 
-    for (i = 0; i < mat->m; i++) {
-        mat->mat[i][i] += epsilon;
+    for (i = 0; i < mat->rows; i++) {
+        MATRIX2D_XY(mat,i,i) += epsilon;
 
-        for (j = i+1; j < mat->n; j++) {
+        for (j = i+1; j < mat->cols; j++) {
             double tmp;
-            m1 = &mat->mat[j][i];
-            m2 = &mat->mat[i][j];
+            m1 = &MATRIX2D_XY(mat,j,i);
+            m2 = &MATRIX2D_XY(mat,i,j);
             tmp = (0.5 * *m1 + 0.5 * *m2);
 
             *m1 = *m2 = tmp;

@@ -8,12 +8,14 @@
 #include <stdbool.h>
 
 typedef struct {
-  uint16_t m, n; /* rows, cols */
+  uint16_t rows, cols, stride; /* rows, cols, stride (column stride) */
 
-  /* Array of n column pointers. Data stored in column-major order */
-  double **mat;
-  double *mat1D;
+  /* Block of cols * stride doubles, in column-major order */
+  double *mem;
 } matrix2d;
+/* Accessors for 2D (row x cols) matrices and 1D (rows x 1) column vectors */
+#define MATRIX2D_XY(m,r,c) (m)->mem[(c)*((m)->stride) + (r)]
+#define MATRIX2D_Y(m,r) (m)->mem[(r)]
 
 typedef enum {
   MATRIX_RESULT_OK = 0,
@@ -22,12 +24,16 @@ typedef enum {
 } matrix_result;
 
 /* Init a matrix of M rows x N columns */
-matrix2d *matrix2d_alloc (uint16_t m, uint16_t n);
-matrix2d *matrix2d_alloc0 (uint16_t m, uint16_t n);
-matrix2d *matrix2d_alloc_init (uint16_t m, uint16_t n, const double **init_vals);
-matrix2d *matrix2d_alloc_identity (uint16_t m);
+matrix2d *matrix2d_alloc (uint16_t rows, uint16_t cols);
+matrix2d *matrix2d_alloc0 (uint16_t rows, uint16_t cols);
+matrix2d *matrix2d_alloc_init (uint16_t rows, uint16_t cols, const double **init_vals);
+matrix2d *matrix2d_alloc_identity (uint16_t rows);
 matrix2d *matrix2d_dup (const matrix2d *mat);
 void matrix2d_free (matrix2d *mat);
+
+/* Create a sub-matrix that references memory from the owner and should not be freed */
+matrix_result matrix2d_submatrix_ref(const matrix2d *src, uint16_t x, uint16_t y, uint16_t rows, uint16_t cols, matrix2d *dest);
+matrix_result matrix2d_column_ref(const matrix2d *src, uint16_t col, matrix2d *dest);
 
 matrix_result matrix2d_copy (matrix2d *dest, const matrix2d *src);
 matrix_result matrix2d_extract_row (matrix2d *dest, const matrix2d *src, const uint16_t m);
