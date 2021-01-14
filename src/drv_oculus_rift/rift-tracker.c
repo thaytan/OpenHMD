@@ -439,7 +439,7 @@ void rift_tracked_device_get_view_pose(rift_tracked_device *dev_base, posef *pos
 {
 	rift_tracked_device_priv *dev = (rift_tracked_device_priv *) (dev_base);
 	ohmd_lock_mutex (dev->device_lock);
-	oposef_init(pose, &dev->simple_fusion.world_position, &dev->simple_fusion.orient);
+	rift_kalman_6dof_get_pose_at(&dev->ukf_fusion, dev->device_time_ns, pose);
 	ohmd_unlock_mutex (dev->device_lock);
 }
 
