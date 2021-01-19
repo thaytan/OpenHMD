@@ -73,8 +73,7 @@ struct _GstOhmdRiftSensor {
 
   double angle;
 
-  vec3f pose_pos;
-  quatf pose_orient;
+  posef pose;
 
   led_search_model_t *led_models[3];
   correspondence_search_t *cs;
