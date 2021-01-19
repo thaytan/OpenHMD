@@ -17,6 +17,11 @@ struct leds;
 
 #include <stdio.h>
 
+/* Require at least 1 pixel over this threshold in a blob -
+ * allows for collecting fainter blobs, as long as they have a bright
+ * point somewhere, and helps to eliminate generally faint background noise */
+#define BLOB_THRESHOLD_MIN  0x40
+
 /* Keep enough history frames that the caller can keep hold
  * of a previous blobservation and pass it to the long term
  * tracker while we still have 2 left to ping-pong between */
@@ -40,6 +45,9 @@ struct extent {
 	uint16_t left;
 	uint16_t right;
 	uint32_t area;
+
+	/* Maximum pixel colour detected */
+	uint8_t max_pixel;
 };
 
 struct extent_line {
@@ -161,6 +169,30 @@ static inline void store_blob(struct extent *e, int index, int y, struct blob *b
 	b->prev_led_id = b->led_id = LED_INVALID_ID;
 }
 
+static void extent_to_blobs(blobwatch *bw, blobservation *ob, struct extent *e, int y)
+{
+	const int max_blobs = MAX_BLOBS_PER_FRAME;
+	struct blob *blobs = ob->blobs;
+
+	/* Don't store unless there was at least one "bright enough" pixel in the blob */
+	if (e->max_pixel < BLOB_THRESHOLD_MIN)
+		return;
+
+	/* Don't store 1x1 blobs */
+	if (e->top == y && e->left == e->right)
+		return;
+
+	/* Don't store blobs that are too big to be LEDs sensibly
+	 * (arbitrary 35 pixel cut-off. FIXME: revisit this number) */
+	if (y - e->top > 35 || e->right - e->left > 35)
+		return;
+
+	while (ob->num_blobs < max_blobs) {
+		store_blob(e, ob->num_blobs++, y, blobs, bw->next_blob_id++);
+		break;
+	}
+}
+
 /*
  * Collects contiguous ranges of pixels with values larger than a threshold of
  * THRESHOLD in a given scanline and stores them in extents. Processing stops after
@@ -177,9 +209,7 @@ static void process_scanline(uint8_t *line, blobwatch *bw, int y,
 	struct extent *le_end = prev_el->extents;
 	struct extent *le = prev_el->extents;
 	struct extent *extent = el->extents;
-	struct blob *blobs = ob->blobs;
 	int num_extents = MAX_EXTENTS_PER_LINE;
-	int num_blobs = MAX_BLOBS_PER_FRAME;
 	float center;
 	int x, e = 0;
 
@@ -189,6 +219,7 @@ static void process_scanline(uint8_t *line, blobwatch *bw, int y,
 	for (x = 0; x < bw->width; x++) {
 		int start, end;
 		bool is_new_extent = true;
+		uint8_t max_pixel = 0;
 
 		/* Loop until pixel value exceeds threshold */
 		if (line[x] <= bw->threshold)
@@ -197,8 +228,11 @@ static void process_scanline(uint8_t *line, blobwatch *bw, int y,
 		start = x++;
 
 		/* Loop until pixel value falls below threshold */
-		while (x < bw->width && line[x] > bw->threshold)
+		while (x < bw->width && line[x] > bw->threshold) {
+			if (line[x] > max_pixel)
+				max_pixel = line[x];
 			x++;
+		}
 
 		end = x - 1;
 
@@ -207,18 +241,15 @@ static void process_scanline(uint8_t *line, blobwatch *bw, int y,
 		extent->start = start;
 		extent->end = end;
 		extent->area = x - start;
+		extent->max_pixel = max_pixel;
 
-		if (prev_el && ob->num_blobs < num_blobs) {
+		if (prev_el) {
 			/*
 			 * Previous extents without significant overlap are the
 			 * bottom of finished blobs. Store them into an array.
 			 */
-			while (le < le_end && le->end < center &&
-			       ob->num_blobs < num_blobs) {
-				/* Don't store 1x1 blobs */
-				if (le->top != y || le->left != le->right)
-					store_blob(le, ob->num_blobs++, y, blobs, bw->next_blob_id++);
-
+			while (le < le_end && le->end < center) {
+				extent_to_blobs(bw, ob, le, y);
 				le++;
 			}
 
@@ -231,6 +262,8 @@ static void process_scanline(uint8_t *line, blobwatch *bw, int y,
 				extent->top = le->top;
 				extent->left = min(extent->start, le->left);
 				extent->right = max(extent->end, le->right);
+				if (le->max_pixel > extent->max_pixel)
+					extent->max_pixel = le->max_pixel;
 				extent->area += le->area;
 				is_new_extent = false;
 				le++;
@@ -257,10 +290,8 @@ static void process_scanline(uint8_t *line, blobwatch *bw, int y,
 		 * If there are no more extents on this line, all remaining
 		 * extents in the previous line are finished blobs. Store them.
 		 */
-		while (le < le_end && ob->num_blobs < num_blobs) {
-			/* Don't store 1x1 blobs */
-			if (le->top != y || le->left != le->right)
-				store_blob(le, ob->num_blobs++, y, blobs, bw->next_blob_id++);
+		while (le < le_end) {
+			extent_to_blobs(bw, ob, le, y);
 			le++;
 		}
 	}
@@ -271,12 +302,7 @@ static void process_scanline(uint8_t *line, blobwatch *bw, int y,
 		/* All extents of the last line are finished blobs, too. */
 		for (extent = el->extents; extent < el->extents + el->num;
 		     extent++) {
-			if (ob->num_blobs >= num_blobs)
-				break;
-
-			/* Don't store 1x1 blobs */
-			if (le->top != y || le->left != le->right)
-				store_blob(extent, ob->num_blobs++, y, blobs, bw->next_blob_id++);
+			extent_to_blobs(bw, ob, extent, y);
 		}
 	}
 }
