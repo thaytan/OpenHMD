@@ -145,20 +145,57 @@ void blobwatch_free (blobwatch *bw)
 	free (bw);
 }
 
+static void
+compute_greysum(blobwatch *bw, uint8_t *frame, struct extent *e, int end_y, float *led_x, float *led_y)
+{
+	const uint16_t width = e->right - e->left + 1;
+	const uint16_t height = end_y - e->top + 1;
+	uint8_t *pixels;
+	uint16_t x, y;
+	uint32_t x_pos, y_pos;
+	uint32_t greysum_total = 0, greysum_x = 0, greysum_y = 0;
+
+	/* Point to top left pixel of the extent */
+	pixels = frame + bw->width * e->top + e->left;
+
+	for (y = 0; y < height; y++) {
+		/* Use 1...frame_width/height as coords, otherwise the first column never contributes anything */
+		y_pos = e->top + y + 1;
+		x_pos = e->left + 1;
+
+		for (x = 0; x < width; x++) {
+			uint32_t pix = pixels[x];
+
+			greysum_total += pix;
+			greysum_x += x_pos * pix;
+			greysum_y += y_pos * pix;
+			x_pos++;
+		}
+
+		pixels += bw->width;
+	}
+
+	*led_x = (float) (greysum_x) / greysum_total - 1;
+	*led_y = (float) (greysum_y) / greysum_total - 1;
+}
+
 /*
  * Stores blob information collected in the last extent e into the blob
  * array b at the given index.
  */
-static inline void store_blob(struct extent *e, int index, int y, struct blob *b, uint32_t blob_id)
+static inline void store_blob(struct extent *e, int index, int end_y, struct blob *b, uint32_t blob_id, float led_x, float led_y)
 {
 	b += index;
 	b->blob_id = blob_id;
-	b->x = (e->left + e->right) / 2.0;
-	b->y = (e->top + y) / 2.0;
+	b->x = led_x;
+	b->y = led_y;
 	b->vx = 0;
 	b->vy = 0;
+
+	b->left = e->left;
+	b->top = e->top;
 	b->width = e->right - e->left + 1;
-	b->height = y - e->top + 1;
+	b->height = end_y - e->top + 1;
 	b->area = e->area;
 	b->age = 0;
 	b->track_index = -1;
@@ -169,7 +206,7 @@ static inline void store_blob(struct extent *e, int index, int y, struct blob *b
 	b->prev_led_id = b->led_id = LED_INVALID_ID;
 }
 
-static void extent_to_blobs(blobwatch *bw, blobservation *ob, struct extent *e, int y)
+static void extent_to_blobs(blobwatch *bw, blobservation *ob, struct extent *e, int y, uint8_t *frame)
 {
 	const int max_blobs = MAX_BLOBS_PER_FRAME;
 	struct blob *blobs = ob->blobs;
@@ -187,8 +224,14 @@ static void extent_to_blobs(blobwatch *bw, blobservation *ob, struct extent *e, 
 	if (y - e->top > 35 || e->right - e->left > 35)
 		return;
 
+	/* In the future we could generate multiple blobs from one extent if we detect
+	 * it as multiple LEDs */
 	while (ob->num_blobs < max_blobs) {
-		store_blob(e, ob->num_blobs++, y, blobs, bw->next_blob_id++);
+		float led_x, led_y;
+
+		compute_greysum(bw, frame, e, y, &led_x, &led_y);
+
+		store_blob(e, ob->num_blobs++, y, blobs, bw->next_blob_id++, led_x, led_y);
 		break;
 	}
 }
@@ -202,7 +245,7 @@ static void extent_to_blobs(blobwatch *bw, blobservation *ob, struct extent *e, 
  *
  * Returns the number of extents found.
  */
-static void process_scanline(uint8_t *line, blobwatch *bw, int y,
+static void process_scanline(uint8_t *frame, uint8_t *line, blobwatch *bw, int y,
 			    struct extent_line *el, struct extent_line *prev_el,
 			    blobservation *ob)
 {
@@ -249,7 +292,7 @@ static void process_scanline(uint8_t *line, blobwatch *bw, int y,
 			 * bottom of finished blobs. Store them into an array.
 			 */
 			while (le < le_end && le->end < center) {
-				extent_to_blobs(bw, ob, le, y);
+				extent_to_blobs(bw, ob, le, y, frame);
 				le++;
 			}
 
@@ -291,7 +334,7 @@ static void process_scanline(uint8_t *line, blobwatch *bw, int y,
 		 * extents in the previous line are finished blobs. Store them.
 		 */
 		while (le < le_end) {
-			extent_to_blobs(bw, ob, le, y);
+			extent_to_blobs(bw, ob, le, y, frame);
 			le++;
 		}
 	}
@@ -302,7 +345,7 @@ static void process_scanline(uint8_t *line, blobwatch *bw, int y,
 		/* All extents of the last line are finished blobs, too. */
 		for (extent = el->extents; extent < el->extents + el->num;
 		     extent++) {
-			extent_to_blobs(bw, ob, extent, y);
+			extent_to_blobs(bw, ob, extent, y, frame);
 		}
 	}
 }
@@ -311,20 +354,21 @@ static void process_scanline(uint8_t *line, blobwatch *bw, int y,
  * Processes extents from all scanlines in a frame and stores the
  * resulting blobs in ob->blobs.
  */
-static void process_frame(uint8_t *lines, blobwatch *bw, blobservation *ob)
+static void process_frame(uint8_t *frame, blobwatch *bw, blobservation *ob)
 {
 	struct extent_line el1;
 	struct extent_line el2;
-	int y = 2;
+	int y = 2; /* Skip first 2 lines of frame data */
+	uint8_t *line = frame;
 
 	ob->num_blobs = 0;
 
-	lines += bw->width * y;
-	process_scanline(lines, bw, y++, &el1, NULL, ob);
+	line += bw->width * y;
+	process_scanline(frame, line, bw, y++, &el1, NULL, ob);
 
 	for (; y < bw->height; y++) {
-		lines += bw->width;
-		process_scanline(lines, bw, y, y&1? &el2 : &el1, y&1? &el1 : &el2, ob);
+		line += bw->width;
+		process_scanline(frame, line, bw, y, y&1? &el2 : &el1, y&1? &el1 : &el2, ob);
 	}
 }
 

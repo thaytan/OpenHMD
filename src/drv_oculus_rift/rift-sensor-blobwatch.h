@@ -32,12 +32,18 @@ struct blob {
 	 */
 	uint32_t blob_id;
 
-	/* center of bounding box */
+	/* Weighted greysum centre of blob */
 	float x;
 	float y;
+
+	/* Motion vector from previous blob */
 	float vx;
 	float vy;
+
 	/* bounding box */
+	uint16_t top;
+	uint16_t left;
+
 	uint16_t width;
 	uint16_t height;
 	uint32_t area;
