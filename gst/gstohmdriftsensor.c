@@ -940,7 +940,7 @@ gst_ohmd_rift_sensor_transform_frame (GstVideoFilter * base,
 
         /* Draw a dot at the weighted center */
         draw_rgb_marker (out_frame->data[0], width, out_stride, height,
-            b->x, b->y, 0, 0,
+            round(b->x), round(b->y), 0, 0,
             b->led_id == LED_INVALID_ID ? 0xFF00FF : 0x00FFFF);
       }
 
