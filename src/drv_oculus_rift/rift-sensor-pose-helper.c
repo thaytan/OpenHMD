@@ -30,11 +30,12 @@ static vec3f *find_best_matching_led (vec3f *led_points, int num_leds, struct bl
 		vec3f *led = led_points + i;
 		double dx = abs(led->x - blob->x);
 		double dy = abs(led->y - blob->y);
+		double sqerror = dx*dx + dy*dy;
 
-		/* Check if the LED falls within the bounding box */
-		if (blob->width > 2 * (dx-led_radius) && blob->height > 2 * (dy-led_radius)) {
-			double sqerror = dx*dx + dy*dy;
-			if (best_led == NULL || sqerror < best_sqerror) {
+		/* Check if the LED falls within the bounding box
+		 * has smaller error distance, or is closer to the camera (smaller Z) */
+		if (sqerror < led_radius * led_radius) {
+			if (best_led == NULL || sqerror < best_sqerror || best_led->z > led->z) {
 				best_led = led;
 				best_sqerror = sqerror;
 			}
@@ -205,7 +206,7 @@ void rift_mark_matching_blobs (posef *pose,
 	    pose, led_out_points);
 
 	/* FIXME: Estimate LED size based on distance */
-	led_radius = 5;
+	led_radius = 10;
 
 	/* Calculate the bounding box and visible LEDs */
 	for (i = 0; i < num_leds; i++) {
@@ -224,7 +225,9 @@ void rift_mark_matching_blobs (posef *pose,
 		oquatf_get_rotated(&pose->orient, &leds[i].dir, &normal);
 		facing_dot = ovec3f_get_dot (&position, &normal);
 
-		if (facing_dot < -0.25) {
+		LOGV("LED %d @ %f,%f dot %f\n", i, p->x, p->y, facing_dot);
+
+		if (facing_dot < 0.65) {
 			visible_led_points[num_visible_leds] = *p;
 			visible_leds[num_visible_leds] = leds + i;
 			num_visible_leds++;
@@ -268,6 +271,9 @@ void rift_mark_matching_blobs (posef *pose,
 				b->led_id = LED_MAKE_ID (device_id, led_index);
 				if (b->led_id != b->prev_led_id)
 					LOGV("Marking LED %d/%d at %f,%f now %d (was %d)\n", device_id, led_index, b->x, b->y, b->led_id, b->prev_led_id);
+			}
+			else {
+					LOGV("No LED match %f,%f\n", b->x, b->y);
 			}
 		}
 	}
