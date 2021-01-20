@@ -28,9 +28,9 @@ draw_rgb_marker (uint8_t * pixels, int width, int stride, int height,
 {
   int x, y;
   int min_x = MAX (0, x_pos - mark_width / 2);
-  int max_x = MIN (width, x_pos + mark_width / 2);
+  int max_x = MIN (width, x_pos + mark_width / 2 + 1.5);
   int min_y = MAX (0, y_pos - mark_height / 2);
-  int max_y = MIN (height, y_pos + mark_height / 2);
+  int max_y = MIN (height, y_pos + mark_height / 2 + 1.5);
 
   if (y_pos < 0 || y_pos >= height)
     return;
@@ -202,8 +202,8 @@ void rift_debug_draw_frame (uint8_t *pixels, struct blobservation* bwobs,
 			struct blob *b = bwobs->blobs + index;
 			int start_x, start_y, w, h;
 
-			start_x = b->x - b->width / 2.0;
-			start_y = b->y - b->height / 2.0;
+			start_x = b->left;
+			start_y = b->top;
 			w = b->width;
 			h = b->height;
 			clamp_rect (&start_x, &start_y, &w, &h, width, height);
@@ -230,6 +230,15 @@ void rift_debug_draw_frame (uint8_t *pixels, struct blobservation* bwobs,
 
 				colour_rgb_rect (pixels + 3*width, width, out_stride, height, start_x,
 					start_y, b->width, b->height, colours[d]);
+
+				/* Draw a dot at the weighted center */
+				draw_rgb_marker (pixels + 3*width, width, out_stride, height,
+						round(b->x), round(b->y), 0, 0, colours[d]);
+			}
+			else {
+				/* Draw a dot at the weighted center in purple */
+				draw_rgb_marker (pixels + 3*width, width, out_stride, height,
+						round(b->x), round(b->y), 0, 0, 0xFF00FF);
 			}
 		}
 
