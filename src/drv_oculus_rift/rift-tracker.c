@@ -439,7 +439,7 @@ void rift_tracked_device_get_view_pose(rift_tracked_device *dev_base, posef *pos
 {
 	rift_tracked_device_priv *dev = (rift_tracked_device_priv *) (dev_base);
 	ohmd_lock_mutex (dev->device_lock);
-	rift_kalman_6dof_get_pose_at(&dev->ukf_fusion, dev->device_time_ns, pose);
+	rift_kalman_6dof_get_pose_at(&dev->ukf_fusion, dev->device_time_ns, pose, NULL, NULL);
 	ohmd_unlock_mutex (dev->device_lock);
 }
 
@@ -480,33 +480,26 @@ void rift_tracked_device_model_pose_update(rift_tracked_device *dev_base, uint64
 	ohmd_unlock_mutex (dev->device_lock);
 }
 
-void rift_tracked_device_get_model_pose(rift_tracked_device *dev_base, double ts, posef *pose, float *gravity_error_rad)
+void rift_tracked_device_get_model_pose(rift_tracked_device *dev_base, double ts, posef *pose, vec3f *pos_error, vec3f *rot_error)
 {
 	rift_tracked_device_priv *dev = (rift_tracked_device_priv *) (dev_base);
-	posef tmp;
+	posef global_pose;
+	vec3f global_pos_error, global_rot_error;
 	ohmd_lock_mutex (dev->device_lock);
 
-	rift_kalman_6dof_get_pose_at(&dev->ukf_fusion, dev->device_time_ns, &tmp);
+	rift_kalman_6dof_get_pose_at(&dev->ukf_fusion, dev->device_time_ns, &global_pose, &global_pos_error, &global_rot_error);
 
 	if (dev_base->id == 0) {
 		/* Mirror the pose in XZ to go from view-plane to device axes for the HMD */
-		oposef_mirror_XZ(&tmp);
+		oposef_mirror_XZ(&global_pose);
 	}
 
 	/* Apply any needed global pose change */
-	oposef_apply(&tmp, &dev->fusion_to_model, pose);
-
-	/* FIXME: Return a real value based on orientation covariance, when the filtering can supply that.
-	 * For now, check that there was a recent gravity update and it was small */
-	if (gravity_error_rad) {
-		double time_since_gravity = (ts - dev->simple_fusion.last_gravity_vector_time);
-		if (time_since_gravity > -0.5 && time_since_gravity < 0.5) {
-			*gravity_error_rad = dev->simple_fusion.grav_error_angle;
-		}
-		else {
-			*gravity_error_rad = M_PI;
-		}
-	}
+	oposef_apply(&global_pose, &dev->fusion_to_model, pose);
+	if (pos_error)
+		oquatf_get_rotated(&global_pose.orient, &global_pos_error, pos_error);
+	if (rot_error)
+		oquatf_get_rotated(&global_pose.orient, &global_rot_error, rot_error);
 
 	ohmd_unlock_mutex (dev->device_lock);
 }

@@ -272,14 +272,15 @@ static void tracker_process_blobs_long(rift_sensor_ctx *ctx, rift_sensor_capture
 			continue;
 		}
 
-		/* If the gravity vector error is < 45 degrees, try for an aligned pose from the prior */
-		if (ctx->have_camera_pose && dev_state->gravity_error_rad < M_PI/2.0) {
+		/* If the gravity vector error standard deviation is < 22.5 degrees, try for an aligned pose from the prior,
+		 * within 2 standard deviations */
+		if (ctx->have_camera_pose && dev_state->gravity_error_rad < DEG_TO_RAD(22.5)) {
 			const vec3f up = {{ 0.0, 1.0, 0.0 }};
 			vec3f pose_gravity;
 
 			oquatf_get_rotated(&obj_cam_pose.orient, &up, &pose_gravity);
 			correspondence_search_find_one_pose_aligned (ctx->cs, dev->id, match_all_blobs, &obj_cam_pose,
-					&pose_gravity, dev_state->gravity_error_rad + DEG_TO_RAD(5), &dev_state->score);
+					&pose_gravity, 2 * dev_state->gravity_error_rad, &dev_state->score);
 			LOGI ("Got aligned pose!");
 		} else {
 			correspondence_search_find_one_pose (ctx->cs, dev->id, match_all_blobs, &obj_cam_pose, &dev_state->score);
@@ -490,8 +491,12 @@ static void new_frame_start_cb(struct rift_sensor_uvc_stream *stream, uint64_t s
 	for (d = 0; d < sensor->n_devices; d++) {
 		rift_tracked_device *dev = sensor->devices[d];
 		rift_sensor_device_state *dev_state = next_frame->device_state + d;
+		vec3f rot_error;
 
-		rift_tracked_device_get_model_pose(dev, (double) (start_time) / 1000000000.0, &dev_state->capture_world_pose, &dev_state->gravity_error_rad);
+		rift_tracked_device_get_model_pose(dev, (double) (start_time) / 1000000000.0, &dev_state->capture_world_pose, NULL, &rot_error);
+
+		/* Compute gravity error from XZ error range */
+		dev_state->gravity_error_rad = sqrtf(rot_error.x * rot_error.x + rot_error.z * rot_error.z);
 
 		/* Mark the score as un-evaluated to start */
 		dev_state->score.good_pose_match = false;

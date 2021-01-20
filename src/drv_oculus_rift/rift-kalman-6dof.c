@@ -740,9 +740,10 @@ void rift_kalman_6dof_position_update(rift_kalman_6dof_filter *state, uint64_t t
 	rift_kalman_6dof_update(state, time, m);
 }
 
-void rift_kalman_6dof_get_pose_at(rift_kalman_6dof_filter *state, uint64_t time, posef *pose)
+void rift_kalman_6dof_get_pose_at(rift_kalman_6dof_filter *state, uint64_t time, posef *pose, vec3f *pos_error, vec3f *rot_error)
 {
 	matrix2d *x = state->ukf.x_prior;
+	matrix2d *P = state->ukf.P_prior; /* Covariance */
 
 	/* FIXME: Do prediction using the time? */
 	pose->pos.x = MATRIX2D_Y(x, STATE_POSITION);
@@ -753,5 +754,17 @@ void rift_kalman_6dof_get_pose_at(rift_kalman_6dof_filter *state, uint64_t time,
 	pose->orient.y = MATRIX2D_Y(x, STATE_ORIENTATION+1);
 	pose->orient.z = MATRIX2D_Y(x, STATE_ORIENTATION+2);
 	pose->orient.w = MATRIX2D_Y(x, STATE_ORIENTATION+3);
+
+	if (pos_error) {
+		pos_error->x = sqrtf(MATRIX2D_XY(P, COV_POSITION, COV_POSITION));
+		pos_error->y = sqrtf(MATRIX2D_XY(P, COV_POSITION+1, COV_POSITION+1));
+		pos_error->z = sqrtf(MATRIX2D_XY(P, COV_POSITION+2, COV_POSITION+2));
+	}
+
+	if (rot_error) {
+		rot_error->x = sqrtf(MATRIX2D_XY(P, COV_ORIENTATION, COV_ORIENTATION));
+		rot_error->y = sqrtf(MATRIX2D_XY(P, COV_ORIENTATION+1, COV_ORIENTATION+1));
+		rot_error->z = sqrtf(MATRIX2D_XY(P, COV_ORIENTATION+2, COV_ORIENTATION+2));
+	}
 }
 
