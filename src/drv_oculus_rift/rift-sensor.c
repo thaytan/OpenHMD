@@ -154,6 +154,7 @@ static void update_device_and_blobs (rift_sensor_ctx *ctx, rift_sensor_capture_f
 
 static void tracker_process_blobs_fast(rift_sensor_ctx *ctx, rift_sensor_capture_frame *frame)
 {
+	const rift_tracker_exposure_info *exposure_info = &frame->exposure_info;
 	blobservation* bwobs = frame->bwobs;
 	dmat3 *camera_matrix = &ctx->camera_matrix;
 	double *dist_coeffs = ctx->dist_coeffs;
@@ -163,7 +164,13 @@ static void tracker_process_blobs_fast(rift_sensor_ctx *ctx, rift_sensor_capture
 	for (d = 0; d < frame->n_devices; d++) {
 		rift_tracked_device *dev = ctx->devices[d];
 		rift_sensor_device_state *dev_state = frame->device_state + d;
+		const rift_tracked_device_exposure_info *exp_dev_info = exposure_info->devices + d;
 		posef obj_world_pose, obj_cam_pose;
+
+		if (exp_dev_info->fusion_slot == -1) {
+			LOGV ("Skipping fast analysis of device %d. No fusion slot assigned\n", d);
+			continue;
+		}
 
 		obj_world_pose = dev_state->capture_world_pose;
 
@@ -242,6 +249,7 @@ static void tracker_process_blobs_fast(rift_sensor_ctx *ctx, rift_sensor_capture
 
 static void tracker_process_blobs_long(rift_sensor_ctx *ctx, rift_sensor_capture_frame *frame)
 {
+	const rift_tracker_exposure_info *exposure_info = &frame->exposure_info;
 	blobservation* bwobs = frame->bwobs;
 	int d;
 
@@ -253,8 +261,14 @@ static void tracker_process_blobs_long(rift_sensor_ctx *ctx, rift_sensor_capture
 	for (d = 0; d < frame->n_devices; d++) {
 		rift_tracked_device *dev = ctx->devices[d];
 		rift_sensor_device_state *dev_state = frame->device_state + d;
+		const rift_tracked_device_exposure_info *exp_dev_info = exposure_info->devices + d;
 		posef obj_cam_pose;
 		bool match_all_blobs = (dev->id == 0); /* Let the HMD match whatever it can */
+
+		if (exp_dev_info->fusion_slot == -1) {
+			LOGV ("Skipping long analysis of device %d. No fusion slot assigned\n", d);
+			continue;
+		}
 
 		if (dev_state->score.good_pose_match) {
 			/* We already found this device during fast analysis */
