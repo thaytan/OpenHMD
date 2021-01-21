@@ -27,6 +27,11 @@ typedef struct rift_tracked_device_exposure_info rift_tracked_device_exposure_in
 struct rift_tracked_device_exposure_info {
 	uint64_t device_time_ns; /* Device time this sensor exposure was captured */
 	int fusion_slot; /* Fusion slot assigned to the exposure, or -1 */
+
+	/* World pose and error std dev at exposure time */
+	posef capture_pose;
+	vec3f pos_error;
+	vec3f rot_error;
 };
 
 struct rift_tracker_exposure_info {

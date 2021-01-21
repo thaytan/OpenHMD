@@ -444,7 +444,6 @@ static void new_frame_start_cb(struct rift_sensor_uvc_stream *stream, uint64_t s
 	rift_tracker_exposure_info exposure_info;
 	bool exposure_info_valid;
 	rift_sensor_capture_frame *next_frame;
-	int d;
 
 	exposure_info_valid = rift_tracker_get_exposure_info (sensor->tracker, &exposure_info);
 
@@ -487,21 +486,6 @@ static void new_frame_start_cb(struct rift_sensor_uvc_stream *stream, uint64_t s
 
 	next_frame->exposure_info = exposure_info;
 	next_frame->exposure_info_valid = exposure_info_valid;
-
-	for (d = 0; d < sensor->n_devices; d++) {
-		rift_tracked_device *dev = sensor->devices[d];
-		rift_sensor_device_state *dev_state = next_frame->device_state + d;
-		vec3f rot_error;
-
-		rift_tracked_device_get_model_pose(dev, (double) (start_time) / 1000000000.0, &dev_state->capture_world_pose, NULL, &rot_error);
-
-		/* Compute gravity error from XZ error range */
-		dev_state->gravity_error_rad = sqrtf(rot_error.x * rot_error.x + rot_error.z * rot_error.z);
-
-		/* Mark the score as un-evaluated to start */
-		dev_state->score.good_pose_match = false;
-	}
-	next_frame->n_devices = sensor->n_devices;
 
 	sensor->cur_capture_frame = next_frame;
 	rift_sensor_uvc_stream_set_frame(stream, (rift_sensor_uvc_frame *)next_frame);
@@ -652,7 +636,21 @@ update_device_pose (rift_sensor_ctx *sensor_ctx, rift_tracked_device *dev,
 static void frame_captured_cb(rift_sensor_uvc_stream *stream, rift_sensor_uvc_frame *uvc_frame)
 {
 	rift_sensor_capture_frame *frame = (rift_sensor_capture_frame *)(uvc_frame);
+	const rift_tracker_exposure_info *exposure_info = &frame->exposure_info;
 	rift_sensor_ctx *sensor = stream->user_data;
+	int d;
+
+	/* If there's no exposure info for this frame, we can't use it -
+	 * just release it back to the capture thread */
+	ohmd_lock_mutex (sensor->sensor_lock);
+
+	/* The frame being returned must be the most recent one
+	 * we sent to the UVC capture */
+	assert(sensor->cur_capture_frame == frame);
+	sensor->cur_capture_frame = NULL;
+
+	if (!frame->exposure_info_valid)
+		goto release_frame;
 
 	assert(sensor);
 	uint64_t now = ohmd_monotonic_get(sensor->ohmd_ctx);
@@ -662,14 +660,28 @@ static void frame_captured_cb(rift_sensor_uvc_stream *stream, rift_sensor_uvc_fr
 	LOGD ("Sensor %d captured frame %d exposure counter %u phase %d", sensor->id,
 		frame->id, frame->exposure_info.count, frame->exposure_info.led_pattern_phase);
 
-	ohmd_lock_mutex(sensor->sensor_lock);
-	/* The frame being returned must be the most recent one
-	 * we sent to the UVC capture */
-	assert(sensor->cur_capture_frame == frame);
-	sensor->cur_capture_frame = NULL;
+	for (d = 0; d < exposure_info->n_devices; d++) {
+		rift_sensor_device_state *dev_state = frame->device_state + d;
+		const rift_tracked_device_exposure_info *exp_dev_info = exposure_info->devices + d;
+		const vec3f *rot_error = &exp_dev_info->rot_error;
+
+		dev_state->capture_world_pose = exp_dev_info->capture_pose;
+
+		/* Compute gravity error from XZ error range */
+		dev_state->gravity_error_rad = sqrtf(rot_error->x * rot_error->x + rot_error->z * rot_error->z);
+
+		/* Mark the score as un-evaluated to start */
+		dev_state->score.good_pose_match = false;
+	}
+	frame->n_devices = exposure_info->n_devices;
 
 	PUSH_QUEUE(&sensor->fast_analysis_q, frame);
 	ohmd_cond_broadcast (sensor->new_frame_cond);
+	ohmd_unlock_mutex(sensor->sensor_lock);
+	return;
+
+release_frame:
+	release_capture_frame(sensor, frame);
 	ohmd_unlock_mutex(sensor->sensor_lock);
 }
 
@@ -986,6 +998,9 @@ void rift_sensor_update_exposure (rift_sensor_ctx *sensor, const rift_tracker_ex
 			(double) (exposure_info->local_ts) / 1000000.0,
 			exposure_info->hmd_ts,
 			exposure_info->count, exposure_info->led_pattern_phase);
+
+		frame->exposure_info = *exposure_info;
+		frame->exposure_info_valid = true;
 	}
 	else if (frame->exposure_info.count != exposure_info->count) {
 		/* The exposure info changed mid-frame. Update if this exposure arrived within 5 ms
