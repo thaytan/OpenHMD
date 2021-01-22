@@ -68,6 +68,8 @@ struct rift_tracked_device_priv {
 	uint32_t last_device_ts;
 	uint64_t device_time_ns;
 
+	bool have_pose_observation;
+
 	int num_pending_imu_observations;
 	rift_tracked_device_imu_observation pending_imu_observations[RIFT_MAX_PENDING_IMU_OBSERVATIONS];
 
@@ -118,6 +120,7 @@ rift_tracker_add_device (rift_tracker_ctx *ctx, int device_id, posef *imu_pose, 
 	ofusion_init(&next_dev->simple_fusion);
 	rift_kalman_6dof_init(&next_dev->ukf_fusion, NUM_POSE_DELAY_SLOTS);
 	next_dev->device_time_ns = 0;
+	next_dev->have_pose_observation = false;
 
 	/* Init delay slot bookkeeping */
 	for (s = 0; s < NUM_POSE_DELAY_SLOTS; s++) {
@@ -440,6 +443,10 @@ void rift_tracked_device_get_view_pose(rift_tracked_device *dev_base, posef *pos
 	rift_tracked_device_priv *dev = (rift_tracked_device_priv *) (dev_base);
 	ohmd_lock_mutex (dev->device_lock);
 	rift_kalman_6dof_get_pose_at(&dev->ukf_fusion, dev->device_time_ns, pose, NULL, NULL);
+	if (!dev->have_pose_observation) {
+		/* Don't let the device move until there's been an observation of actual position */
+		pose->pos.x = pose->pos.y = pose->pos.z = 0.0;
+	}
 	ohmd_unlock_mutex (dev->device_lock);
 }
 
@@ -477,6 +484,8 @@ void rift_tracked_device_model_pose_update(rift_tracked_device *dev_base, uint64
 		}
 	}
 
+	dev->have_pose_observation = true;
+
 	ohmd_unlock_mutex (dev->device_lock);
 }
 
@@ -499,6 +508,11 @@ void rift_tracked_device_get_model_pose_locked(rift_tracked_device_priv *dev, do
 		oquatf_get_rotated(&global_pose.orient, &global_pos_error, pos_error);
 	if (rot_error)
 		oquatf_get_rotated(&global_pose.orient, &global_rot_error, rot_error);
+
+	if (!dev->have_pose_observation) {
+		/* Don't let the device move until there's been an observation of actual position */
+		pose->pos.x = pose->pos.y = pose->pos.z = 0.0;
+	}
 }
 
 void rift_tracked_device_get_model_pose(rift_tracked_device *dev_base, double ts, posef *pose, vec3f *pos_error, vec3f *rot_error)
