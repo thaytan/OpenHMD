@@ -577,15 +577,15 @@ void rift_kalman_6dof_init(rift_kalman_6dof_filter *state, int num_delay_slots)
 		MATRIX2D_XY(state->Q_noise, i, i) = 1e-5;
 
 	for (i = COV_POSITION; i < COV_POSITION + 3; i++)
-		MATRIX2D_XY(state->Q_noise, i, i) = 1e-4;
+		MATRIX2D_XY(state->Q_noise, i, i) = 1e-3;
 	for (i = COV_VELOCITY; i < COV_VELOCITY + 3; i++)
-		MATRIX2D_XY(state->Q_noise, i, i) = 2e-4;
+		MATRIX2D_XY(state->Q_noise, i, i) = 0.25;
 
 	/* Accelerometer and Gyro estimates can change sharply -
 	 * even "gentle" motion leads to +/- 5g in a millisecond,
 	 * and gyro can easily change 10dps in a millisecond */
 	for (i = COV_ACCEL; i < COV_ACCEL + 3; i++)
-		MATRIX2D_XY(state->Q_noise, i, i) = sqrt(3) * 10.0 * 10.0;
+		MATRIX2D_XY(state->Q_noise, i, i) = 10.0 * 10.0;
 
 	/* Gyro and accel bias have very small variance, since we
 	 * want them to change slowly */
@@ -626,9 +626,9 @@ void rift_kalman_6dof_init(rift_kalman_6dof_filter *state, int num_delay_slots)
 	 * the orientation. */
 	ukf_measurement_init(&state->m2, 7, 6, &state->ukf, pose_measurement_func, pose_mean_func, pose_residual_func, pose_sum_func);
 	for (int i = 0; i < 3; i++)
-		MATRIX2D_XY(state->m2.R, i, i) = 2.5e-6;
+		MATRIX2D_XY(state->m2.R, i, i) = 0.05 * 0.05; /* 5cm error std dev */
 	for (int i = 3; i < 6; i++)
-		MATRIX2D_XY(state->m2.R, i, i) = 0.25;
+		MATRIX2D_XY(state->m2.R, i, i) = (DEG_TO_RAD(45) * DEG_TO_RAD(45)); /* 45 degrees std dev (don't trust observations much) */
 
 	state->reset_slot = -1;
 	state->pose_slot = -1;
