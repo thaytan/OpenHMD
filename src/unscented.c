@@ -26,6 +26,8 @@ static void print_mat(const char *label, const matrix2d *mat)
 #endif
 }
 
+static bool compute_one_residual(const unscented_transform *ut, const matrix2d *sigmas, const int i, const matrix2d *mean, matrix2d *dest);
+
 /*
  * From the van der Merwe paper
  * Sigma-Point Kalman Filters for Nonlinear Estimation and Sensor-Fusion
@@ -293,18 +295,8 @@ ut_compute_transform (const unscented_transform *ut, const matrix2d *sigmas, mat
 
   for (k = 0; k < ut->N_sigma; k++) {
     /* Compute residual for this sigma point */
-    if (ut->residual_fn == NULL) {
-      for (j = 0; j < ut->N_cov; j++) {
-        MATRIX2D_Y(ut->P_var, j) = MATRIX2D_XY(sigmas, j, k) - MATRIX2D_Y(mean, j);
-      }
-    } else {
-      /* Use external residual func ptr, to compute residuals with
-       * methods other than direct subtraction */
-      if (matrix2d_extract_column(ut->X_tmp, sigmas, k) != MATRIX_RESULT_OK)
-        return false;
-      if (!ut->residual_fn(ut, ut->X_tmp, mean, ut->P_var))
-        return false;
-    }
+    if (!compute_one_residual(ut, sigmas, k, mean, ut->P_var))
+      return false;
 
     /* Add the weighted version to the covariance matrix using
      * outer product */
@@ -337,7 +329,7 @@ ut_compute_transform (const unscented_transform *ut, const matrix2d *sigmas, mat
   return true;
 }
 
-static bool compute_one_residual(unscented_transform *ut, const matrix2d *sigmas, const int i, const matrix2d *mean, matrix2d *dest) {
+static bool compute_one_residual(const unscented_transform *ut, const matrix2d *sigmas, const int i, const matrix2d *mean, matrix2d *dest) {
   int j;
 
   assert(i >= 0 && i < ut->N_sigma);
@@ -349,9 +341,12 @@ static bool compute_one_residual(unscented_transform *ut, const matrix2d *sigmas
   } else {
     /* Use external residual func ptr, to compute residuals with
      * methods other than direct subtraction */
-    if (matrix2d_extract_column(ut->X_tmp, sigmas, i) != MATRIX_RESULT_OK)
+    matrix2d X_tmp;
+
+    if (matrix2d_column_ref(sigmas, i, &X_tmp) != MATRIX_RESULT_OK)
       return false;
-    if (!ut->residual_fn(ut, ut->X_tmp, mean, dest))
+
+    if (!ut->residual_fn(ut, &X_tmp, mean, dest))
       return false;
   }
   return true;
