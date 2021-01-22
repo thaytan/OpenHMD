@@ -59,7 +59,7 @@ struct rift_tracked_device_priv {
 	rift_tracker_pose_delay_slot delay_slots[NUM_POSE_DELAY_SLOTS];
 
 	/* Transform from the fusion pose (which tracks the IMU, oriented to the screens/view)
-	 * to the model the camera will see, which is offset and rotated 180 degrees */
+	 * to the model the camera will see, which is offset and possibly rotated 180 degrees (for the HMD) */
 	posef fusion_to_model;
 
 	/* The model (HMD/controller) pose -> world transform */
