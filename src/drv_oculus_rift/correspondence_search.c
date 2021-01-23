@@ -215,8 +215,12 @@ correspondence_search_project_pose (correspondence_search_t *cs, led_search_mode
 		vec3f pose_gravity;
 
 		oquatf_get_rotated(&pose->orient, &up, &pose_gravity);
-		if (ovec3f_get_angle(&pose_gravity, &mi->gravity_vector) > mi->gravity_tolerance_rad)
+		float pose_angle = ovec3f_get_angle(&pose_gravity, &mi->gravity_vector);
+		if (pose_angle > mi->gravity_tolerance_rad) {
+    			DEBUG ("Failed pose match - orientation was not within tolerance (error %f deg > %f deg)\n",
+        			RAD_TO_DEG(pose_angle), RAD_TO_DEG(mi->gravity_tolerance_rad));
 			return false;
+		}
 	}
 
   rift_pose_metrics score;
@@ -254,7 +258,7 @@ correspondence_search_project_pose (correspondence_search_t *cs, led_search_mode
                  mi->id, pose->orient.x, pose->orient.y, pose->orient.z, pose->orient.w,
                        pose->pos.x, pose->pos.y, pose->pos.z, score.visible_leds, score.reprojection_error, error_per_led);
           DEBUG("model %d matched %u blobs of %u\n", mi->id, score.matched_blobs, score.visible_leds);
-#if DUMP_FULL_DEBUG
+#if DUMP_SCENE
             dump_pose (cs, model, pose, mi);
 #endif
           return true;
