@@ -25,10 +25,14 @@
 #define HYBRID_MOTION_THRESHOLD (3 / 1000.0)
 
 /* IMU biases noise levels */
-#define IMU_GYRO_BIAS_NOISE 1e-7 /* gyro bias (rad/s)^2 */
+#define IMU_GYRO_BIAS_NOISE 1e-17 /* gyro bias (rad/s)^2 */
 #define IMU_GYRO_BIAS_NOISE_INITIAL 1e-3 /* gyro bias (rad/s)^2 */
-#define IMU_ACCEL_BIAS_NOISE 1e-6 /* accelerometer bias (m/s^2)^2 */
+#define IMU_ACCEL_BIAS_NOISE 1e-16 /* accelerometer bias (m/s^2)^2 */
 #define IMU_ACCEL_BIAS_NOISE_INITIAL 0.25 /* accelerometer bias (m/s^2)^2 */
+
+/* Acceleration and Velocity damping factor (1.0 = undamped) */
+#define ACCEL_DAMP 0.9
+#define VEL_DAMP 0.999
 
 const double GRAVITY_MAG = 9.80665;
 /* Maximum sensible acceleration */
@@ -134,10 +138,23 @@ static bool process_func(const ukf_base *ukf, const double dt, const matrix2d *X
 	                        MATRIX2D_Y(X_prior, STATE_ACCEL+1),
 	                        MATRIX2D_Y(X_prior, STATE_ACCEL+2) }};
 
+	vec3d global_vel = {{ MATRIX2D_Y(X_prior, STATE_VELOCITY),
+	                        MATRIX2D_Y(X_prior, STATE_VELOCITY+1),
+	                        MATRIX2D_Y(X_prior, STATE_VELOCITY+2) }};
+
 	/* Clamp accel to the measurable +/- 16g to restrict variance */
 	global_accel.x = OHMD_CLAMP(global_accel.x, -MAX_ACCEL, MAX_ACCEL);
 	global_accel.y = OHMD_CLAMP(global_accel.y, -MAX_ACCEL, MAX_ACCEL);
 	global_accel.z = OHMD_CLAMP(global_accel.z, -MAX_ACCEL, MAX_ACCEL);
+
+	/* Exponentially damped acceleration */
+	global_accel.x *= ACCEL_DAMP;
+	global_accel.y *= ACCEL_DAMP;
+	global_accel.z *= ACCEL_DAMP;
+
+	global_vel.x *= VEL_DAMP;
+	global_vel.y *= VEL_DAMP;
+	global_vel.z *= VEL_DAMP;
 
 #if MOTION_MODEL == 0
 	/* Constant acceleration model */
@@ -155,9 +172,9 @@ static bool process_func(const ukf_base *ukf, const double dt, const matrix2d *X
 	}
 
 	/* Velocity */
-	MATRIX2D_Y(X, STATE_VELOCITY)   += dt * global_accel.x;
-	MATRIX2D_Y(X, STATE_VELOCITY+1) += dt * global_accel.y;
-	MATRIX2D_Y(X, STATE_VELOCITY+2) += dt * global_accel.z;
+	global_vel.x += dt * global_accel.x;
+	global_vel.y += dt * global_accel.y;
+	global_vel.z += dt * global_accel.z;
 #elif MOTION_MODEL == 1
 
 	MATRIX2D_Y(X, STATE_POSITION)   += dt * MATRIX2D_Y(X_prior, STATE_VELOCITY);
@@ -181,9 +198,9 @@ static bool process_func(const ukf_base *ukf, const double dt, const matrix2d *X
 		}
 
 		/* Velocity */
-		MATRIX2D_Y(X, STATE_VELOCITY)   += dt * global_accel.x;
-		MATRIX2D_Y(X, STATE_VELOCITY+1) += dt * global_accel.y;
-		MATRIX2D_Y(X, STATE_VELOCITY+2) += dt * global_accel.z;
+		global_vel.x += dt * global_accel.x;
+		global_vel.y += dt * global_accel.y;
+		global_vel.z += dt * global_accel.z;
 
 	} else {
 		/* Constant Velocity mode */
@@ -199,6 +216,11 @@ static bool process_func(const ukf_base *ukf, const double dt, const matrix2d *X
 	MATRIX2D_Y(X, STATE_ACCEL)   = global_accel.x;
 	MATRIX2D_Y(X, STATE_ACCEL+1) = global_accel.y;
 	MATRIX2D_Y(X, STATE_ACCEL+2) = global_accel.z;
+
+	/* Update velocity */
+	MATRIX2D_Y(X, STATE_VELOCITY)   = global_vel.x;
+	MATRIX2D_Y(X, STATE_VELOCITY+1) = global_vel.y;
+	MATRIX2D_Y(X, STATE_VELOCITY+2) = global_vel.z;
 
 	if (filter_state->reset_slot != -1) {
 		/* One of the lagged slot states needs resetting - assign the current orientation and position */
@@ -583,9 +605,12 @@ void rift_kalman_6dof_init(rift_kalman_6dof_filter *state, int num_delay_slots)
 
 	/* Accelerometer and Gyro estimates can change sharply -
 	 * even "gentle" motion leads to +/- 5g in a millisecond,
-	 * and gyro can easily change 10dps in a millisecond */
+	 * and gyro can easily change 10dps in a millisecond, but that's
+	 * not the common case. Typical variance for small motions is more
+	 * like 0.2 (m/s^2)^2. The value here is an experimentally determined
+	 * mid-ground */
 	for (i = COV_ACCEL; i < COV_ACCEL + 3; i++)
-		MATRIX2D_XY(state->Q_noise, i, i) = 10.0 * 10.0;
+		MATRIX2D_XY(state->Q_noise, i, i) = 1.0;
 
 	/* Gyro and accel bias have very small variance, since we
 	 * want them to change slowly */
