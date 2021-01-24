@@ -437,14 +437,15 @@ static void dump_bin(const char* label, const unsigned char* data, int length)
 static void
 release_capture_frame(rift_sensor_ctx *sensor, rift_sensor_capture_frame *frame)
 {
-	LOGD("Sensor %d Frame %d analysis done after %u ms. Captured %" PRIu64 " USB delivery %u ms thread switch %u ns analysis %ums (%ums blob extraction) %u ms long analysis",
+	LOGD("Sensor %d Frame %d analysis done after %u ms. Captured %" PRIu64 " USB delivery %u ms fast: queued %f ms analysis %u ms (%ums blob extraction) long: queued %f ms analysis %u ms",
 		 sensor->id, frame->id,
 		 (uint32_t) (ohmd_monotonic_get(sensor->ohmd_ctx) - frame->uvc.start_ts) / 1000000,
 		 frame->uvc.start_ts,
 		 (uint32_t) (frame->frame_delivered_ts - frame->uvc.start_ts) / 1000000,
-		 (uint32_t) (frame->image_analysis_start_ts - frame->frame_delivered_ts),
+		 (double) (frame->image_analysis_start_ts - frame->frame_delivered_ts) / 1000000.0,
 		 (uint32_t) (frame->image_analysis_finish_ts - frame->image_analysis_start_ts) / 1000000,
 		 (uint32_t) (frame->blob_extract_finish_ts - frame->image_analysis_start_ts) / 1000000,
+		 (double) (frame->long_analysis_start_ts - frame->image_analysis_finish_ts) / 1000000.0,
 		 (uint32_t) (frame->long_analysis_finish_ts - frame->long_analysis_start_ts) / 1000000);
 
 	if (frame->bwobs) {
@@ -978,13 +979,16 @@ static unsigned int fast_analysis_thread(void *arg)
 					 * then replace it with the new one */
 					rift_sensor_capture_frame *old_frame = REWIND_QUEUE(&sensor->long_analysis_q);
 					if (old_frame) {
+						uint64_t now = ohmd_monotonic_get(sensor->ohmd_ctx);
 						LOGD("Sensor %d reclaimed frame %d from long analysis queue",
 							sensor->id, old_frame->id);
+						old_frame->long_analysis_start_ts = old_frame->long_analysis_finish_ts = now;
 						release_capture_frame(sensor, old_frame);
 					}
 
 					PUSH_QUEUE(&sensor->long_analysis_q, frame);
 				} else {
+					frame->long_analysis_start_ts = frame->long_analysis_finish_ts = frame->image_analysis_finish_ts;
 					release_capture_frame(sensor, frame);
 				}
 			}
