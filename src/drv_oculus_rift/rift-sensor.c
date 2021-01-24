@@ -132,6 +132,9 @@ struct rift_sensor_ctx_s
 	rift_sensor_frame_queue long_analysis_q;
 
 	int shutdown;
+
+	bool long_analysis_busy;
+
 	/* End protected by sensor_lock */
 
 	ohmd_thread* fast_analysis_thread;
@@ -785,6 +788,8 @@ rift_sensor_new(ohmd_context* ohmd_ctx, int id, const char *serial_no,
 
 	sensor_ctx->have_camera_pose = false;
 
+	sensor_ctx->long_analysis_busy = false;
+
 	printf ("Found Rift Sensor %d w/ Serial %s. Connecting to Radio address 0x%02x%02x%02x%02x%02x\n",
 		id, serial_no, radio_id[0], radio_id[1], radio_id[2], radio_id[3], radio_id[4]);
 
@@ -939,6 +944,7 @@ static unsigned int long_analysis_thread(void *arg)
 	while (!ctx->shutdown) {
 			rift_sensor_capture_frame *frame = POP_QUEUE(&ctx->long_analysis_q);
 			if (frame != NULL) {
+				ctx->long_analysis_busy = true;
 				ohmd_unlock_mutex (ctx->sensor_lock);
 
 				frame->long_analysis_start_ts = ohmd_monotonic_get(ctx->ohmd_ctx);
@@ -946,6 +952,7 @@ static unsigned int long_analysis_thread(void *arg)
 				frame->long_analysis_finish_ts = ohmd_monotonic_get(ctx->ohmd_ctx);
 
 				ohmd_lock_mutex (ctx->sensor_lock);
+				ctx->long_analysis_busy = false;
 
 				/* Done with this frame - send it back to the capture thread */
 				release_capture_frame(ctx, frame);
@@ -972,8 +979,10 @@ static unsigned int fast_analysis_thread(void *arg)
 				ohmd_lock_mutex (sensor->sensor_lock);
 
 				/* Done with this frame - either send it back to the capture thread,
-				 * or to the long analysis thread */
-				if (frame->need_long_analysis) {
+				 * or to the long analysis thread (unless the thread is still busy
+				 * processing something else
+				 */
+				if (frame->need_long_analysis && !sensor->long_analysis_busy) {
 					/* If there is an un-fetched frame in the long analysis
 					 * queue, steal it back and return that to the capture thread,
 					 * then replace it with the new one */
