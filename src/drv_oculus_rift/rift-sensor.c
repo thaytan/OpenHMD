@@ -291,7 +291,7 @@ static void tracker_process_blobs_long(rift_sensor_ctx *ctx, rift_sensor_capture
 
 		/* If the gravity vector error standard deviation is small enough, try for an aligned pose from the prior,
 		 * within 1 standard deviation */
-		if (ctx->have_camera_pose && dev_state->gravity_error_rad < DEG_TO_RAD(45)) {
+		if (false && ctx->have_camera_pose && dev_state->gravity_error_rad < DEG_TO_RAD(45)) {
 			const vec3f up = {{ 0.0, 1.0, 0.0 }};
 			vec3f pose_gravity;
 			float pose_tolerance = OHMD_MAX(dev_state->gravity_error_rad, DEG_TO_RAD(5));
