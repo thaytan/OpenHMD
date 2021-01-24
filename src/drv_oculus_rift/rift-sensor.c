@@ -148,9 +148,9 @@ struct rift_sensor_ctx_s
 };
 
 static void update_device_pose (rift_sensor_ctx *sensor_ctx, rift_tracked_device *dev,
-	rift_sensor_capture_frame *frame, rift_sensor_device_state *dev_state);
+	rift_sensor_capture_frame *frame, rift_sensor_frame_device_state *dev_state);
 static void update_device_and_blobs (rift_sensor_ctx *ctx, rift_sensor_capture_frame *frame,
-	rift_tracked_device *dev, rift_sensor_device_state *dev_state, posef *obj_cam_pose);
+	rift_tracked_device *dev, rift_sensor_frame_device_state *dev_state, posef *obj_cam_pose);
 
 static void tracker_process_blobs_fast(rift_sensor_ctx *ctx, rift_sensor_capture_frame *frame)
 {
@@ -163,7 +163,7 @@ static void tracker_process_blobs_fast(rift_sensor_ctx *ctx, rift_sensor_capture
 	/* Only process the devices that were available when this frame was captured */
 	for (d = 0; d < frame->n_devices; d++) {
 		rift_tracked_device *dev = ctx->devices[d];
-		rift_sensor_device_state *dev_state = frame->device_state + d;
+		rift_sensor_frame_device_state *dev_state = frame->capture_state + d;
 		const rift_tracked_device_exposure_info *exp_dev_info = exposure_info->devices + d;
 		posef obj_world_pose, obj_cam_pose;
 
@@ -260,7 +260,7 @@ static void tracker_process_blobs_long(rift_sensor_ctx *ctx, rift_sensor_capture
 	/* Only process the devices that were available when this frame was captured */
 	for (d = 0; d < frame->n_devices; d++) {
 		rift_tracked_device *dev = ctx->devices[d];
-		rift_sensor_device_state *dev_state = frame->device_state + d;
+		rift_sensor_frame_device_state *dev_state = frame->capture_state + d;
 		const rift_tracked_device_exposure_info *exp_dev_info = exposure_info->devices + d;
 		posef obj_cam_pose;
 		bool match_all_blobs = (dev->id == 0); /* Let the HMD match whatever it can */
@@ -510,7 +510,7 @@ static void new_frame_start_cb(struct rift_sensor_uvc_stream *stream, uint64_t s
 
 static void
 update_device_and_blobs (rift_sensor_ctx *ctx, rift_sensor_capture_frame *frame,
-	rift_tracked_device *dev, rift_sensor_device_state *dev_state, posef *obj_cam_pose)
+	rift_tracked_device *dev, rift_sensor_frame_device_state *dev_state, posef *obj_cam_pose)
 {
 	blobservation* bwobs = frame->bwobs;
 	dmat3 *camera_matrix = &ctx->camera_matrix;
@@ -549,7 +549,7 @@ update_device_and_blobs (rift_sensor_ctx *ctx, rift_sensor_capture_frame *frame,
 
 static void
 update_device_pose (rift_sensor_ctx *sensor_ctx, rift_tracked_device *dev,
-	rift_sensor_capture_frame *frame, rift_sensor_device_state *dev_state)
+	rift_sensor_capture_frame *frame, rift_sensor_frame_device_state *dev_state)
 {
 	posef pose = dev_state->final_cam_pose;
 	posef *capture_pose = &dev_state->capture_world_pose;
@@ -677,7 +677,7 @@ static void frame_captured_cb(rift_sensor_uvc_stream *stream, rift_sensor_uvc_fr
 		frame->id, frame->exposure_info.count, frame->exposure_info.led_pattern_phase);
 
 	for (d = 0; d < exposure_info->n_devices; d++) {
-		rift_sensor_device_state *dev_state = frame->device_state + d;
+		rift_sensor_frame_device_state *dev_state = frame->capture_state + d;
 		const rift_tracked_device_exposure_info *exp_dev_info = exposure_info->devices + d;
 		const vec3f *rot_error = &exp_dev_info->rot_error;
 

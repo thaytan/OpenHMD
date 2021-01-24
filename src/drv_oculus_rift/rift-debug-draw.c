@@ -249,12 +249,12 @@ void rift_debug_draw_frame (uint8_t *pixels, struct blobservation* bwobs,
 			int i;
 			posef pose;
 			rift_tracked_device *dev = devs[d];
-			rift_sensor_device_state *dev_state = frame->device_state + d;
+			rift_sensor_frame_device_state *dev_state = frame->capture_state + d;
 
 			assert(dev->leds != NULL);
 
 			/* Draw the capture pose blobs in yellow */
-			oposef_apply_inverse(&frame->device_state[d].capture_world_pose, camera_pose, &pose);
+			oposef_apply_inverse(&frame->capture_state[d].capture_world_pose, camera_pose, &pose);
 
 			rift_project_points (dev->leds->points,
 				dev->leds->num_points, &camera_matrix,

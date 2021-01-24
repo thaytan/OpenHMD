@@ -16,10 +16,10 @@
 #include "rift-sensor-uvc.h"
 
 typedef struct rift_sensor_ctx_s rift_sensor_ctx;
-typedef struct rift_sensor_device_state rift_sensor_device_state;
+typedef struct rift_sensor_frame_device_state rift_sensor_frame_device_state;
 typedef struct rift_sensor_capture_frame rift_sensor_capture_frame;
 
-struct rift_sensor_device_state {
+struct rift_sensor_frame_device_state {
 	posef capture_world_pose;
 	float gravity_error_rad; /* Gravity vector uncertainty in radians 0..M_PI */
 	posef final_cam_pose;
@@ -40,7 +40,7 @@ struct rift_sensor_capture_frame {
 	blobservation* bwobs;
 
 	/* Device poses at capture time */
-	rift_sensor_device_state device_state[RIFT_MAX_TRACKED_DEVICES];
+	rift_sensor_frame_device_state capture_state[RIFT_MAX_TRACKED_DEVICES];
 	uint8_t n_devices;
 
 	/* Timestamp of complete frame arriving from USB */
