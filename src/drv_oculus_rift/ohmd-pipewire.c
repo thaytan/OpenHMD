@@ -222,7 +222,7 @@ ohmd_pw_video_stream_new (const char *stream_id, ohmd_pw_video_format format,
 			spa_format = SPA_VIDEO_FORMAT_RGB;
 			break;
 		default:
-			break;
+			return NULL;
 	}
 
 	params[0] = spa_pod_builder_add_object(&b,
