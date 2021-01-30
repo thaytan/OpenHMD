@@ -152,3 +152,29 @@ void test_oquatf_diff()
 		TAssert(quatf_eq(q, list[i].q3, t));
 	}
 }
+
+void
+test_oquatf_decompose_swing_twist()
+{
+	const vec3f test_axis = {{1.0, 1.0, 0.0 }};
+	quatf test_q;
+
+	oquatf_init_axis(&test_q, &test_axis, DEG_TO_RAD(45));
+
+	quatf test_swing, test_twist;
+	vec3f twist_axis = {{ 0.0, 1.0, 0.0 }};
+
+	oquatf_decompose_swing_twist(&test_q, &twist_axis, &test_swing, &test_twist);
+
+	/* The swing rotation should have no Y component, twist should be only Y axis */
+	TAssert(float_eq(test_swing.y, 0.0, t));
+
+	TAssert(float_eq(test_twist.x, 0.0, t));
+	TAssert(float_eq(test_twist.z, 0.0, t));
+
+	/* Recombination of swing twist should yield the original quat again */
+	quatf out_q;
+
+	oquatf_mult(&test_swing, &test_twist, &out_q);
+	TAssert(quatf_eq(out_q, test_q, t));
+}

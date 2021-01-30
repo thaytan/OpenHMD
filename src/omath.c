@@ -8,6 +8,7 @@
 /* Math Code Implementation */
 
 #include <assert.h>
+#include <float.h>
 #include <string.h>
 #include "openhmdi.h"
 
@@ -99,6 +100,14 @@ void oquatf_init_axis(quatf* me, const vec3f* vec, float angle)
 	me->y = norm.y * sinf(angle / 2.0f);
 	me->z = norm.z * sinf(angle / 2.0f);
 	me->w = cosf(angle / 2.0f);
+}
+
+void oquatf_set(quatf* me, float x, float y, float z, float w)
+{
+	me->x = x;
+	me->y = y;
+	me->z = z;
+	me->w = w;
 }
 
 void oquatf_get_rotated(const quatf* me, const vec3f* vec, vec3f* out_vec)
@@ -247,6 +256,46 @@ void oquatf_get_mat4x4(const quatf* me, const vec3f* point, float mat[4][4])
 	mat[3][3] = 1;
 }
 
+/* Take a rotation quat and decompose it into 2 rotations representing
+ * the rotation (twist) around the axis, and the 'swing' between the
+ * source rotation axis and the target.
+ *
+ * Both `me` and `twist_axis` inputs must be normalised.
+ *
+ * swing * twist gives back the original quat
+ * (e.g. oquatf_mult(&swing, &twist, &orig_q))
+ *
+ * See https://arxiv.org/pdf/1506.05481.pdf
+ */
+void oquatf_decompose_swing_twist(const quatf *me, const vec3f *twist_axis, quatf *swing, quatf *twist)
+{
+       quatf twist_inv;
+       vec3f orig_axis, projection;
+       float dot;
+
+       ovec3f_set(&orig_axis, me->x, me->y, me->z);
+       dot = ovec3f_get_dot(&orig_axis, &orig_axis);
+
+       /* Calculate projection onto the twist axis */
+       dot = ovec3f_get_dot(&orig_axis, twist_axis);
+
+       ovec3f_multiply_scalar (twist_axis, dot, &projection);
+       oquatf_set(twist, projection.x, projection.y, projection.z, me->w);
+
+       if (oquatf_get_dot(twist, twist) < FLT_EPSILON) {
+               /* Singularity - 180 degree rotation and perpendicular
+                * decomp axis */
+               oquatf_set(twist, 0.0, 0.0, 0.0, 1.0);
+       }
+       else {
+               oquatf_normalize_me(twist);
+       }
+
+       twist_inv = *twist;
+       oquatf_inverse(&twist_inv);
+       oquatf_mult(me, &twist_inv, swing);
+       oquatf_normalize_me(swing);
+}
 
 void oposef_init(posef* p, const vec3f *pos, const quatf *orient)
 {

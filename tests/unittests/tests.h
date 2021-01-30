@@ -42,6 +42,7 @@ void test_oquatf_inverse();
 void test_oquatf_diff();
 
 void test_oquatf_get_mat4x4();
+void test_oquatf_decompose_swing_twist();
 
 // Pose tests
 void test_oposef_init();
