@@ -212,10 +212,9 @@ correspondence_search_project_pose (correspondence_search_t *cs, led_search_mode
 
 	/* See if we need to make a gravity vector alignment check */
 	if (expected_match && mi->match_gravity_vector) {
-		const vec3f up = {{ 0.0, 1.0, 0.0 }};
 		quatf pose_gravity_swing, pose_gravity_twist;
 
-		oquatf_decompose_swing_twist(&pose->orient, &up, &pose_gravity_swing, &pose_gravity_twist);
+		oquatf_decompose_swing_twist(&pose->orient, &mi->gravity_vector, &pose_gravity_swing, &pose_gravity_twist);
 
 		float pose_angle = acosf(oquatf_get_dot(&pose_gravity_swing, &mi->gravity_swing));
 		if (pose_angle > mi->gravity_tolerance_rad) {
@@ -731,7 +730,7 @@ correspondence_search_find_one_pose (correspondence_search_t *cs, int model_id, 
 
 bool
 correspondence_search_find_one_pose_aligned (correspondence_search_t *cs, int model_id, bool match_all_blobs, posef *pose,
-	quatf *gravity_swing, float gravity_tolerance_rad, rift_pose_metrics *score)
+	vec3f *gravity_vector, quatf *gravity_swing, float gravity_tolerance_rad, rift_pose_metrics *score)
 {
   int i;
 
@@ -744,6 +743,7 @@ correspondence_search_find_one_pose_aligned (correspondence_search_t *cs, int mo
     mi->match_all_blobs = match_all_blobs;
     mi->match_all_blobs = match_all_blobs;
 		mi->match_gravity_vector = true;
+    mi->gravity_vector = *gravity_vector;
     mi->gravity_swing = *gravity_swing;
     mi->gravity_tolerance_rad = gravity_tolerance_rad;
 
