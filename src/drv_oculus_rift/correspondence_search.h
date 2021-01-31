@@ -45,7 +45,7 @@ struct cs_model_info_s {
     /* Search parameters */
     bool match_all_blobs;
     bool match_gravity_vector;
-    vec3f gravity_vector;
+    quatf gravity_swing;
     float gravity_tolerance_rad;
 };
 
@@ -76,6 +76,6 @@ void correspondence_search_free (correspondence_search_t *cs);
 
 bool correspondence_search_find_one_pose (correspondence_search_t *cs, int model_id, bool match_all_blobs, posef *pose, rift_pose_metrics *score);
 bool correspondence_search_find_one_pose_aligned (correspondence_search_t *cs, int model_id, bool match_all_blobs, posef *pose,
-				vec3f *gravity_vector, float gravity_tolerance_rad, rift_pose_metrics *score);
+				quatf *gravity_swing, float gravity_tolerance_rad, rift_pose_metrics *score);
 bool correspondence_search_have_pose (correspondence_search_t *cs, int model_id, posef *pose, rift_pose_metrics *score);
 #endif

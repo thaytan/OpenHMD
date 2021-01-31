@@ -206,19 +206,21 @@ correspondence_search_project_pose (correspondence_search_t *cs, led_search_mode
   /* Increment stats */
   cs->num_pose_checks++;
 
-  if (pose->pos.z < 0.05 || pose->pos.z > 15) /* Invalid position, out of range */
+  if (pose->pos.z < 0.05 || pose->pos.z > 15) { /* Invalid position, out of range */
     return false;
+  }
 
 	/* See if we need to make a gravity vector alignment check */
-	if (mi->match_gravity_vector) {
+	if (expected_match && mi->match_gravity_vector) {
 		const vec3f up = {{ 0.0, 1.0, 0.0 }};
-		vec3f pose_gravity;
+		quatf pose_gravity_swing, pose_gravity_twist;
 
-		oquatf_get_rotated(&pose->orient, &up, &pose_gravity);
-		float pose_angle = ovec3f_get_angle(&pose_gravity, &mi->gravity_vector);
+		oquatf_decompose_swing_twist(&pose->orient, &up, &pose_gravity_swing, &pose_gravity_twist);
+
+		float pose_angle = acosf(oquatf_get_dot(&pose_gravity_swing, &mi->gravity_swing));
 		if (pose_angle > mi->gravity_tolerance_rad) {
-    			DEBUG ("Failed pose match - orientation was not within tolerance (error %f deg > %f deg)\n",
-        			RAD_TO_DEG(pose_angle), RAD_TO_DEG(mi->gravity_tolerance_rad));
+			DEBUG("Failed pose match - orientation was not within tolerance (error %f deg > %f deg)\n",
+			    RAD_TO_DEG(pose_angle), RAD_TO_DEG(mi->gravity_tolerance_rad));
 			return false;
 		}
 	}
@@ -243,7 +245,7 @@ correspondence_search_project_pose (correspondence_search_t *cs, led_search_mode
 
       if (mi->best_score.matched_blobs < score.matched_blobs && (error_per_led < best_error_per_led))
           is_new_best = true; /* prefer more matched blobs with tighter error/LED  */
-      else if (mi->best_score.matched_blobs+1 < score.matched_blobs && (error_per_led < best_error_per_led + 2))
+      else if (mi->best_score.matched_blobs+1 < score.matched_blobs && (error_per_led < best_error_per_led * 1.2))
           is_new_best = true; /* prefer at least 2 more matched blobs with slightly worse error/LED  */
       else if (mi->best_score.matched_blobs == score.matched_blobs &&
               mi->best_score.reprojection_error > score.reprojection_error)
@@ -409,7 +411,7 @@ check_led_against_model_subset (correspondence_search_t *cs, cs_model_info_t *mi
             checkpos.x, checkpos.y, checkpos.z, l);
         continue; /* FIXME: Figure out why this happened */
       }
-      assert (l < 0.0025);
+      assert (l <= 0.0025);
 
       /* check against the 4th point to check the proposed P3P solution */
       oquatf_get_rotated (&pose.orient, xcheck, &checkpos);
@@ -626,7 +628,7 @@ search_pose_for_model (correspondence_search_t *cs, cs_model_info_t *mi)
                 mi->best_pose.pos.x, mi->best_pose.pos.y, mi->best_pose.pos.z);
           return true;
         }
-        printf ("Pose from %u correspondences for model %u did not yield good pose\n", already_known_blobs, mi->id);
+        DEBUG("Pose from %u correspondences for model %u did not yield good pose from %d matches\n", already_known_blobs, mi->id, num_matched_leds);
     }
     else {
       printf ("Could not get pose from %u correspondences for model %u\n", already_known_blobs, mi->id);
@@ -729,7 +731,7 @@ correspondence_search_find_one_pose (correspondence_search_t *cs, int model_id, 
 
 bool
 correspondence_search_find_one_pose_aligned (correspondence_search_t *cs, int model_id, bool match_all_blobs, posef *pose,
-	vec3f *gravity_vector, float gravity_tolerance_rad, rift_pose_metrics *score)
+	quatf *gravity_swing, float gravity_tolerance_rad, rift_pose_metrics *score)
 {
   int i;
 
@@ -742,7 +744,7 @@ correspondence_search_find_one_pose_aligned (correspondence_search_t *cs, int mo
     mi->match_all_blobs = match_all_blobs;
     mi->match_all_blobs = match_all_blobs;
 		mi->match_gravity_vector = true;
-    mi->gravity_vector = *gravity_vector;
+    mi->gravity_swing = *gravity_swing;
     mi->gravity_tolerance_rad = gravity_tolerance_rad;
 
     if (search_pose_for_model (cs, mi) && mi->good_pose_match) {
