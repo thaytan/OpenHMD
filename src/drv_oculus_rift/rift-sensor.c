@@ -200,7 +200,8 @@ static void tracker_process_blobs_fast(rift_sensor_ctx *ctx, rift_sensor_capture
 
 		dev_state->final_cam_pose = obj_cam_pose;
 
-		rift_evaluate_pose (&dev_state->score, &obj_cam_pose,
+		rift_evaluate_pose_with_prior(&dev_state->score, &obj_cam_pose,
+			&obj_cam_pose, &exp_dev_info->pos_error, &exp_dev_info->rot_error,
 			frame->bwobs->blobs, frame->bwobs->num_blobs,
 			dev->id, dev->leds->points, dev->leds->num_points,
 			&ctx->camera_matrix, ctx->dist_coeffs, ctx->dist_fisheye, NULL);
@@ -220,12 +221,13 @@ static void tracker_process_blobs_fast(rift_sensor_ctx *ctx, rift_sensor_capture
 				}
 			}
 
-			if (num_blobs > 4) {
+			if (num_blobs > 3) {
 				estimate_initial_pose (bwobs->blobs, bwobs->num_blobs,
 					dev->id, dev->leds->points, dev->leds->num_points, camera_matrix,
 					dist_coeffs, ctx->is_cv1,
 					&obj_cam_pose, NULL, NULL, true);
-				rift_evaluate_pose (&dev_state->score, &obj_cam_pose,
+				rift_evaluate_pose_with_prior(&dev_state->score, &obj_cam_pose,
+					&dev_state->final_cam_pose, &exp_dev_info->pos_error, &exp_dev_info->rot_error,
 					bwobs->blobs, bwobs->num_blobs,
 					dev->id, dev->leds->points, dev->leds->num_points,
 					&ctx->camera_matrix, ctx->dist_coeffs, ctx->dist_fisheye, NULL);
