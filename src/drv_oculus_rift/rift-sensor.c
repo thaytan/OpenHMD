@@ -609,17 +609,14 @@ update_device_pose (rift_sensor_ctx *sensor_ctx, rift_tracked_device *dev,
 				pose.pos.x, pose.pos.y, pose.pos.z);
 #endif
 		}
-		/* FIXME: Arbitrary 5 degree threshold for gravity vector as a random magic number */
-		else if (dev->id == 0 && oquatf_get_length (&capture_pose->orient) > 0.9 && dev_state->gravity_error_rad < RAD_TO_DEG(5.0)) {
+		/* Arbitrary 2 degree threshold for gravity vector as a random magic number */
+		else if (dev->id == 0 && oquatf_get_length (&capture_pose->orient) > 0.9 && dev_state->gravity_error_rad < RAD_TO_DEG(2.0)) {
 			/* No camera pose yet. If this is the HMD, we had an IMU pose at capture time,
 			 * and the fusion has a good gravity vector from the IMU, use it to
 			 * initialise the camera (world->camera) pose using the current headset pose.
 			 * Calculate the xform from camera->world by applying
 			 * the observed pose (object->camera), inverted (so camera->object) to our found
 			 * fusion pose (object->world) to yield camera->world xform
-			 *
-			 * FIXME: Store the gravity vector in the fusion and record it with the capture too
-			 * so we only do this calculation if the IMU had acquired a gravity vector
 			 */
 			posef camera_object_pose = pose;
 			oposef_inverse(&camera_object_pose);
