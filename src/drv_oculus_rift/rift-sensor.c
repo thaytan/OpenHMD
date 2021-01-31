@@ -302,7 +302,9 @@ static void tracker_process_blobs_long(rift_sensor_ctx *ctx, rift_sensor_capture
 		/* If the gravity vector error standard deviation is small enough, try for an aligned pose from the prior,
 		 * within 1 standard deviation */
 		if (ctx->have_camera_pose && dev_state->gravity_error_rad < DEG_TO_RAD(45)) {
+#if LOGLEVEL == 0
 			quatf ref_orient = obj_cam_pose.orient;
+#endif
 			quatf pose_gravity_swing, pose_gravity_twist;
 			float pose_tolerance = OHMD_MAX(dev_state->gravity_error_rad, DEG_TO_RAD(5));
 
