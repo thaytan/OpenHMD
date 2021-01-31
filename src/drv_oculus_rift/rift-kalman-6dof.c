@@ -610,7 +610,7 @@ void rift_kalman_6dof_init(rift_kalman_6dof_filter *state, int num_delay_slots)
 	 * like 0.2 (m/s^2)^2. The value here is an experimentally determined
 	 * mid-ground */
 	for (i = COV_ACCEL; i < COV_ACCEL + 3; i++)
-		MATRIX2D_XY(state->Q_noise, i, i) = 1.0;
+		MATRIX2D_XY(state->Q_noise, i, i) = 20.0;
 
 	/* Gyro and accel bias have very small variance, since we
 	 * want them to change slowly */
