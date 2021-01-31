@@ -56,6 +56,7 @@ check_pose_prior(posef *pose, posef *pose_prior, const vec3f *pos_variance, cons
 
 	ovec3f_subtract(&pose->pos, &pose_prior->pos, &pos_diff);
 	oquatf_diff(&pose->orient, &pose_prior->orient, &orient_diff);
+	oquatf_normalize_me(&orient_diff);
 	oquatf_to_rotation(&orient_diff, &orient_err);
 
 	/* Check each component of position and rotation are within the passed variance */
@@ -185,9 +186,11 @@ void rift_evaluate_pose_with_prior (rift_pose_metrics *score, posef *pose,
 			bool have_close_prior = check_pose_prior(pose, pose_prior, pos_variance, rot_variance);
 
 			if (have_close_prior && num_matched_blobs >= 2) {
+#if 0
 				printf("Got good prior match within pos (%f, %f, %f) rot (%f, %f, %f)\n",
 						pos_variance->x, pos_variance->y, pos_variance->z,
 						rot_variance->x, rot_variance->y, rot_variance->z);
+#endif
 				good_pose_match = true;
 			}
     }
