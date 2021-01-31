@@ -122,6 +122,58 @@ void oquatf_get_rotated(const quatf* me, const vec3f* vec, vec3f* out_vec)
 	out_vec->z = me->w * q.z + me->z * q.w + me->x * q.y - me->y * q.x;
 }
 
+/* Map a rotation parameterisation to a quaternion */
+void oquatf_from_rotation(quatf *me, const vec3f *rot)
+{
+  float theta = ovec3f_get_length(rot);
+  float c_t = cosf(theta / 2.0f);
+  float sinc_t;
+
+  /* magic number for numerical stability */
+  if (theta > 1e-10) {
+    sinc_t = sinf(theta / 2.0f) / theta;
+  }
+  else {
+    /* Use Taylor series expansion, as suggested by Grassia -
+     * "Practical Parameterization of Rotations Using the Exponential Map"
+     */
+    sinc_t = 0.5 + theta * theta / 48.0f;
+  }
+
+	me->x = rot->x * sinc_t;
+	me->y = rot->y * sinc_t;
+	me->z = rot->z * sinc_t;
+	me->w = c_t;
+
+	oquatf_normalize_me(me);
+}
+
+/* Map a quaternion into rotation parameterisation */
+void oquatf_to_rotation(const quatf *me, vec3f *rot)
+{
+  float theta;
+
+  if (me->w < 0)
+    theta = -2*acos(-me->w);
+  else
+    theta = 2*acos(me->w);
+
+  vec3f v = {{ me->x, me->y, me->z }};
+  float v_len = ovec3f_get_length(&v);
+
+  if (v_len > 1e-10) {
+    ovec3f_multiply_scalar (&v, theta / v_len, rot);
+  }
+  else {
+    /* quaternion is approximately the identity rotation */
+    ovec3f_multiply_scalar (&v, 2.0, rot);
+  }
+
+  assert(!isnan(rot->x));
+  assert(!isnan(rot->y));
+  assert(!isnan(rot->z));
+}
+
 void oquatf_mult(const quatf* me, const quatf* q, quatf* out_q)
 {
 	assert (out_q != me);
