@@ -47,7 +47,30 @@ static vec3f *find_best_matching_led (vec3f *led_points, int num_leds, struct bl
 	return best_led;
 }
 
-void rift_evaluate_pose (rift_pose_metrics *score, posef *pose,
+static bool
+check_pose_prior(posef *pose, posef *pose_prior, const vec3f *pos_variance, const vec3f *rot_variance)
+{
+	vec3f pos_diff, orient_err;
+	quatf orient_diff;
+	int i;
+
+	ovec3f_subtract(&pose->pos, &pose_prior->pos, &pos_diff);
+	oquatf_diff(&pose->orient, &pose_prior->orient, &orient_diff);
+	oquatf_to_rotation(&orient_diff, &orient_err);
+
+	/* Check each component of position and rotation are within the passed variance */
+	for (i = 0; i < 3; i++) {
+		if (pos_diff.arr[i] * pos_diff.arr[i] > pos_variance->arr[i])
+			return false;
+		if (orient_err.arr[i] * orient_err.arr[i] > rot_variance->arr[i])
+			return false;
+	}
+
+	return true;
+}
+
+void rift_evaluate_pose_with_prior (rift_pose_metrics *score, posef *pose,
+	posef *pose_prior, const vec3f *pos_variance, const vec3f *rot_variance,
 	struct blob *blobs, int num_blobs,
 	int device_id, rift_led *leds, int num_leds,
 	dmat3 *camera_matrix, double dist_coeffs[5], bool dist_fisheye,
@@ -150,13 +173,24 @@ void rift_evaluate_pose (rift_pose_metrics *score, posef *pose,
 		}
 	}
 
-  if (num_visible_leds > 4 && num_matched_blobs > 3) {
+  if (num_visible_leds > 3 && num_matched_blobs > 3) {
     /* If we matched all the blobs in the pose bounding box (allowing 25% noise / overlapping blobs)
      * or if we matched a large proportion (2/3) of the LEDs we expect to be visible, then consider this a good pose match */
     if (num_unmatched_blobs * 4 <= num_matched_blobs ||
         (2 * num_visible_leds <= 3 * num_matched_blobs)) {
 			good_pose_match = true;
 		}
+    else if (pose_prior) {
+			/* We have a pose prior, see if it's a close match for the passed pose */
+			bool have_close_prior = check_pose_prior(pose, pose_prior, pos_variance, rot_variance);
+
+			if (have_close_prior && num_matched_blobs >= 2) {
+				printf("Got good prior match within pos (%f, %f, %f) rot (%f, %f, %f)\n",
+						pos_variance->x, pos_variance->y, pos_variance->z,
+						rot_variance->x, rot_variance->y, rot_variance->z);
+				good_pose_match = true;
+			}
+    }
 	}
 
 #if 0
@@ -174,6 +208,17 @@ void rift_evaluate_pose (rift_pose_metrics *score, posef *pose,
 
 	if (out_bounds)
 		*out_bounds = bounds;
+}
+
+void rift_evaluate_pose (rift_pose_metrics *score, posef *pose,
+	struct blob *blobs, int num_blobs,
+	int device_id, rift_led *leds, int num_leds,
+	dmat3 *camera_matrix, double dist_coeffs[5], bool dist_fisheye,
+	rift_rect_t *out_bounds)
+{
+  rift_evaluate_pose_with_prior (score, pose, NULL, NULL, NULL,
+      blobs, num_blobs, device_id, leds, num_leds,
+      camera_matrix, dist_coeffs, dist_fisheye, out_bounds);
 }
 
 void rift_mark_matching_blobs (posef *pose,

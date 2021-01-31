@@ -35,6 +35,13 @@ void rift_evaluate_pose (rift_pose_metrics *score, posef *pose,
 	dmat3 *camera_matrix, double dist_coeffs[5], bool dist_fisheye,
 	rift_rect_t *out_bounds);
 
+void rift_evaluate_pose_with_prior (rift_pose_metrics *score, posef *pose,
+	posef *pose_prior, const vec3f *pos_variance, const vec3f *rot_variance,
+	struct blob *blobs, int num_blobs,
+	int device_id, rift_led *leds, int num_leds,
+	dmat3 *camera_matrix, double dist_coeffs[5], bool dist_fisheye,
+	rift_rect_t *out_bounds);
+
 void rift_mark_matching_blobs (posef *pose,
 	struct blob *blobs, int num_blobs,
 	int device_id, rift_led *leds, int num_leds,
