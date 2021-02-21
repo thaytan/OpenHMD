@@ -21,7 +21,7 @@
 #define DUMP_BLOBS  0
 #define DUMP_FULL_DEBUG 0
 #define DUMP_FULL_LOG 0
-#define DUMP_TIMING 1
+#define DUMP_TIMING 0
 
 #define MAX_SEARCH_DEPTH 6
 
@@ -267,11 +267,13 @@ correspondence_search_project_pose (correspondence_search_t *cs, led_search_mode
       if (is_new_best) {
           mi->best_score = score;
           mi->best_pose = *pose;
+#if DUMP_TIMING
           mi->best_pose_found_time = get_cur_time();
+#endif
           mi->best_pose_blob_depth = depth;
           mi->best_pose_led_depth = mi->led_depth;
           mi->good_pose_match = (mi->best_score.matched_blobs > 4) && (error_per_led < 3.0);
-          mi->strong_pose_match = (mi->best_score.matched_blobs > 8) && (error_per_led < 1.5);
+          mi->strong_pose_match = (mi->best_score.matched_blobs > 6) && (error_per_led < 2.0);
 
           if (mi->strong_pose_match) {
             DEBUG_TIMING("# Found a strong match for model %d - %d points out of %d with error %f pixels^2\n", mi->id, mi->best_score.matched_blobs,
@@ -682,8 +684,10 @@ search_pose_for_model (correspondence_search_t *cs, cs_model_info_t *mi)
   }
 #endif
 
+#if DUMP_TIMING
   /* Set the search start time */
   mi->search_start_time = get_cur_time();
+#endif
 
   /* filter the list of blobs to unknown, or belonging to this model */
   for (b = 0; b < cs->num_points; b++) {
@@ -811,12 +815,12 @@ correspondence_search_find_one_pose_aligned (correspondence_search_t *cs, int mo
 			*pose = mi->best_pose;
       *score = mi->best_score;
 
-      printf("# Best aligned match for model %d was %d points out of %d with error %f pixels^2\n", model_id, mi->best_score.matched_blobs,
+      DEBUG_TIMING("# Best aligned match for model %d was %d points out of %d with error %f pixels^2\n", model_id, mi->best_score.matched_blobs,
                 mi->best_score.visible_leds, mi->best_score.reprojection_error);
-      printf("# Found at LED depth %d blob depth %d after %f ms of %f ms\n",
+      DEBUG_TIMING("# Found at LED depth %d blob depth %d after %f ms of %f ms\n",
                 mi->best_pose_led_depth, mi->best_pose_blob_depth, (mi->best_pose_found_time - mi->search_start_time) * 1000.0,
                 (get_cur_time() - mi->search_start_time) * 1000.0);
-      printf("# pose orient %f %f %f %f pos %f %f %f\n",
+      DEBUG_TIMING("# pose orient %f %f %f %f pos %f %f %f\n",
                 mi->best_pose.orient.x, mi->best_pose.orient.y, mi->best_pose.orient.z, mi->best_pose.orient.w,
                 mi->best_pose.pos.x, mi->best_pose.pos.y, mi->best_pose.pos.z);
       return true;
