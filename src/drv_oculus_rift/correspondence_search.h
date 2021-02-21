@@ -37,12 +37,21 @@ struct cs_model_info_s {
 
     led_search_model_t *model;
 
+    double best_pose_found_time; /* Time (in secs) at which the best pose was found */
+    int best_pose_blob_depth;    /* Blob neighbor depth the best pose is from */
+    int best_pose_led_depth;    /* LED neigbour depth the best pose is from */
 		posef best_pose;
     bool good_pose_match;
+    bool strong_pose_match;
 
     rift_pose_metrics best_score;
 
     /* Search parameters */
+    double search_start_time;
+    int led_depth;
+    int led_index;
+    int blob_index;
+
     bool match_all_blobs;
     bool match_gravity_vector;
     vec3f gravity_vector;

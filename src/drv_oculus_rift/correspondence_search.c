@@ -17,7 +17,20 @@
 #include "rift-sensor-blobwatch.h"
 #include "rift-sensor-pose-helper.h"
 
+#define DUMP_SCENE 0
+#define DUMP_BLOBS  0
+#define DUMP_FULL_DEBUG 0
+#define DUMP_FULL_LOG 0
+#define DUMP_TIMING 1
+
 #define MAX_SEARCH_DEPTH 6
+
+#if DUMP_TIMING
+#ifdef DRIVER_OCULUS_RIFT
+#include "../openhmdi.h"
+#define get_cur_time() ohmd_get_tick()
+#endif
+#endif
 
 //#define printf(s,...)
 #define abs(x) ((x) >= 0 ? (x) : -(x))
@@ -32,15 +45,16 @@ correspondence_search_new(dmat3 *camera_matrix, double *dist_coeffs, bool dist_f
     return cs;
 }
 
-#define DUMP_SCENE 0
-#define DUMP_BLOBS  0
-#define DUMP_FULL_DEBUG 0
-#define DUMP_FULL_LOG 0
-
 #if DUMP_FULL_DEBUG
 #define DEBUG(s,...) printf(s,__VA_ARGS__)
 #else
 #define DEBUG(s,...)
+#endif
+
+#if DUMP_TIMING
+#define DEBUG_TIMING(s,...) printf(s,__VA_ARGS__)
+#else
+#define DEBUG_TIMING(s,...)
 #endif
 
 #undef LOG
@@ -197,7 +211,7 @@ dump_pose (correspondence_search_t *cs, led_search_model_t *model, posef *pose, 
 
 static bool
 correspondence_search_project_pose (correspondence_search_t *cs, led_search_model_t *model,
-	posef *pose, cs_model_info_t *mi, bool expected_match)
+	posef *pose, cs_model_info_t *mi, bool expected_match, int depth)
 {
   /* Given a pose, project each 3D LED point back to 2D and assign correspondences to blobs */
   /* If enough match, print out the pose */
@@ -253,7 +267,22 @@ correspondence_search_project_pose (correspondence_search_t *cs, led_search_mode
       if (is_new_best) {
           mi->best_score = score;
           mi->best_pose = *pose;
+          mi->best_pose_found_time = get_cur_time();
+          mi->best_pose_blob_depth = depth;
+          mi->best_pose_led_depth = mi->led_depth;
           mi->good_pose_match = (mi->best_score.matched_blobs > 4) && (error_per_led < 3.0);
+          mi->strong_pose_match = (mi->best_score.matched_blobs > 8) && (error_per_led < 1.5);
+
+          if (mi->strong_pose_match) {
+            DEBUG_TIMING("# Found a strong match for model %d - %d points out of %d with error %f pixels^2\n", mi->id, mi->best_score.matched_blobs,
+                      mi->best_score.visible_leds, mi->best_score.reprojection_error);
+            DEBUG_TIMING("# Found at LED depth %d blob depth %d after %f ms. Anchor indices: LED %d blob %d\n",
+                      mi->best_pose_led_depth, mi->best_pose_blob_depth, (mi->best_pose_found_time - mi->search_start_time) * 1000.0,
+                      mi->led_index, mi->blob_index);
+            DEBUG_TIMING("# pose orient %f %f %f %f pos %f %f %f\n",
+                      mi->best_pose.orient.x, mi->best_pose.orient.y, mi->best_pose.orient.z, mi->best_pose.orient.w,
+                      mi->best_pose.pos.x, mi->best_pose.pos.y, mi->best_pose.pos.z);
+          }
 
           DEBUG("model %d new best pose candidate orient %f %f %f %f pos %f %f %f has %u visible LEDs, error %f (%f / LED)\n",
                  mi->id, pose->orient.x, pose->orient.y, pose->orient.z, pose->orient.w,
@@ -319,7 +348,7 @@ oquatf_from_rotation_matrix (quatf* me, double R[9])
 
 static void
 check_led_against_model_subset (correspondence_search_t *cs, cs_model_info_t *mi,
-     cs_image_point_t **blobs, rift_led *model_leds[4])
+     cs_image_point_t **blobs, rift_led *model_leds[4], int depth)
 {
   led_search_model_t *model = mi->model;
   double x[3][3];
@@ -433,7 +462,7 @@ check_led_against_model_subset (correspondence_search_t *cs, cs_model_info_t *mi
         printf ("4th point @ %f %f offset %f pixels\n",
             checkpos.x, checkpos.y, distance * cs->camera_matrix->m[0]);
 #endif
-        if (correspondence_search_project_pose (cs, model, &pose, mi, false)) {
+        if (correspondence_search_project_pose (cs, model, &pose, mi, false, depth)) {
 #if 0
           printf ("  P4P points %f,%f,%f -> %f %f\n"
                   "         %f,%f,%f -> %f %f\n"
@@ -460,11 +489,11 @@ check_led_against_model_subset (correspondence_search_t *cs, cs_model_info_t *mi
 static void
 select_k_blobs_from_n (correspondence_search_t *cs, cs_model_info_t *mi, rift_led **model_leds,
     cs_image_point_t **result_list, cs_image_point_t **output_list,
-    cs_image_point_t **candidate_list, int k, int n)
+    cs_image_point_t **candidate_list, int k, int n, int depth)
 {
     if (k == 1) {
         output_list[0] = candidate_list[0];
-        check_led_against_model_subset (cs, mi, result_list, model_leds);
+        check_led_against_model_subset (cs, mi, result_list, model_leds, depth);
         return;
     }
 
@@ -476,10 +505,14 @@ select_k_blobs_from_n (correspondence_search_t *cs, cs_model_info_t *mi, rift_le
     assert (k > 1);
     assert (n > 1);
     output_list[0] = candidate_list[0];
-    select_k_blobs_from_n (cs, mi, model_leds, result_list, output_list+1, candidate_list+1, k-1, n-1);
+    select_k_blobs_from_n (cs, mi, model_leds, result_list, output_list+1, candidate_list+1, k-1, n-1, depth);
+
+    /* Short circuit if we found a strong pose match already */
+    if (mi->strong_pose_match)
+      return;
 
     if (n > k)
-      select_k_blobs_from_n (cs, mi, model_leds, result_list, output_list, candidate_list+1, k, n-1);
+      select_k_blobs_from_n (cs, mi, model_leds, result_list, output_list, candidate_list+1, k, n-1, depth+1);
 }
 
 /* Generate quadruples of neighbouring blobs and pass to check_led_match().
@@ -506,17 +539,20 @@ check_leds_against_anchor (correspondence_search_t *cs, cs_model_info_t *mi,
       return; // Not enough blobs to compare against
 
   work_list[0] = anchor;
-  select_k_blobs_from_n (cs, mi, model_leds, work_list, work_list+1, anchor->neighbours, 3, max_blob_search_depth);
+  select_k_blobs_from_n (cs, mi, model_leds, work_list, work_list+1, anchor->neighbours, 3, max_blob_search_depth, 1);
 }
 
 /* Called with 4 model_leds that need checking against blob combos */
 static void
-check_led_match (correspondence_search_t *cs, cs_model_info_t *mi, rift_led **model_leds)
+check_led_match (correspondence_search_t *cs, cs_model_info_t *mi, rift_led **model_leds, int depth)
 {
     int b;
 
+    mi->led_depth = depth;
+
     for (b = 0; b < cs->num_points; b++) {
         cs_image_point_t *anchor = cs->points + b;
+        mi->blob_index = b;
         check_leds_against_anchor (cs, mi, model_leds, anchor);
     }
 }
@@ -527,13 +563,17 @@ static void
 select_k_leds_from_n (correspondence_search_t *cs,
     cs_model_info_t *mi,
     rift_led **result_list, rift_led **output_list,
-    rift_led **candidate_list, int k, int n)
+    rift_led **candidate_list, int k, int n, int depth)
 {
     if (k == 1) {
         rift_led *swap_list[4];
 
         output_list[0] = candidate_list[0];
-        check_led_match (cs, mi, result_list);
+        check_led_match (cs, mi, result_list, depth);
+
+        /* Short circuit if we found a strong pose match already */
+        if (mi->strong_pose_match)
+          return;
 
         /* Check the other orientation of blob 2/3, without
          * affecting result_list that needs to stay intact
@@ -543,7 +583,7 @@ select_k_leds_from_n (correspondence_search_t *cs,
         swap_list[2] = result_list[1];
         swap_list[3] = result_list[3];
 
-        check_led_match (cs, mi, swap_list);
+        check_led_match (cs, mi, swap_list, depth);
 
         return;
     }
@@ -556,10 +596,14 @@ select_k_leds_from_n (correspondence_search_t *cs,
     assert (k > 1);
     assert (n > 1);
     output_list[0] = candidate_list[0];
-    select_k_leds_from_n (cs, mi, result_list, output_list+1, candidate_list+1, k-1, n-1);
+    select_k_leds_from_n (cs, mi, result_list, output_list+1, candidate_list+1, k-1, n-1, depth);
+
+    /* Short circuit if we found a strong pose match already */
+    if (mi->strong_pose_match)
+      return;
 
     if (n > k)
-      select_k_leds_from_n (cs, mi, result_list, output_list, candidate_list+1, k, n-1);
+      select_k_leds_from_n (cs, mi, result_list, output_list, candidate_list+1, k, n-1, depth+1);
 }
 
 /* Generate quadruples of neighbouring leds and pass to check_led_match().
@@ -581,20 +625,23 @@ generate_led_match_candidates (correspondence_search_t *cs, cs_model_info_t *mi,
   rift_led *work_list[MAX_SEARCH_DEPTH+1];
 
   work_list[0] = c->led;
-  select_k_leds_from_n (cs, mi, work_list, work_list+1, c->neighbours, 3, max_search_depth);
+  select_k_leds_from_n (cs, mi, work_list, work_list+1, c->neighbours, 3, max_search_depth, 1);
 }
 
 static bool
 search_pose_for_model (correspondence_search_t *cs, cs_model_info_t *mi)
 {
   led_search_model_t *model = mi->model;
-  struct blob matched_blobs[MAX_BLOBS_PER_FRAME];
-  int already_known_blobs = 0;
   int b, l;
 
   /* clear the info for this model */
   memset (&mi->best_score, 0, sizeof (rift_pose_metrics));
   mi->good_pose_match = false;
+  mi->strong_pose_match = false;
+
+#if 0
+  int already_known_blobs = 0;
+  struct blob matched_blobs[MAX_BLOBS_PER_FRAME];
 
   /* First, see if we have enough correspondences to directly get the pose */
   for (b = 0; b < cs->num_points; b++) {
@@ -633,6 +680,10 @@ search_pose_for_model (correspondence_search_t *cs, cs_model_info_t *mi)
       printf ("Could not get pose from %u correspondences for model %u\n", already_known_blobs, mi->id);
     }
   }
+#endif
+
+  /* Set the search start time */
+  mi->search_start_time = get_cur_time();
 
   /* filter the list of blobs to unknown, or belonging to this model */
   for (b = 0; b < cs->num_points; b++) {
@@ -660,14 +711,19 @@ search_pose_for_model (correspondence_search_t *cs, cs_model_info_t *mi)
   }
 
   /* Start correspondence search for this model */
-  /* At this point, each image point has a list of the nearest neighbours filtered for this model */
+  /* At this stage, each image point has a list of the nearest neighbours filtered for this model */
   for (l = 0; l < model->num_points; l++) {
       led_search_candidate_t *c = model->points[l];
       int max_search_depth = MIN (MAX_SEARCH_DEPTH, c->num_neighbours);
 
+      mi->led_index = l;
+
       if (max_search_depth < 3)
           continue; // Not enough LEDs to compare against
       generate_led_match_candidates (cs, mi, c, max_search_depth);
+
+      if (mi->strong_pose_match)
+        return true;
   }
 
   if (mi->good_pose_match)
@@ -715,11 +771,15 @@ correspondence_search_find_one_pose (correspondence_search_t *cs, int model_id, 
 			*pose = mi->best_pose;
       *score = mi->best_score;
 
-      DEBUG("# Best match for model %d was %d points out of %d with error %f pixels^2\n", model_id, mi->best_score.matched_blobs,
+      DEBUG_TIMING("# Best match for model %d was %d points out of %d with error %f pixels^2\n", model_id, mi->best_score.matched_blobs,
                 mi->best_score.visible_leds, mi->best_score.reprojection_error);
-      DEBUG("# pose orient %f %f %f %f pos %f %f %f\n",
+      DEBUG_TIMING("# Found at LED depth %d blob depth %d after %f ms of %f ms\n",
+                mi->best_pose_led_depth, mi->best_pose_blob_depth, (mi->best_pose_found_time - mi->search_start_time) * 1000.0,
+                (get_cur_time() - mi->search_start_time) * 1000.0);
+      DEBUG_TIMING("# pose orient %f %f %f %f pos %f %f %f\n",
                 mi->best_pose.orient.x, mi->best_pose.orient.y, mi->best_pose.orient.z, mi->best_pose.orient.w,
                 mi->best_pose.pos.x, mi->best_pose.pos.y, mi->best_pose.pos.z);
+
       return true;
     }
     return false;
@@ -751,9 +811,12 @@ correspondence_search_find_one_pose_aligned (correspondence_search_t *cs, int mo
 			*pose = mi->best_pose;
       *score = mi->best_score;
 
-      DEBUG("# Best match for model %d was %d points out of %d with error %f pixels^2\n", model_id, mi->best_score.matched_blobs,
+      printf("# Best aligned match for model %d was %d points out of %d with error %f pixels^2\n", model_id, mi->best_score.matched_blobs,
                 mi->best_score.visible_leds, mi->best_score.reprojection_error);
-      DEBUG("# pose orient %f %f %f %f pos %f %f %f\n",
+      printf("# Found at LED depth %d blob depth %d after %f ms of %f ms\n",
+                mi->best_pose_led_depth, mi->best_pose_blob_depth, (mi->best_pose_found_time - mi->search_start_time) * 1000.0,
+                (get_cur_time() - mi->search_start_time) * 1000.0);
+      printf("# pose orient %f %f %f %f pos %f %f %f\n",
                 mi->best_pose.orient.x, mi->best_pose.orient.y, mi->best_pose.orient.z, mi->best_pose.orient.w,
                 mi->best_pose.pos.x, mi->best_pose.pos.y, mi->best_pose.pos.z);
       return true;
