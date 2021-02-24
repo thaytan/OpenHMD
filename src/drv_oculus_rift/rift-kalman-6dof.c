@@ -673,9 +673,9 @@ void rift_kalman_6dof_init(rift_kalman_6dof_filter *state, int num_delay_slots)
 	 * the orientation. */
 	ukf_measurement_init(&state->m2, 7, 6, &state->ukf, pose_measurement_func, pose_mean_func, pose_residual_func, pose_sum_func);
 	for (int i = 0; i < 3; i++)
-		MATRIX2D_XY(state->m2.R, i, i) = 0.05 * 0.05; /* 5cm error std dev */
+		MATRIX2D_XY(state->m2.R, i, i) = 0.02 * 0.02; /* 5cm error std dev */
 	for (int i = 3; i < 6; i++)
-		MATRIX2D_XY(state->m2.R, i, i) = (DEG_TO_RAD(45) * DEG_TO_RAD(45)); /* 45 degrees std dev (don't trust observations much) */
+		MATRIX2D_XY(state->m2.R, i, i) = (DEG_TO_RAD(20) * DEG_TO_RAD(20)); /* 45 degrees std dev (don't trust observations much) */
 
 	state->reset_slot = -1;
 	state->pose_slot = -1;
