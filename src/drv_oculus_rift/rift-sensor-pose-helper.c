@@ -174,18 +174,18 @@ void rift_evaluate_pose_with_prior (rift_pose_metrics *score, posef *pose,
 		}
 	}
 
-  if (num_visible_leds > 3 && num_matched_blobs > 3) {
+  if (num_visible_leds > 4 && num_matched_blobs > 4) {
     /* If we matched all the blobs in the pose bounding box (allowing 25% noise / overlapping blobs)
      * or if we matched a large proportion (2/3) of the LEDs we expect to be visible, then consider this a good pose match */
-    if (num_unmatched_blobs * 4 <= num_matched_blobs ||
-        (2 * num_visible_leds <= 3 * num_matched_blobs)) {
+    if (num_visible_leds > 6 && num_matched_blobs > 6 && (num_unmatched_blobs * 4 <= num_matched_blobs ||
+        (2 * num_visible_leds <= 3 * num_matched_blobs))) {
 			good_pose_match = true;
-		}
+	}
     else if (pose_prior) {
 			/* We have a pose prior, see if it's a close match for the passed pose */
 			bool have_close_prior = check_pose_prior(pose, pose_prior, pos_variance, rot_variance);
 
-			if (have_close_prior && num_matched_blobs >= 2) {
+			if (have_close_prior && num_matched_blobs > 4 && reprojection_error / num_matched_blobs < 2.0) {
 #if 0
 				printf("Got good prior match within pos (%f, %f, %f) rot (%f, %f, %f)\n",
 						pos_variance->x, pos_variance->y, pos_variance->z,
