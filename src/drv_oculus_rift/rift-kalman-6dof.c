@@ -109,10 +109,23 @@ static bool process_func(const ukf_base *ukf, const double dt, const matrix2d *X
 
 	vec3d imu_ang_vel;
 	vec3d ang_vel_bias;
+	vec3d accel_bias;
 
 	ang_vel_bias.x = MATRIX2D_Y(X, STATE_GYRO_BIAS);
 	ang_vel_bias.y = MATRIX2D_Y(X, STATE_GYRO_BIAS+1);
 	ang_vel_bias.z = MATRIX2D_Y(X, STATE_GYRO_BIAS+2);
+
+	ang_vel_bias.x = OHMD_CLAMP(ang_vel_bias.x, -0.3, 0.3);
+	ang_vel_bias.y = OHMD_CLAMP(ang_vel_bias.y, -0.3, 0.3);
+	ang_vel_bias.z = OHMD_CLAMP(ang_vel_bias.z, -0.3, 0.3);
+
+	accel_bias.x = MATRIX2D_Y(X, STATE_ACCEL_BIAS);
+	accel_bias.y = MATRIX2D_Y(X, STATE_ACCEL_BIAS+1);
+	accel_bias.z = MATRIX2D_Y(X, STATE_ACCEL_BIAS+2);
+
+	accel_bias.x = OHMD_CLAMP(accel_bias.x, -1.0, 1.0);
+	accel_bias.y = OHMD_CLAMP(accel_bias.y, -1.0, 1.0);
+	accel_bias.z = OHMD_CLAMP(accel_bias.z, -1.0, 1.0);
 
 	/* Subtract estimated IMU bias from the ang vel */
 	ovec3d_subtract (&filter_state->ang_vel, &ang_vel_bias, &imu_ang_vel);
@@ -221,6 +234,15 @@ static bool process_func(const ukf_base *ukf, const double dt, const matrix2d *X
 	MATRIX2D_Y(X, STATE_VELOCITY)   = global_vel.x;
 	MATRIX2D_Y(X, STATE_VELOCITY+1) = global_vel.y;
 	MATRIX2D_Y(X, STATE_VELOCITY+2) = global_vel.z;
+
+	/* Clamped Biases */
+	MATRIX2D_Y(X, STATE_GYRO_BIAS)   = ang_vel_bias.x;
+	MATRIX2D_Y(X, STATE_GYRO_BIAS+1) = ang_vel_bias.y;
+	MATRIX2D_Y(X, STATE_GYRO_BIAS+2) = ang_vel_bias.z;
+
+	MATRIX2D_Y(X, STATE_ACCEL_BIAS)   = accel_bias.x;
+	MATRIX2D_Y(X, STATE_ACCEL_BIAS+1) = accel_bias.y;
+	MATRIX2D_Y(X, STATE_ACCEL_BIAS+2) = accel_bias.z;
 
 	if (filter_state->reset_slot != -1) {
 		/* One of the lagged slot states needs resetting - assign the current orientation and position */
