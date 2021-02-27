@@ -140,6 +140,8 @@ struct rift_sensor_ctx_s
 	ohmd_thread* fast_analysis_thread;
 	ohmd_thread* long_analysis_thread;
 
+	/* Pipewire output streams */
+	ohmd_pw_video_stream *debug_vid_raw;
 	ohmd_pw_video_stream *debug_vid;
 	uint8_t *debug_frame;
 
@@ -763,6 +765,9 @@ static void analyse_frame_fast(rift_sensor_ctx *sensor, rift_sensor_capture_fram
 
 	frame->image_analysis_finish_ts = ohmd_monotonic_get(sensor->ohmd_ctx);
 
+	if (ohmd_pw_video_stream_connected(sensor->debug_vid_raw))
+		ohmd_pw_video_stream_push (sensor->debug_vid_raw, frame->uvc.start_ts, frame->uvc.data);
+
 	if (ohmd_pw_video_stream_connected(sensor->debug_vid)) {
 		rift_debug_draw_frame (sensor->debug_frame, frame->bwobs, sensor->cs, frame,
 			frame->n_devices, sensor->devices, sensor->is_cv1, sensor->camera_matrix,
@@ -835,10 +840,16 @@ rift_sensor_new(ohmd_context* ohmd_ctx, int id, const char *serial_no,
 	sensor_ctx->dropped_frames = 0;
 	sensor_ctx->cur_capture_frame = NULL;
 
-	snprintf(stream_id,64,"openhmd-rift-sensor-%s", sensor_ctx->serial_no);
+	/* Raw debug video stream */
+	snprintf(stream_id,64,"openhmd-rift-sensor-raw-%s", sensor_ctx->serial_no);
 	stream_id[63] = 0;
+	sensor_ctx->debug_vid_raw = ohmd_pw_video_stream_new (stream_id, OHMD_PW_VIDEO_FORMAT_GRAY8, sensor_ctx->stream.width, sensor_ctx->stream.height, 625, 12);
 
+	/* Annotated debug video stream */
+	snprintf(stream_id,64,"openhmd-rift-sensor-annotated-%s", sensor_ctx->serial_no);
+	stream_id[63] = 0;
 	sensor_ctx->debug_vid = ohmd_pw_video_stream_new (stream_id, OHMD_PW_VIDEO_FORMAT_RGB, sensor_ctx->stream.width * 2, sensor_ctx->stream.height, 625, 12);
+
 	if (sensor_ctx->debug_vid) {
 		/* Allocate an RGB debug frame, twice the width of the input */
 		sensor_ctx->debug_frame = ohmd_alloc(ohmd_ctx, 2 * 3 * sensor_ctx->stream.width * sensor_ctx->stream.height);
@@ -933,6 +944,8 @@ rift_sensor_free (rift_sensor_ctx *sensor_ctx)
 
 	if (sensor_ctx->bw)
 		blobwatch_free (sensor_ctx->bw);
+	if (sensor_ctx->debug_vid_raw != NULL)
+		ohmd_pw_video_stream_free (sensor_ctx->debug_vid_raw);
 	if (sensor_ctx->debug_vid != NULL)
 		ohmd_pw_video_stream_free (sensor_ctx->debug_vid);
 	if (sensor_ctx->debug_frame != NULL)
