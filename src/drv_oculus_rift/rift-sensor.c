@@ -862,15 +862,14 @@ rift_sensor_new(ohmd_context* ohmd_ctx, int id, const char *serial_no,
 	sensor_ctx->dropped_frames = 0;
 	sensor_ctx->cur_capture_frame = NULL;
 
-	/* Raw debug video stream */
-	snprintf(stream_id,64,"openhmd-rift-sensor-raw-%s", sensor_ctx->serial_no);
+	snprintf(stream_id,64,"openhmd-rift-sensor-%s", sensor_ctx->serial_no);
 	stream_id[63] = 0;
-	sensor_ctx->debug_vid_raw = ohmd_pw_video_stream_new (stream_id, OHMD_PW_VIDEO_FORMAT_GRAY8, sensor_ctx->stream.width, sensor_ctx->stream.height, 625, 12);
+
+	/* Raw debug video stream */
+	sensor_ctx->debug_vid_raw = ohmd_pw_video_stream_new (stream_id, "Rift Sensor", OHMD_PW_VIDEO_FORMAT_GRAY8, sensor_ctx->stream.width, sensor_ctx->stream.height, 625, 12);
 
 	/* Annotated debug video stream */
-	snprintf(stream_id,64,"openhmd-rift-sensor-annotated-%s", sensor_ctx->serial_no);
-	stream_id[63] = 0;
-	sensor_ctx->debug_vid = ohmd_pw_video_stream_new (stream_id, OHMD_PW_VIDEO_FORMAT_RGB, sensor_ctx->stream.width * 2, sensor_ctx->stream.height, 625, 12);
+	sensor_ctx->debug_vid = ohmd_pw_video_stream_new (stream_id, "Rift Tracking", OHMD_PW_VIDEO_FORMAT_RGB, sensor_ctx->stream.width * 2, sensor_ctx->stream.height, 625, 12);
 
 	if (sensor_ctx->debug_vid) {
 		/* Allocate an RGB debug frame, twice the width of the input */

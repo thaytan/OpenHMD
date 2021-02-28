@@ -135,7 +135,7 @@ rift_tracker_add_device (rift_tracker_ctx *ctx, int device_id, posef *imu_pose, 
 
 	next_dev->fusion_to_model = *imu_pose;
 
-	next_dev->debug_metadata = ohmd_pw_debug_stream_new (device_name);
+	next_dev->debug_metadata = ohmd_pw_debug_stream_new (device_name, "Rift Device");
 	next_dev->base.leds = leds;
 	next_dev->base.led_search = led_search_model_new (leds);
 	ctx->n_devices++;

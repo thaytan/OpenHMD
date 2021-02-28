@@ -173,7 +173,7 @@ static void ohmd_pipewire_global_deinit()
 }
 
 ohmd_pw_video_stream *
-ohmd_pw_video_stream_new (const char *stream_id, ohmd_pw_video_format format,
+ohmd_pw_video_stream_new (const char *stream_id, const char *stream_role, ohmd_pw_video_format format,
                           uint16_t w, uint16_t h, uint16_t fps_n, uint16_t fps_d)
 {
 	ohmd_pw_video_stream *ret = NULL;
@@ -207,7 +207,7 @@ ohmd_pw_video_stream_new (const char *stream_id, ohmd_pw_video_format format,
 				pw_properties_new(PW_KEY_MEDIA_CLASS, "Video/Source",
 					PW_KEY_MEDIA_TYPE, "Video",
 					PW_KEY_MEDIA_CATEGORY, "Source",
-					PW_KEY_MEDIA_ROLE, "Rift Sensor",
+					PW_KEY_MEDIA_ROLE, stream_role,
 					NULL));
 
 	enum spa_video_format spa_format;
@@ -361,7 +361,7 @@ static const struct pw_stream_events debug_stream_events = {
 	.param_changed = on_debug_stream_param_changed,
 };
 
-ohmd_pw_debug_stream *ohmd_pw_debug_stream_new (const char *stream_id)
+ohmd_pw_debug_stream *ohmd_pw_debug_stream_new (const char *stream_id, const char *stream_role)
 {
 	ohmd_pw_debug_stream *ret = NULL;
 	ohmd_pw_base_stream *base = NULL;
@@ -392,7 +392,7 @@ ohmd_pw_debug_stream *ohmd_pw_debug_stream_new (const char *stream_id)
 				pw_properties_new(PW_KEY_MEDIA_CLASS, "Text/Source",
 					PW_KEY_MEDIA_TYPE, "Text",
 					PW_KEY_MEDIA_CATEGORY, "Source",
-					PW_KEY_MEDIA_ROLE, "OpenHMD Debug",
+					PW_KEY_MEDIA_ROLE, stream_role,
 					NULL));
 
 	params[0] = spa_pod_builder_add_object(&b,
