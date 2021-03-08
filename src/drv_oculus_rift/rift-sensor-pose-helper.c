@@ -5,6 +5,8 @@
  */
 #include <assert.h>
 #include <stdio.h>
+#include <stdbool.h>
+#include <stdlib.h>
 
 #include "rift-sensor-pose-helper.h"
 #include "rift-sensor-opencv.h"
@@ -93,6 +95,7 @@ void rift_evaluate_pose_with_prior (rift_pose_metrics *score, posef *pose,
 	bool first_visible = true;
 	double led_radius;
 	bool good_pose_match = false;
+	bool strong_pose_match = false;
 	rift_rect_t bounds = { 0, };
 	int i;
 	
@@ -174,26 +177,34 @@ void rift_evaluate_pose_with_prior (rift_pose_metrics *score, posef *pose,
 		}
 	}
 
-  if (num_visible_leds > 4 && num_matched_blobs > 4) {
-    /* If we matched all the blobs in the pose bounding box (allowing 25% noise / overlapping blobs)
-     * or if we matched a large proportion (2/3) of the LEDs we expect to be visible, then consider this a good pose match */
-    if (num_visible_leds > 6 && num_matched_blobs > 6 && (num_unmatched_blobs * 4 <= num_matched_blobs ||
-        (2 * num_visible_leds <= 3 * num_matched_blobs))) {
-			good_pose_match = true;
-	}
-    else if (pose_prior) {
-			/* We have a pose prior, see if it's a close match for the passed pose */
-			bool have_close_prior = check_pose_prior(pose, pose_prior, pos_variance, rot_variance);
+	if (num_visible_leds > 4 && num_matched_blobs > 4) {
+		double error_per_led = reprojection_error / num_matched_blobs;
 
-			if (have_close_prior && num_matched_blobs > 4 && reprojection_error / num_matched_blobs < 2.0) {
+		if (pose_prior) {
+			/* We have a pose prior, require it's a close match for the passed pose */
+			if (check_pose_prior(pose, pose_prior, pos_variance, rot_variance)) {
+				if (num_matched_blobs > 4 && error_per_led < 2.0) {
 #if 0
 				printf("Got good prior match within pos (%f, %f, %f) rot (%f, %f, %f)\n",
 						pos_variance->x, pos_variance->y, pos_variance->z,
 						rot_variance->x, rot_variance->y, rot_variance->z);
 #endif
+					good_pose_match = true;
+				}
+			}
+		}
+		else {
+			/* If we matched all the blobs in the pose bounding box (allowing 25% noise / overlapping blobs)
+			 * or if we matched a large proportion (2/3) of the LEDs we expect to be visible, then consider this a good pose match */
+			if (num_visible_leds > 6 && num_matched_blobs > 6 && error_per_led < 3.0 && (num_unmatched_blobs * 4 <= num_matched_blobs ||
+			    (2 * num_visible_leds <= 3 * num_matched_blobs))) {
 				good_pose_match = true;
 			}
-    }
+
+		}
+
+		if (good_pose_match && error_per_led < 1.5)
+			strong_pose_match = true;
 	}
 
 #if 0
@@ -207,6 +218,7 @@ void rift_evaluate_pose_with_prior (rift_pose_metrics *score, posef *pose,
 		score->visible_leds = num_visible_leds;
 		score->reprojection_error = reprojection_error;
 		score->good_pose_match = good_pose_match;
+    score->strong_pose_match = strong_pose_match;
 	}
 
 	if (out_bounds)
@@ -316,6 +328,7 @@ void rift_mark_matching_blobs (posef *pose,
 
 				/* FIXME: Get the ID directly from the LED */
 				int led_index = match_led - leds;
+				b->prev_led_id = b->led_id;
 				b->led_id = LED_MAKE_ID (device_id, led_index);
 				if (b->led_id != b->prev_led_id)
 					LOGV("Marking LED %d/%d at %f,%f now %d (was %d)\n", device_id, led_index, b->x, b->y, b->led_id, b->prev_led_id);

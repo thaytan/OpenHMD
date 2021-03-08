@@ -27,6 +27,7 @@ typedef struct {
 	double reprojection_error;
 
 	bool good_pose_match; /* TRUE if rift_evaluate_pose() considered this a good match */
+	bool strong_pose_match; /* TRUE if rift_evaluate_pose() considered this a STRONG (almost certain) match */
 } rift_pose_metrics;
 
 void rift_evaluate_pose (rift_pose_metrics *score, posef *pose,
