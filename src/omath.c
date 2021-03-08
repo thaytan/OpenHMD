@@ -10,7 +10,8 @@
 #include <assert.h>
 #include <float.h>
 #include <string.h>
-#include "openhmdi.h"
+#include <stdbool.h>
+#include "omath.h"
 
 // vector
 void ovec3f_set(vec3f* me, float x, float y, float z)
@@ -18,6 +19,11 @@ void ovec3f_set(vec3f* me, float x, float y, float z)
 	me->x = x;
 	me->y = y;
 	me->z = z;
+}
+
+static float ovec3f_get_sqlength(const vec3f* me)
+{
+	return POW2(me->x) + POW2(me->y) + POW2(me->z);
 }
 
 float ovec3f_get_length(const vec3f* me)
@@ -108,6 +114,40 @@ void oquatf_set(quatf* me, float x, float y, float z, float w)
 	me->y = y;
 	me->z = z;
 	me->w = w;
+}
+
+/* Calculate a quaternion that moves vec 'from' to align along 'to' */
+void oquatf_from_vectors(quatf* me, const vec3f* from, const vec3f* to)
+{
+	vec3f axis;
+	float dot;
+
+	ovec3f_cross(from, to, &axis);
+	dot = ovec3f_get_dot(from, to);
+
+	if (ovec3f_get_sqlength(&axis) < 1e-7) {
+		if (dot < 0.0) {
+			/* 180 degree rotation, pick an arbirtrary rotation
+			 * axis at 90 degrees to the vector */
+			me->x = from->x;
+			me->y = -from->z;
+			me->z = from->y;
+			me->w = 0.0;
+			oquatf_normalize_me(me);
+		}
+		else {
+			/* Identity rotation */
+			me->x = me->y = me->z = 0.0;
+			me->w = 1.0;
+		}
+	} else {
+		me->x = axis.x;
+		me->y = axis.y;
+		me->z = axis.z;
+		me->w = dot + sqrtf(ovec3f_get_sqlength(from) * ovec3f_get_sqlength(to));
+
+		oquatf_normalize_me(me);
+	}
 }
 
 void oquatf_get_rotated(const quatf* me, const vec3f* vec, vec3f* out_vec)

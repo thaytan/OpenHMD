@@ -54,6 +54,7 @@ typedef union {
 
 void oquatf_init_axis(quatf* me, const vec3f* vec, float angle);
 void oquatf_set(quatf* me, float x, float y, float z, float w);
+void oquatf_from_vectors(quatf* me, const vec3f* from, const vec3f* to);
 
 void oquatf_get_rotated(const quatf* me, const vec3f* vec, vec3f* out_vec);
 void oquatf_mult_me(quatf* me, const quatf* q);
