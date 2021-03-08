@@ -25,10 +25,6 @@ void rift_project_points(rift_led *leds, int num_led_pos,
   dmat3 *camera_matrix, double dist_coeffs[5], bool dist_fisheye,
 	posef *pose, vec3f *out_points);
 
-void undistort_points (struct blob *blobs, int num_blobs,
-        vec3f *out_points,
-        double camera_matrix[9], double dist_coeffs[5], bool dist_fisheye);
-
 void refine_pose(vec3f *image_points,
     rift_led **leds, int num_matches,
 		posef *pose, double *reprojection_error);
