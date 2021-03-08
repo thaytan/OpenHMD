@@ -9,6 +9,9 @@ typedef struct led_search_model_s led_search_model_t;
 struct led_search_candidate_s {
     rift_led *led;
 
+    /* Transform to rotate the anchor LED to face forward @ 0,0,0 */
+    posef pose;
+
     /* List of possible neighbours for this LED, sorted by distance */
     uint8_t num_neighbours;
     rift_led **neighbours;
