@@ -278,7 +278,10 @@ static void tracker_process_blobs_long(rift_sensor_ctx *ctx, rift_sensor_capture
 		rift_sensor_frame_device_state *dev_state = frame->capture_state + d;
 		const rift_tracked_device_exposure_info *exp_dev_info = exposure_info->devices + d;
 		posef obj_cam_pose;
-		bool match_all_blobs = (dev->id == 0); /* Let the HMD match whatever it can */
+    CorrespondenceSearchFlags flags = CS_FLAG_STOP_FOR_STRONG_MATCH | CS_FLAG_SHALLOW_SEARCH | CS_FLAG_DEEP_SEARCH;
+
+    if (dev->id == 0)
+      flags |= CS_FLAG_MATCH_ALL_BLOBS; /* Let the HMD match whatever it can */
 
 		if (exp_dev_info->fusion_slot == -1) {
 			LOGV ("Skipping long analysis of device %d. No fusion slot assigned\n", d);
@@ -311,7 +314,7 @@ static void tracker_process_blobs_long(rift_sensor_ctx *ctx, rift_sensor_capture
 			float pose_tolerance = OHMD_MAX(dev_state->gravity_error_rad, DEG_TO_RAD(5));
 
 			oquatf_decompose_swing_twist(&obj_cam_pose.orient, &gravity_vector, &pose_gravity_swing, &pose_gravity_twist);
-			if (correspondence_search_find_one_pose_aligned (ctx->cs, dev->id, match_all_blobs, &obj_cam_pose,
+			if (correspondence_search_find_one_pose_aligned (ctx->cs, dev->id, flags, &obj_cam_pose,
 					&gravity_vector, &pose_gravity_swing, pose_tolerance, &dev_state->score)) {
 				LOGD("Got aligned pose %f, %f, %f, %f (to %f, %f, %f, %f) for device %d with tolerance %f!",
 					obj_cam_pose.orient.x, obj_cam_pose.orient.y, obj_cam_pose.orient.z, obj_cam_pose.orient.w,
@@ -324,7 +327,7 @@ static void tracker_process_blobs_long(rift_sensor_ctx *ctx, rift_sensor_capture
 					d, RAD_TO_DEG(pose_tolerance));
 			}
 		} else {
-			correspondence_search_find_one_pose (ctx->cs, dev->id, match_all_blobs, &obj_cam_pose, &dev_state->score);
+			correspondence_search_find_one_pose (ctx->cs, dev->id, flags, &obj_cam_pose, &dev_state->score);
 		}
 
 		LOGV("Sensor %d Frame %d - doing long search for device %d matched %u blobs of %u (%s match)",

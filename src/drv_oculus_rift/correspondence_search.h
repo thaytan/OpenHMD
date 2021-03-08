@@ -17,8 +17,17 @@
 typedef struct correspondence_search_s correspondence_search_t;
 typedef struct cs_image_point_s cs_image_point_t;
 typedef struct cs_model_info_s cs_model_info_t;
+typedef enum CorrespondenceSearchFlags CorrespondenceSearchFlags;
 
 #define MAX_BLOB_SEARCH_DEPTH 5
+
+enum CorrespondenceSearchFlags {
+	CS_FLAG_NONE = 0x0,
+	CS_FLAG_SHALLOW_SEARCH = 0x1,           /* do quick search @ depth 1-2 neighbour depth */
+	CS_FLAG_DEEP_SEARCH = 0x2,              /* do deeper searches @ up to MAX_LED_SEARCH_DEPTH/MAX_BLOB_SEARCH_DEPTH */
+	CS_FLAG_STOP_FOR_STRONG_MATCH = 0x4,    /* Stop searching if a strong match is found, otherwise search all and return best match */
+	CS_FLAG_MATCH_ALL_BLOBS = 0x8,          /* Allow matching against all blobs, not just unlabelled ones or for the current device */
+};
 
 struct cs_image_point_s {
     struct blob *blob;
@@ -52,7 +61,10 @@ struct cs_model_info_s {
     int led_index;
     int blob_index;
 
-    bool match_all_blobs;
+		CorrespondenceSearchFlags flags;
+		int min_led_depth, max_led_depth;
+		int max_blob_depth;
+
     bool match_gravity_vector;
     vec3f gravity_vector;
     quatf gravity_swing;
@@ -84,8 +96,8 @@ void correspondence_search_set_blobs (correspondence_search_t *cs, struct blob *
 bool correspondence_search_set_model (correspondence_search_t *cs, int model_id, led_search_model_t *model);
 void correspondence_search_free (correspondence_search_t *cs);
 
-bool correspondence_search_find_one_pose (correspondence_search_t *cs, int model_id, bool match_all_blobs, posef *pose, rift_pose_metrics *score);
-bool correspondence_search_find_one_pose_aligned (correspondence_search_t *cs, int model_id, bool match_all_blobs, posef *pose,
+bool correspondence_search_find_one_pose (correspondence_search_t *cs, int model_id, CorrespondenceSearchFlags flags, posef *pose, rift_pose_metrics *score);
+bool correspondence_search_find_one_pose_aligned (correspondence_search_t *cs, int model_id, CorrespondenceSearchFlags flags, posef *pose,
 				vec3f *gravity_vector, quatf *gravity_swing, float gravity_tolerance_rad, rift_pose_metrics *score);
 bool correspondence_search_have_pose (correspondence_search_t *cs, int model_id, posef *pose, rift_pose_metrics *score);
 #endif
