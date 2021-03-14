@@ -21,6 +21,7 @@
 typedef struct rift_tracker_exposure_info rift_tracker_exposure_info;
 typedef struct rift_tracked_device_exposure_info rift_tracked_device_exposure_info;
 typedef struct rift_sensor_camera_params rift_sensor_camera_params;
+typedef struct rift_tracked_device_imu_calibration rift_tracked_device_imu_calibration;
 
 struct rift_tracked_device_exposure_info {
 	uint64_t device_time_ns; /* Device time this sensor exposure was captured */
@@ -54,6 +55,14 @@ struct rift_tracked_device_s
 	rift_leds *leds;
 
 	led_search_model_t *led_search;
+};
+
+struct rift_tracked_device_imu_calibration {
+	vec3f accel_offset;
+	float accel_matrix[9];
+
+	vec3f gyro_offset;
+	float gyro_matrix[9];
 };
 
 struct rift_sensor_camera_params {

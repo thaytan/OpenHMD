@@ -329,6 +329,9 @@ static void handle_touch_controller_message(rift_hmd_t *hmd, uint64_t local_ts,
 		return;
 
 	if (!touch->have_calibration) {
+		rift_tracked_device_imu_calibration imu_calibration;
+		int i;
+
 		/* We need calibration data to do any more */
 		if (rift_touch_get_calibration (hmd->ctx, &hmd->radio, touch->device_num,
 				&touch->calibration) < 0)
@@ -343,7 +346,15 @@ static void handle_touch_controller_message(rift_hmd_t *hmd, uint64_t local_ts,
 		posef model_pose;
 		oposef_init(&model_pose, &model_pos, &model_orient);
 
-		touch->tracked_dev = rift_tracker_add_device (hmd->tracker_ctx, touch->base.id, &imu_pose, &model_pose, &touch->calibration.leds);
+		/* Copy into imu_calibration array */
+		imu_calibration.accel_offset = touch->calibration.accel_offset;
+		imu_calibration.gyro_offset = touch->calibration.gyro_offset;
+		for (i = 0; i < 9; i++) {
+			imu_calibration.accel_matrix[i] = touch->calibration.accel_matrix[i/3][i%3];
+			imu_calibration.gyro_matrix[i] = touch->calibration.gyro_matrix[i/3][i%3];
+		}
+
+		touch->tracked_dev = rift_tracker_add_device (hmd->tracker_ctx, touch->base.id, &imu_pose, &model_pose, &touch->calibration.leds, &imu_calibration);
 		touch->have_calibration = true;
 		dump_controller_calibration(touch);
 	}
@@ -1281,7 +1292,16 @@ static rift_hmd_t *open_hmd(ohmd_driver* driver, ohmd_device_desc* desc)
 	posef model_pose;
 	oposef_init(&model_pose, &model_pos, &model_orient);
 
-	priv->tracked_dev = rift_tracker_add_device (priv->tracker_ctx, 0, &imu_pose, &model_pose, &priv->leds);
+	rift_tracked_device_imu_calibration imu_calibration;
+	int i;
+
+	imu_calibration.accel_offset = priv->imu_calibration.accel_offset;
+	imu_calibration.gyro_offset = priv->imu_calibration.gyro_offset;
+	for (i = 0; i < 9; i++) {
+		imu_calibration.accel_matrix[i] = priv->imu_calibration.accel_matrix[i/3][i%3];
+		imu_calibration.gyro_matrix[i] = priv->imu_calibration.gyro_matrix[i/3][i%3];
+	}
+	priv->tracked_dev = rift_tracker_add_device (priv->tracker_ctx, 0, &imu_pose, &model_pose, &priv->leds, &imu_calibration);
 
 	return priv;
 

@@ -152,7 +152,8 @@ static void rift_tracked_device_exposure_claim(rift_tracked_device_priv *dev, ri
 static void rift_tracked_device_exposure_release_locked(rift_tracked_device_priv *dev, rift_tracked_device_exposure_info *dev_info);
 
 rift_tracked_device *
-rift_tracker_add_device (rift_tracker_ctx *ctx, int device_id, posef *imu_pose, posef *model_pose, rift_leds *leds)
+rift_tracker_add_device (rift_tracker_ctx *ctx, int device_id, posef *imu_pose, posef *model_pose, rift_leds *leds,
+      rift_tracked_device_imu_calibration *imu_calib)
 {
 	int i, s;
 	rift_tracked_device_priv *next_dev;
@@ -193,6 +194,23 @@ rift_tracker_add_device (rift_tracker_ctx *ctx, int device_id, posef *imu_pose, 
 	oposef_inverse(&next_dev->model_from_fusion);
 
 	next_dev->debug_metadata = ohmd_pw_debug_stream_new (device_name, "Rift Device");
+
+	uint64_t now = ohmd_monotonic_get(ctx->ohmd_ctx);
+	rift_tracked_device_send_debug_printf (next_dev, now, "{ \"type\": \"device\", "
+		 "\"device-id\": %d,"
+		"\"imu-calibration\": { \"accel-offset\": [ %f, %f, %f ], "
+		"\"accel-matrix\": [ %f, %f, %f, %f, %f, %f, %f, %f, %f ], "
+		"\"gyro_offset\": [ %f, %f, %f ], "
+		"\"gyro-matrix\": [ %f, %f, %f, %f, %f, %f, %f, %f, %f ] } },", device_id,
+		imu_calib->accel_offset.x, imu_calib->accel_offset.y, imu_calib->accel_offset.z,
+		imu_calib->accel_matrix[0], imu_calib->accel_matrix[1], imu_calib->accel_matrix[2],
+		imu_calib->accel_matrix[3], imu_calib->accel_matrix[4], imu_calib->accel_matrix[5],
+		imu_calib->accel_matrix[6], imu_calib->accel_matrix[7], imu_calib->accel_matrix[8],
+		imu_calib->gyro_offset.x, imu_calib->gyro_offset.y, imu_calib->gyro_offset.z,
+		imu_calib->gyro_matrix[0], imu_calib->gyro_matrix[1], imu_calib->gyro_matrix[2],
+		imu_calib->gyro_matrix[3], imu_calib->gyro_matrix[4], imu_calib->gyro_matrix[5],
+		imu_calib->gyro_matrix[6], imu_calib->gyro_matrix[7], imu_calib->gyro_matrix[8]);
+
 	next_dev->base.leds = leds;
 	next_dev->base.led_search = led_search_model_new (leds);
 	ctx->n_devices++;
