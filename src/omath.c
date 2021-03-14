@@ -366,7 +366,6 @@ void oquatf_decompose_swing_twist(const quatf *me, const vec3f *twist_axis, quat
        float dot;
 
        ovec3f_set(&orig_axis, me->x, me->y, me->z);
-       dot = ovec3f_get_dot(&orig_axis, &orig_axis);
 
        /* Calculate projection onto the twist axis */
        dot = ovec3f_get_dot(&orig_axis, twist_axis);
