@@ -350,10 +350,15 @@ static void handle_touch_controller_message(rift_hmd_t *hmd, uint64_t local_ts,
 		OHMD_GRAVITY_EARTH / 2048 * msg->touch.accel[1],
 		OHMD_GRAVITY_EARTH / 2048 * msg->touch.accel[2],
 	};
+	/* Gyro is MPU 6500, configured for 2000°/s,
+	 * The datasheet has 16.4 LSB/°/s, but I'm using
+	 * 32768 / 2000 = 16.384 here because that actually
+	 * yields a 2000°/s full range, then converting to
+	 * radians for the fusion. */
 	double g[3] = {
-		msg->touch.gyro[0] / 1000.0,
-		msg->touch.gyro[1] / 1000.0,
-		msg->touch.gyro[2] / 1000.0,
+		msg->touch.gyro[0] / (16.384 * 180.0) * M_PI,
+		msg->touch.gyro[1] / (16.384 * 180.0) * M_PI,
+		msg->touch.gyro[2] / (16.384 * 180.0) * M_PI,
 	};
 	vec3f mag = {{0.0f, 0.0f, 0.0f}};
 	vec3f gyro;
