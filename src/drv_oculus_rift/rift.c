@@ -339,7 +339,7 @@ static void handle_touch_controller_message(rift_hmd_t *hmd, uint64_t local_ts,
 	if (touch->time_valid)
 		dt = msg->touch.timestamp - touch->last_timestamp;
 	else
-		dt = 2000; /* 500Hz updates */
+		dt = 2000; /* 500Hz updates = 2000µS spacing */
 
 	uint32_t device_ts = msg->touch.timestamp - dt;
 	local_ts -= TICK_US_TO_NS(dt);
@@ -351,9 +351,9 @@ static void handle_touch_controller_message(rift_hmd_t *hmd, uint64_t local_ts,
 		OHMD_GRAVITY_EARTH / 2048 * msg->touch.accel[2],
 	};
 	double g[3] = {
-		2.0 / 2048 * msg->touch.gyro[0],
-		2.0 / 2048 * msg->touch.gyro[1],
-		2.0 / 2048 * msg->touch.gyro[2],
+		msg->touch.gyro[0] / 1000.0,
+		msg->touch.gyro[1] / 1000.0,
+		msg->touch.gyro[2] / 1000.0,
 	};
 	vec3f mag = {{0.0f, 0.0f, 0.0f}};
 	vec3f gyro;
