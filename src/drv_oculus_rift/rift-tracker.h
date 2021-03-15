@@ -54,8 +54,6 @@ struct rift_tracked_device_imu_observation {
 	vec3f ang_vel;
 	vec3f accel;
 	vec3f mag;
-
-	quatf simple_orient;
 };
 
 struct rift_tracked_device_s

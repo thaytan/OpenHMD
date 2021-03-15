@@ -50,7 +50,6 @@ struct rift_tracked_device_priv {
 	int index; /* Index of this entry in the devices array for the tracker and exposures */
 
 	ohmd_mutex *device_lock;
-	fusion simple_fusion;
 
 	/* 6DOF Kalman Filter */
 	rift_kalman_6dof_filter ukf_fusion;
@@ -120,7 +119,6 @@ rift_tracker_add_device (rift_tracker_ctx *ctx, int device_id, posef *imu_pose, 
 	next_dev = ctx->devices + ctx->n_devices;
 
 	next_dev->base.id = device_id;
-	ofusion_init(&next_dev->simple_fusion);
 	rift_kalman_6dof_init(&next_dev->ukf_fusion, NUM_POSE_DELAY_SLOTS);
 	next_dev->device_time_ns = 0;
 	next_dev->have_pose_observation = false;
@@ -434,7 +432,6 @@ void rift_tracked_device_imu_update(rift_tracked_device *dev_base, uint64_t loca
 	rift_tracked_device_imu_observation *obs;
 
 	ohmd_lock_mutex (dev->device_lock);
-	ofusion_update(&dev->simple_fusion, dt, ang_vel, accel, mag_field);
 
 	/* Handle device_ts wrap by extending to 64-bit and working in nanoseconds */
 	if (dev->device_time_ns == 0) {
@@ -454,7 +451,6 @@ void rift_tracked_device_imu_update(rift_tracked_device *dev_base, uint64_t loca
 	obs->ang_vel = *ang_vel;
 	obs->accel = *accel;
 	obs->mag = *mag_field;
-	obs->simple_orient = dev->simple_fusion.orient;
 
 	dev->num_pending_imu_observations++;
 
@@ -483,7 +479,6 @@ static rift_tracker_pose_delay_slot *get_matching_delay_slot(rift_tracked_device
 void rift_tracked_device_model_pose_update(rift_tracked_device *dev_base, uint64_t local_ts, uint64_t frame_start_local_ts, rift_tracker_exposure_info *exposure_info, posef *pose, const char *source)
 {
 	rift_tracked_device_priv *dev = (rift_tracked_device_priv *) (dev_base);
-	double time = (double)(exposure_info->local_ts) / 1000000000.0;
 	uint64_t frame_device_time_ns = 0;
 	rift_tracker_pose_delay_slot *slot = NULL;
 	int frame_fusion_slot = -1;
@@ -499,8 +494,6 @@ void rift_tracked_device_model_pose_update(rift_tracked_device *dev_base, uint64
 	}
 
 	rift_tracked_device_send_imu_debug(dev);
-
-	ofusion_tracker_update (&dev->simple_fusion, time, &pose->pos, &pose->orient);
 
 	if (dev->index < exposure_info->n_devices) {
 		/* This device existed when the exposure was taken and therefore has info */
@@ -588,15 +581,13 @@ rift_tracked_device_send_imu_debug(rift_tracked_device_priv *dev)
 			snprintf (debug_str, 1024, ",\n{ \"type\": \"imu\", \"local-ts\": %llu, "
 				 "\"device-ts\": %llu, \"dt\": %f, "
 				 "\"ang_vel\": [ %f, %f, %f ], \"accel\": [ %f, %f, %f ], "
-				 "\"mag\": [ %f, %f, %f ], "
-				 "\"simple-orient\" : [ %f, %f, %f, %f ] }",
+				 "\"mag\": [ %f, %f, %f ] }",
 				(unsigned long long) obs->local_ts,
 				(unsigned long long) obs->device_ts,
 				obs->dt,
 				obs->ang_vel.x, obs->ang_vel.y, obs->ang_vel.z,
 				obs->accel.x, obs->accel.y, obs->accel.z,
-				obs->mag.x, obs->mag.y, obs->mag.z,
-				obs->simple_orient.x, obs->simple_orient.y, obs->simple_orient.z, obs->simple_orient.w);
+				obs->mag.x, obs->mag.y, obs->mag.z);
 
 			debug_str[1023] = '\0';
 
