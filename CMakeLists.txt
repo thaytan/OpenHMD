@@ -71,7 +71,6 @@ if(OPENHMD_DRIVER_OCULUS_RIFT)
 	${CMAKE_CURRENT_LIST_DIR}/src/drv_oculus_rift/rift-sensor-esp770u.c
 	${CMAKE_CURRENT_LIST_DIR}/src/drv_oculus_rift/rift-sensor-flicker.c
 	${CMAKE_CURRENT_LIST_DIR}/src/drv_oculus_rift/rift-sensor-maths.c
-	${CMAKE_CURRENT_LIST_DIR}/src/drv_oculus_rift/rift-debug-draw.c
 	${CMAKE_CURRENT_LIST_DIR}/src/drv_oculus_rift/rift-sensor-mt9v034.c
 	${CMAKE_CURRENT_LIST_DIR}/src/drv_oculus_rift/rift-sensor-pose-helper.c
 	${CMAKE_CURRENT_LIST_DIR}/src/drv_oculus_rift/rift-sensor-ar0134.c

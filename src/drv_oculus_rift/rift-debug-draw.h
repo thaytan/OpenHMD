@@ -13,10 +13,14 @@
 #include "rift-sensor.h"
 #include "correspondence_search.h"
 
+#if HAVE_PIPEWIRE
 void rift_debug_draw_frame (uint8_t *pixels, struct blobservation* bwobs,
   correspondence_search_t *cs, struct rift_sensor_capture_frame *frame,
 	uint8_t n_devs, rift_tracked_device **devs, bool is_cv1,
   dmat3 camera_matrix, bool dist_fisheye, double dist_coeffs[5],
 	posef *camera_pose);
+#else
+#define rift_debug_draw_frame(pixels,bwobs,cs,frame,n_devs,devs,is_cv1,camera_matrix,dist_fisheye,dist_coeffs,camera_pose)
+#endif
 
 #endif
