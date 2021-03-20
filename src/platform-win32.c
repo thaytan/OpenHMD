@@ -136,7 +136,8 @@ ohmd_cond* ohmd_create_cond(ohmd_context* ctx)
 
 void ohmd_destroy_cond(ohmd_cond* cond)
 {
-	DeleteConditionVariable(&cond->cond);
+  /* The condition variable must not be in use. In that case,
+   * there's no need to do anything to clear condition variables, just free it */
 	free(cond);
 }
 
