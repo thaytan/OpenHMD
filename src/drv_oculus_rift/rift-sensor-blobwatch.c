@@ -587,10 +587,10 @@ struct blob *blobwatch_find_blob_at(blobwatch *bw, int x, int y)
 	return NULL;
 }
 
-static void update_labels_from_observation(blobwatch *bw, blobservation *ob)
+void blobwatch_update_labels(blobwatch *bw, blobservation *ob, int device_id)
 {
-	/* Take the observation in ob and use any LED labels in it to update any missing
-	 * LED labels in the last observation */
+	/* Take the observation in ob and replace any labels for the given device in
+	 * the most recent observation with labels from this observation */
 	/* FIXME: This is an n^2 match for simplicity. Filtering out blobs with no LED
 	 * label and sorting the blobs by ID might make things quicker for larger numbers
 	 * of blobs - needs testing. */
@@ -600,14 +600,24 @@ static void update_labels_from_observation(blobwatch *bw, blobservation *ob)
 	if (last_ob == NULL || last_ob == ob)
 		return; /* Nothing to do */
 
+	/* Clear all labels for the indicated device */
+	for (l = 0; l < last_ob->num_blobs; l++) {
+		struct blob *new_b = last_ob->blobs + l;
+		if (LED_OBJECT_ID(new_b->led_id) == device_id) {
+			new_b->prev_led_id = new_b->led_id;
+			new_b->led_id = LED_INVALID_ID;
+		}
+	}
+
+	/* Transfer all labels for matching blob ids */
 	for (i = 0; i < ob->num_blobs; i++) {
 		struct blob *b = ob->blobs + i;
-		if (b->led_id == LED_INVALID_ID)
-			continue; /* Not labelled */
+		if (LED_OBJECT_ID(b->led_id) != device_id)
+			continue; /* Not for this device */
 
 		for (l = 0; l < last_ob->num_blobs; l++) {
 			struct blob *new_b = last_ob->blobs + l;
-			if (new_b->blob_id == b->blob_id && new_b->led_id == LED_INVALID_ID) {
+			if (new_b->blob_id == b->blob_id) {
 				LOGV("Found matching blob %u - labelled with LED id %x\n",
 					b->blob_id, b->led_id);
 				new_b->led_id = b->led_id;
@@ -616,9 +626,7 @@ static void update_labels_from_observation(blobwatch *bw, blobservation *ob)
 	}
 }
 
-void blobwatch_release_observation(blobwatch *bw, blobservation *ob, bool update_labels)
+void blobwatch_release_observation(blobwatch *bw, blobservation *ob)
 {
-	if (update_labels)
-		update_labels_from_observation(bw, ob);
 	PUSH_QUEUE(&bw->observation_q, ob);
 }

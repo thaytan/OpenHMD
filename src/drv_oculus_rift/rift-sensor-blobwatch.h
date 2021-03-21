@@ -77,7 +77,8 @@ void blobwatch_process(blobwatch *bw, uint8_t *frame,
 		       int width, int height, uint8_t led_pattern_phase,
 		       rift_led *leds, uint8_t num_leds,
 		       blobservation **output);
-void blobwatch_release_observation(blobwatch *bw, blobservation *ob, bool update_labels);
+void blobwatch_update_labels(blobwatch *bw, blobservation *ob, int device_id);
+void blobwatch_release_observation(blobwatch *bw, blobservation *ob);
 struct blob *blobwatch_find_blob_at(blobwatch *bw, int x, int y);
 void blobwatch_set_flicker(blobwatch *bw, bool enable);
 

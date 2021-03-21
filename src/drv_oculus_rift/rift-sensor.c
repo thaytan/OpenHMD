@@ -338,6 +338,11 @@ static void tracker_process_blobs_long(rift_sensor_ctx *ctx, rift_sensor_capture
 			if (dev_state->score.good_pose_match) {
 				update_device_and_blobs (ctx, frame, dev, dev_state, &obj_cam_pose);
 				frame->long_analysis_found_new_blobs = true;
+
+				/* Transfer these blob labels to the blobwatch object */
+				ohmd_lock_mutex(ctx->sensor_lock);
+				blobwatch_update_labels (ctx->bw, frame->bwobs, dev->id);
+				ohmd_unlock_mutex(ctx->sensor_lock);
 			}
 		}
 	}
@@ -482,7 +487,7 @@ release_capture_frame(rift_sensor_ctx *sensor, rift_sensor_capture_frame *frame)
 	rift_tracker_frame_release (sensor->tracker, now, frame->uvc.start_ts, &frame->exposure_info, sensor->serial_no);
 
 	if (frame->bwobs) {
-		blobwatch_release_observation(sensor->bw, frame->bwobs, frame->long_analysis_found_new_blobs);
+		blobwatch_release_observation(sensor->bw, frame->bwobs);
 		frame->bwobs = NULL;
 	}
 	PUSH_QUEUE(&sensor->capture_frame_q, frame);
