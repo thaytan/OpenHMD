@@ -833,6 +833,27 @@ static int rift_get_led_info(rift_hmd_t *priv)
 		priv->leds.points[pkt.index].pattern = pattern;
 	}
 
+	/* FIXME: Filter out the LEDs on the back of the headset strap for now, until the positional tracking copes with the
+	 * device articulation. At the moment, a camera that sees the back LEDs will extract the wrong position.
+	 * Headset LEDs have a Z < -100mm */
+	{
+		int in_index, out_index = 0;
+		for (in_index = 0; in_index < priv->leds.num_points; in_index++) {
+			rift_led *led = &priv->leds.points[in_index];
+			if (led->pos.z < -0.1) {
+				printf ("Dropping headband LED { .pos = {%f,%f,%f}, .dir={%f,%f,%f}, .pattern=0x%x },\n",
+					led->pos.x, led->pos.y, led->pos.z,
+					led->dir.x, led->dir.y, led->dir.z,
+					led->pattern);
+				continue;
+			}
+			if (in_index != out_index)
+				priv->leds.points[out_index] = *led;
+			out_index++;
+		}
+		priv->leds.num_points = out_index;
+	}
+
 	rift_leds_dump (&priv->leds, "HMD LEDs");
 
 	return 0;
