@@ -260,6 +260,7 @@ static void tracker_process_blobs_long(rift_sensor_ctx *ctx, rift_sensor_capture
 	blobservation* bwobs = frame->bwobs;
 	int d, pass;
 	vec3f gravity_vector = {{ 0.0, 1.0, 0.0 }};
+	bool had_strong_matches = false;
 
 	LOGD("Sensor %d Frame %d - starting long search for devices", ctx->id, frame->id);
 
@@ -295,8 +296,21 @@ static void tracker_process_blobs_long(rift_sensor_ctx *ctx, rift_sensor_capture
 			}
 
 			if (dev_state->score.good_pose_match) {
-				/* We already found this device during fast analysis */
-				continue;
+				if (pass == 0 || dev_state->score.strong_pose_match) {
+					/* We already found this device during fast analysis, or
+					 * we found a strong match on the first search. Skip it */
+					continue;
+				}
+
+				/* We have a good pose match for this device, that we found on the first
+				 * pass. If any other device found a strong match though, then that may
+				 * have claimed blobs we were relying on and should start again */
+				if (had_strong_matches)
+					flags |= CS_FLAG_SHALLOW_SEARCH;
+			}
+
+			if (flags & CS_FLAG_DEEP_SEARCH) {
+				LOGD("Sensor %d long search for device %d\n", ctx->id, dev->id);
 			}
 
 			/* If the gravity vector error standard deviation is small enough, try for an aligned pose from the prior,
@@ -336,6 +350,8 @@ static void tracker_process_blobs_long(rift_sensor_ctx *ctx, rift_sensor_capture
 				continue;
 
 			if (dev_state->score.good_pose_match) {
+				had_strong_matches |= dev_state->score.strong_pose_match;
+
 				update_device_and_blobs (ctx, frame, dev, dev_state, &obj_cam_pose);
 				frame->long_analysis_found_new_blobs = true;
 
