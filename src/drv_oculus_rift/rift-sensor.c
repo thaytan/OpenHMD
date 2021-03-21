@@ -673,8 +673,8 @@ update_device_pose (rift_sensor_ctx *sensor_ctx, rift_tracked_device *dev,
 				pose.pos.x, pose.pos.y, pose.pos.z);
 #endif
 		}
-		/* Arbitrary 2 degree threshold for gravity vector as a random magic number */
-		else if (dev->id == 0 && oquatf_get_length (&capture_pose->orient) > 0.9 && dev_state->gravity_error_rad < RAD_TO_DEG(2.0)) {
+		/* Arbitrary 15 degree threshold for gravity vector as a random magic number */
+		else if (dev->id == 0 && oquatf_get_length (&capture_pose->orient) > 0.9 && dev_state->gravity_error_rad < DEG_TO_RAD(15.0)) {
 			/* No camera pose yet. If this is the HMD, we had an IMU pose at capture time,
 			 * and the fusion has a good gravity vector from the IMU, use it to
 			 * initialise the camera (world->camera) pose using the current headset pose.
@@ -714,6 +714,9 @@ update_device_pose (rift_sensor_ctx *sensor_ctx, rift_tracked_device *dev,
 #endif
 
 			sensor_ctx->have_camera_pose = true;
+		}
+		else if (dev->id == 0) {
+			LOGD("No camera pose yet - gravity error is %f degrees\n", RAD_TO_DEG(dev_state->gravity_error_rad));
 		}
 
 	}
