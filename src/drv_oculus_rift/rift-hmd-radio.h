@@ -10,7 +10,31 @@
 #include <hidapi.h>
 #include "rift.h"
 
-int rift_touch_get_calibration(hid_device *handle,
+typedef struct rift_hmd_radio_state rift_hmd_radio_state;
+
+enum rift_fw_read_cmd {
+	RIFT_FW_READ_CMD_NONE = 0,
+	RIFT_FW_READ_CMD_CALIBRATION_HASH,
+	RIFT_FW_READ_CMD_CALIBRATION_HDR,
+	RIFT_FW_READ_CMD_CALIBRATION
+};
+
+struct rift_hmd_radio_state {
+	hid_device *handle;
+
+	enum rift_fw_read_cmd cur_read_cmd; /* Which firmware read state is in progress */
+	bool command_result_pending; /* We are waiting for a response to a read command */
+	int device_in_progress; /* Device ID we're currently reading from */
+
+	uint32_t read_block_alloc; /* Allocated size of the read_block */
+	uint32_t read_data_offset; /* current read offset */
+	uint32_t read_data_size;   /* Amount of data in the read block */
+	unsigned char *read_block;
+};
+
+void rift_hmd_radio_init(rift_hmd_radio_state *radio, hid_device *handle);
+void rift_hmd_radio_clear(rift_hmd_radio_state *radio);
+int rift_touch_get_calibration(rift_hmd_radio_state *radio,
 		int device_id,
 		rift_touch_calibration *calibration);
 void rift_touch_clear_calibration(rift_touch_calibration *calibration);

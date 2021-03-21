@@ -53,6 +53,8 @@ struct rift_hmd_s {
 
 	hid_device* handle;
 	hid_device* radio_handle;
+	rift_hmd_radio_state radio;
+
 	pkt_sensor_range sensor_range;
 	pkt_imu_calibration imu_calibration;
 	pkt_sensor_display_info display_info;
@@ -344,7 +346,7 @@ static void handle_touch_controller_message(rift_hmd_t *hmd, uint64_t local_ts,
 
 	if (!touch->have_calibration) {
 		/* We need calibration data to do any more */
-		if (rift_touch_get_calibration (hmd->radio_handle, touch->device_num,
+		if (rift_touch_get_calibration (&hmd->radio, touch->device_num,
 				&touch->calibration) < 0)
 			return;
 
@@ -536,6 +538,7 @@ static void handle_rift_radio_report(rift_hmd_t* hmd, uint64_t ts, unsigned char
 static void update_hmd(rift_hmd_t *priv)
 {
 	unsigned char buffer[FEATURE_BUFFER_SIZE];
+	bool got_a_msg = false;
 
 	// Handle keep alive messages
 	double t = ohmd_get_tick();
@@ -547,45 +550,45 @@ static void update_hmd(rift_hmd_t *priv)
 	}
 
 	// Read all the messages from the device.
-	while(true){
-		int size = hid_read(priv->handle, buffer, FEATURE_BUFFER_SIZE);
+	do {
+		int size;
+		got_a_msg = false;
+
+		size = hid_read(priv->handle, buffer, FEATURE_BUFFER_SIZE);
 		if(size < 0){
-			LOGE("error reading from device");
+			LOGE("error reading from HMD");
 			break;
-		} else if(size == 0) {
-			break; // No more messages, return.
+		} else if(size > 0) {
+			/* FIXME: Collect all HID messages that are pending, then work backward to calculate capture timestamps? */
+			uint64_t ts = ohmd_monotonic_get(priv->ctx);
+
+			// currently the only message type the hardware supports (I think)
+			if(buffer[0] == RIFT_IRQ_SENSORS_DK1 || buffer[0] == RIFT_IRQ_SENSORS_DK2) {
+				handle_tracker_sensor_msg(priv, ts, buffer, size);
+				got_a_msg = true;
+			}else{
+				LOGE("unknown HMD message type: %u", buffer[0]);
+			}
 		}
 
-		/* FIXME: Collect all HID messages that are pending, then work backward to calculate capture timestamps? */
-		uint64_t ts = ohmd_monotonic_get(priv->ctx);
+		if (priv->radio_handle == NULL)
+			continue;;
 
-		// currently the only message type the hardware supports (I think)
-		if(buffer[0] == RIFT_IRQ_SENSORS_DK1 || buffer[0] == RIFT_IRQ_SENSORS_DK2) {
-			handle_tracker_sensor_msg(priv, ts, buffer, size);
-		}else{
-			LOGE("unknown message type: %u", buffer[0]);
-		}
-	}
-
-	if (priv->radio_handle == NULL)
-		return;
-
-	// Read all the controller messages from the radio device.
-	while(true){
-		int size = hid_read(priv->radio_handle, buffer, FEATURE_BUFFER_SIZE);
+		// Read all the controller messages from the radio device.
+		size = hid_read(priv->radio_handle, buffer, FEATURE_BUFFER_SIZE);
 		if(size < 0){
-			LOGE("error reading from device");
+			LOGE("error reading from controllers");
 			break;
-		} else if(size == 0) {
-			break; // No more messages, return.
+		} else if(size > 0) {
+			/* FIXME: Collect all HID messages that are pending, then work backward to calculate capture timestamps? */
+			uint64_t ts = ohmd_monotonic_get(priv->ctx);
+
+			if (buffer[0] == RIFT_RADIO_REPORT_ID) {
+				handle_rift_radio_report (priv, ts, buffer, size);
+				got_a_msg = true;
+			}
 		}
-
-		/* FIXME: Collect all HID messages that are pending, then work backward to calculate capture timestamps? */
-		uint64_t ts = ohmd_monotonic_get(priv->ctx);
-
-		if (buffer[0] == RIFT_RADIO_REPORT_ID)
-			handle_rift_radio_report (priv, ts, buffer, size);
-	}
+	} while(got_a_msg);
 }
 
 static void update_device(ohmd_device* device)
@@ -1003,6 +1006,7 @@ static rift_hmd_t *open_hmd(ohmd_driver* driver, ohmd_device_desc* desc)
 			ohmd_set_error(driver->ctx, "Failed to set non-blocking on radio device");
 			goto cleanup;
 		}
+		rift_hmd_radio_init(&priv->radio, priv->radio_handle);
 	}
 
 	unsigned char buf[FEATURE_BUFFER_SIZE];
@@ -1181,8 +1185,10 @@ static void close_hmd(rift_hmd_t *hmd)
 {
 	if (hmd->tracker_ctx)
 		rift_tracker_free(hmd->tracker_ctx);
-	if (hmd->radio_handle)
+	if (hmd->radio_handle) {
+		rift_hmd_radio_clear(&hmd->radio);
 		hid_close(hmd->radio_handle);
+	}
 	hid_close(hmd->handle);
 
 	rift_touch_clear_calibration (&hmd->touch_dev[0].calibration);
