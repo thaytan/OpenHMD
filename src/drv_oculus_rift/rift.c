@@ -539,6 +539,7 @@ static void update_hmd(rift_hmd_t *priv)
 {
 	unsigned char buffer[FEATURE_BUFFER_SIZE];
 	bool got_a_msg = false;
+	uint64_t start = ohmd_monotonic_get(priv->ctx);
 
 	// Handle keep alive messages
 	double t = ohmd_get_tick();
@@ -587,6 +588,13 @@ static void update_hmd(rift_hmd_t *priv)
 				handle_rift_radio_report (priv, ts, buffer, size);
 				got_a_msg = true;
 			}
+		}
+
+		/* Don't loop for more than 5ms, or the app doesn't get a chance to draw anything */
+		if (got_a_msg) {
+			uint64_t now = ohmd_monotonic_get(priv->ctx);
+			if (now - start > 5000000)
+				break;
 		}
 	} while(got_a_msg);
 }
