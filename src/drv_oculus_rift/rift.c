@@ -301,6 +301,29 @@ static void handle_tracker_sensor_msg(rift_hmd_t* priv, uint64_t local_ts, unsig
 	}
 }
 
+static void dump_controller_calibration(rift_touch_controller_t *touch)
+{
+	rift_touch_calibration *c = &touch->calibration;
+	int i;
+
+	LOGI ("%s Controller IMU calibration  gyro_offset [ %f, %f, %f ]  accel_offset [ %f, %f, %f ]",
+		touch->base.id == 1 ? "Right" : "Left",
+		c->gyro_calibration[9], c->gyro_calibration[10], c->gyro_calibration[11],
+		c->acc_calibration[9], c->acc_calibration[10], c->acc_calibration[11]);
+
+	LOGI("  gyro_calib = ");
+	for (i = 0; i < 3; i++) {
+		LOGI("  [ %8.3f, %8.3f, %8.3f ]", c->gyro_calibration[i*3+0],
+			c->gyro_calibration[i*3+1], c->gyro_calibration[i*3+2]);
+	}
+
+	LOGI("  accel_calib = ");
+	for (i = 0; i < 3; i++) {
+		LOGI("  [ %8.3f, %8.3f, %8.3f ]", c->acc_calibration[i*3+0],
+			c->acc_calibration[i*3+1], c->acc_calibration[i*3+2]);
+	}
+}
+
 static void handle_touch_controller_message(rift_hmd_t *hmd, uint64_t local_ts,
 		rift_touch_controller_t *touch, pkt_rift_radio_message *msg)
 {
@@ -332,6 +355,7 @@ static void handle_touch_controller_message(rift_hmd_t *hmd, uint64_t local_ts,
 
 		touch->tracked_dev = rift_tracker_add_device (hmd->tracker_ctx, touch->base.id, &imu_pose, &touch->calibration.leds);
 		touch->have_calibration = true;
+		dump_controller_calibration(touch);
 	}
 
 	// time in microseconds
