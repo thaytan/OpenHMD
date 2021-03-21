@@ -32,6 +32,10 @@
 /* Number of state slots to use for quat/position updates */
 #define NUM_POSE_DELAY_SLOTS 3
 
+/* Length of time (milliseconds) we will interpolate position before declaring
+ * tracking lost */
+#define POSE_LOST_THRESHOLD 500
+
 typedef struct rift_tracked_device_priv rift_tracked_device_priv;
 typedef struct rift_tracker_pose_delay_slot rift_tracker_pose_delay_slot;
 
@@ -62,13 +66,13 @@ struct rift_tracked_device_priv {
 	 * to the model the camera will see, which is offset and possibly rotated 180 degrees (for the HMD) */
 	posef fusion_to_model;
 
-	/* The model (HMD/controller) pose -> world transform */
-	posef pose;
-
 	uint32_t last_device_ts;
 	uint64_t device_time_ns;
 
-	bool have_pose_observation;
+	uint64_t last_observed_pose_ts;
+	/* Reported view pose and model pose respectively */
+	posef reported_pose;
+	posef model_pose;
 
 	int num_pending_imu_observations;
 	rift_tracked_device_imu_observation pending_imu_observations[RIFT_MAX_PENDING_IMU_OBSERVATIONS];
@@ -120,8 +124,7 @@ rift_tracker_add_device (rift_tracker_ctx *ctx, int device_id, posef *imu_pose, 
 
 	next_dev->base.id = device_id;
 	rift_kalman_6dof_init(&next_dev->ukf_fusion, NUM_POSE_DELAY_SLOTS);
-	next_dev->device_time_ns = 0;
-	next_dev->have_pose_observation = false;
+	next_dev->last_observed_pose_ts = next_dev->device_time_ns = 0;
 
 	/* Init delay slot bookkeeping */
 	for (s = 0; s < NUM_POSE_DELAY_SLOTS; s++) {
@@ -465,12 +468,18 @@ void rift_tracked_device_imu_update(rift_tracked_device *dev_base, uint64_t loca
 void rift_tracked_device_get_view_pose(rift_tracked_device *dev_base, posef *pose)
 {
 	rift_tracked_device_priv *dev = (rift_tracked_device_priv *) (dev_base);
+	posef imu_pose;
+
 	ohmd_lock_mutex (dev->device_lock);
-	rift_kalman_6dof_get_pose_at(&dev->ukf_fusion, dev->device_time_ns, pose, NULL, NULL);
-	if (!dev->have_pose_observation) {
-		/* Don't let the device move until there's been an observation of actual position */
-		pose->pos.x = pose->pos.y = pose->pos.z = 0.0;
+	rift_kalman_6dof_get_pose_at(&dev->ukf_fusion, dev->device_time_ns, &imu_pose, NULL, NULL);
+
+	dev->reported_pose.orient = imu_pose.orient;
+	if (dev->device_time_ns - dev->last_observed_pose_ts < (POSE_LOST_THRESHOLD * 1000000UL)) {
+		/* Don't let the device move unless there's a recent observation of actual position */
+		dev->reported_pose.pos = imu_pose.pos;
 	}
+
+	*pose = dev->reported_pose;
 	ohmd_unlock_mutex (dev->device_lock);
 }
 
@@ -506,10 +515,9 @@ void rift_tracked_device_model_pose_update(rift_tracked_device *dev_base, uint64
 					(unsigned long long) frame_device_time_ns, (double) (dev->device_time_ns - frame_device_time_ns) / 1000000000.0 );
 			frame_fusion_slot = slot->slot_id;
 			rift_kalman_6dof_position_update(&dev->ukf_fusion, dev->device_time_ns, pose, slot->slot_id);
+			dev->last_observed_pose_ts = dev->device_time_ns;
 		}
 	}
-
-	dev->have_pose_observation = true;
 
 	rift_tracked_device_send_debug_printf(dev, local_ts, ",\n{ \"type\": \"pose\", \"local-ts\": %llu, "
 			"\"device-ts\": %u, \"frame-start-local-ts\": %llu, "
@@ -532,7 +540,7 @@ void rift_tracked_device_model_pose_update(rift_tracked_device *dev_base, uint64
 /* Called with the device lock held */
 void rift_tracked_device_get_model_pose_locked(rift_tracked_device_priv *dev, double ts, posef *pose, vec3f *pos_error, vec3f *rot_error)
 {
-	posef global_pose;
+	posef global_pose, model_pose;
 	vec3f global_pos_error, global_rot_error;
 
 	rift_kalman_6dof_get_pose_at(&dev->ukf_fusion, dev->device_time_ns, &global_pose, &global_pos_error, &global_rot_error);
@@ -543,16 +551,18 @@ void rift_tracked_device_get_model_pose_locked(rift_tracked_device_priv *dev, do
 	}
 
 	/* Apply any needed global pose change */
-	oposef_apply(&global_pose, &dev->fusion_to_model, pose);
+	oposef_apply(&global_pose, &dev->fusion_to_model, &model_pose);
 	if (pos_error)
 		oquatf_get_rotated(&global_pose.orient, &global_pos_error, pos_error);
 	if (rot_error)
 		oquatf_get_rotated(&global_pose.orient, &global_rot_error, rot_error);
 
-	if (!dev->have_pose_observation) {
-		/* Don't let the device move until there's been an observation of actual position */
-		pose->pos.x = pose->pos.y = pose->pos.z = 0.0;
+	dev->model_pose.orient = model_pose.orient;
+	if (dev->device_time_ns - dev->last_observed_pose_ts < (POSE_LOST_THRESHOLD * 1000000UL)) {
+		/* Don't let the device move unless there's a recent observation of actual position */
+		dev->model_pose.pos = model_pose.pos;
 	}
+	*pose = dev->model_pose;
 }
 
 void rift_tracked_device_get_model_pose(rift_tracked_device *dev_base, double ts, posef *pose, vec3f *pos_error, vec3f *rot_error)
