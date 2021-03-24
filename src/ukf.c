@@ -81,6 +81,16 @@ bool ukf_base_predict(ukf_base *u, double dt)
 
 bool ukf_base_predict_with_process(ukf_base *u, double dt, ukf_process_fn process_fn)
 {
+
+  /* Add the additive process noise before prediction, so it is
+   * already incorporated in the prediction, and we don't need
+   * to re-draw points after */
+  if (u->Q) {
+    if (matrix2d_add_in_place (u->P_prior, u->Q) != MATRIX_RESULT_OK) {
+      return false;
+    }
+  }
+
   /* Generate the sigma points around the current state prior */
   if (!ut_compute_sigma_points(&u->ut_X, u->sigmas, u->x_prior, u->P_prior)) {
       printf ("Prediction UKF weight computation failed\n");
@@ -101,7 +111,7 @@ bool ukf_base_predict_with_process(ukf_base *u, double dt, ukf_process_fn proces
       return false;
   }
 
-  if (!ut_compute_transform (&u->ut_X, u->sigmas, u->x, u->P, u->Q)) {
+  if (!ut_compute_transform (&u->ut_X, u->sigmas, u->x, u->P, NULL)) {
       printf ("Failed to compute UKF transformed mean and covariance\n");
       return false;
   }
@@ -109,12 +119,6 @@ bool ukf_base_predict_with_process(ukf_base *u, double dt, ukf_process_fn proces
   /* Fix-up numerical errors in the computed covariance */
   if (matrix2d_condition_symmetry(u->P, 1e-26) != MATRIX_RESULT_OK)
     return false;
-
-  /* Re-generate the sigma points, because the covariance has been changed */
-  if (!ut_compute_sigma_points(&u->ut_X, u->sigmas, u->x, u->P)) {
-      printf ("UKF weight re-draw computation failed\n");
-      return false;
-  }
 
   return true;
 }
