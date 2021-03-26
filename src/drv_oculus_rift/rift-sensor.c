@@ -320,7 +320,7 @@ static void tracker_process_blobs_long(rift_sensor_ctx *ctx, rift_sensor_capture
 				quatf ref_orient = obj_cam_pose.orient;
 #endif
 				quatf pose_gravity_swing, pose_gravity_twist;
-				float pose_tolerance = OHMD_MAX(dev_state->gravity_error_rad, DEG_TO_RAD(10));
+				float pose_tolerance = OHMD_MAX(2 * dev_state->gravity_error_rad, DEG_TO_RAD(10));
 
 				oposef_apply_inverse(&dev_state->capture_world_pose, &ctx->camera_pose, &obj_cam_pose);
 
