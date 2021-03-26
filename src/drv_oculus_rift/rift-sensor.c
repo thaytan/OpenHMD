@@ -223,7 +223,7 @@ static void tracker_process_blobs_fast(rift_sensor_ctx *ctx, rift_sensor_capture
 				}
 			}
 
-			if (num_blobs > 3) {
+			if (num_blobs > 4) {
 				estimate_initial_pose (bwobs->blobs, bwobs->num_blobs,
 					dev->id, dev->leds->points, dev->leds->num_points, camera_matrix,
 					dist_coeffs, ctx->is_cv1,
@@ -233,11 +233,14 @@ static void tracker_process_blobs_fast(rift_sensor_ctx *ctx, rift_sensor_capture
 					bwobs->blobs, bwobs->num_blobs,
 					dev->id, dev->leds->points, dev->leds->num_points,
 					&ctx->camera_matrix, ctx->dist_coeffs, ctx->dist_fisheye, NULL);
-			}
 
-			if (dev_state->score.good_pose_match) {
-				LOGD("Sensor %d re-acquired match for device %d matched %u blobs of %u",
-					ctx->id, dev->id, dev_state->score.matched_blobs, dev_state->score.visible_leds);
+				if (dev_state->score.strong_pose_match) {
+					LOGD("Sensor %d re-acquired match for device %d matched %u blobs of %u",
+						ctx->id, dev->id, dev_state->score.matched_blobs, dev_state->score.visible_leds);
+				}
+				else {
+					dev_state->score.good_pose_match = false; /* clear the good pose match flag so the long analysis thread will search */
+				}
 			}
 		}
 
