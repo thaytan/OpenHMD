@@ -36,6 +36,10 @@
  * tracking lost */
 #define POSE_LOST_THRESHOLD 500
 
+/* If set to 1, only position information is taken from sensors, and orientation
+ * is purely from IMU (even yaw) */
+#define SENSORS_POSITION_ONLY 0
+
 typedef struct rift_tracked_device_priv rift_tracked_device_priv;
 typedef struct rift_tracker_pose_delay_slot rift_tracker_pose_delay_slot;
 
@@ -514,7 +518,11 @@ void rift_tracked_device_model_pose_update(rift_tracked_device *dev_base, uint64
 			LOGD ("Got pose update for delay slot %d for dev %d, ts %llu (delay %f)", slot->slot_id, dev->base.id,
 					(unsigned long long) frame_device_time_ns, (double) (dev->device_time_ns - frame_device_time_ns) / 1000000000.0 );
 			frame_fusion_slot = slot->slot_id;
-			rift_kalman_6dof_position_update(&dev->ukf_fusion, dev->device_time_ns, pose, slot->slot_id);
+#if SENSORS_POSITION_ONLY
+			rift_kalman_6dof_position_update(&dev->ukf_fusion, dev->device_time_ns, &pose->pos, slot->slot_id);
+#else
+			rift_kalman_6dof_pose_update(&dev->ukf_fusion, dev->device_time_ns, pose, slot->slot_id);
+#endif
 			dev->last_observed_pose_ts = dev->device_time_ns;
 		}
 	}

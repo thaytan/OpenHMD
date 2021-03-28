@@ -520,6 +520,24 @@ static bool pose_measurement_func(const ukf_base *ukf, const ukf_measurement *m,
 	return true;
 }
 
+static bool position_measurement_func(const ukf_base *ukf, const ukf_measurement *m, const matrix2d *x, matrix2d *z)
+{
+	rift_kalman_6dof_filter *filter_state = (rift_kalman_6dof_filter *)(ukf);
+	int state_position_index = STATE_POSITION;
+
+	if (filter_state->pose_slot != -1) {
+		/* A delay slot was set, get the measurement from it */
+		int slot_index = BASE_STATE_SIZE + (DELAY_SLOT_STATE_SIZE * filter_state->pose_slot);
+		state_position_index = slot_index + DELAY_SLOT_STATE_POSITION;
+	}
+	/* Measure position and orientation */
+	MATRIX2D_Y(z, POSE_MEAS_POSITION)   = MATRIX2D_Y(x, state_position_index);
+	MATRIX2D_Y(z, POSE_MEAS_POSITION+1) = MATRIX2D_Y(x, state_position_index+1);
+	MATRIX2D_Y(z, POSE_MEAS_POSITION+2) = MATRIX2D_Y(x, state_position_index+2);
+
+	return true;
+}
+
 /* Callback function that takes a set of sigma points (N_sigmaxN_measurement and weights (1xN_sigma) and computes the
  * mean (1xN_measurement) */
 static bool pose_mean_func(const unscented_transform *ut, const matrix2d *sigmas, const matrix2d *weights, matrix2d *mean)
@@ -677,6 +695,11 @@ void rift_kalman_6dof_init(rift_kalman_6dof_filter *state, int num_delay_slots)
 	for (int i = 3; i < 6; i++)
 		MATRIX2D_XY(state->m2.R, i, i) = (DEG_TO_RAD(45) * DEG_TO_RAD(45)); /* 45 degrees std dev (don't trust observations much) */
 
+	/* m_position is for position-only measurements - no orientation. */
+	ukf_measurement_init(&state->m_position, 3, 3, &state->ukf, position_measurement_func, NULL, NULL, NULL);
+	for (int i = 0; i < 3; i++)
+		MATRIX2D_XY(state->m_position.R, i, i) = 0.02 * 0.02; /* 2cm error std dev */
+
 	state->reset_slot = -1;
 	state->pose_slot = -1;
 
@@ -762,7 +785,7 @@ void rift_kalman_6dof_imu_update (rift_kalman_6dof_filter *state, uint64_t time,
 	rift_kalman_6dof_update(state, time, m);
 }
 
-void rift_kalman_6dof_position_update(rift_kalman_6dof_filter *state, uint64_t time, posef *pose, int delay_slot)
+void rift_kalman_6dof_pose_update(rift_kalman_6dof_filter *state, uint64_t time, posef *pose, int delay_slot)
 {
 	ukf_measurement *m;
 
@@ -783,6 +806,26 @@ void rift_kalman_6dof_position_update(rift_kalman_6dof_filter *state, uint64_t t
 	MATRIX2D_Y(m->z, POSE_MEAS_ORIENTATION+1) = pose->orient.y;
 	MATRIX2D_Y(m->z, POSE_MEAS_ORIENTATION+2) = pose->orient.z;
 	MATRIX2D_Y(m->z, POSE_MEAS_ORIENTATION+3) = pose->orient.w;
+
+	rift_kalman_6dof_update(state, time, m);
+}
+
+void rift_kalman_6dof_position_update(rift_kalman_6dof_filter *state, uint64_t time, vec3f *pos, int delay_slot)
+{
+	ukf_measurement *m;
+
+	/* Use lagged state vector entries to correct for delay */
+	state->pose_slot = delay_slot;
+
+	/* If doing a delayed update, then the slot must be in use (
+	 * or else it contains empty data */
+	if (delay_slot != -1)
+		assert(state->slot_inuse[delay_slot]);
+
+	m = &state->m_position;
+	MATRIX2D_Y(m->z, POSE_MEAS_POSITION+0) = pos->x;
+	MATRIX2D_Y(m->z, POSE_MEAS_POSITION+1) = pos->y;
+	MATRIX2D_Y(m->z, POSE_MEAS_POSITION+2) = pos->z;
 
 	rift_kalman_6dof_update(state, time, m);
 }

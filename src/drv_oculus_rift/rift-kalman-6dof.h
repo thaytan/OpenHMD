@@ -62,6 +62,11 @@ struct rift_kalman_6dof_filter {
    */
   ukf_measurement m2;
 
+  /* Measurment 3: Position
+   *  vec3f position
+   */
+  ukf_measurement m_position;
+
   int pose_slot; /* slot number to use for pose update */
   int reset_slot; /* slot number to reset during process_func if != -1 */
 
@@ -76,7 +81,8 @@ void rift_kalman_6dof_prepare_delay_slot(rift_kalman_6dof_filter *state, uint64_
 void rift_kalman_6dof_release_delay_slot(rift_kalman_6dof_filter *state, int delay_slot);
 
 void rift_kalman_6dof_imu_update (rift_kalman_6dof_filter *state, uint64_t time, const vec3f* ang_vel, const vec3f* accel, const vec3f* mag_field);
-void rift_kalman_6dof_position_update(rift_kalman_6dof_filter *state, uint64_t time, posef *pose, int delay_slot);
+void rift_kalman_6dof_pose_update(rift_kalman_6dof_filter *state, uint64_t time, posef *pose, int delay_slot);
+void rift_kalman_6dof_position_update(rift_kalman_6dof_filter *state, uint64_t time, vec3f *position, int delay_slot);
 
 void rift_kalman_6dof_get_pose_at(rift_kalman_6dof_filter *state, uint64_t time, posef *pose, vec3f *pos_error, vec3f *rot_error);
 
