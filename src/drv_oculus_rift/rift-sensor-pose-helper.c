@@ -11,6 +11,12 @@
 #include "rift-sensor-pose-helper.h"
 #include "rift-sensor-opencv.h"
 
+struct visible_led_info {
+	rift_led *led;
+	vec3f pos;
+	double led_radius;
+};
+
 static void expand_rect(rift_rect_t *bounds, double x, double y, double w, double h)
 {
 	if (x < bounds->left)
@@ -23,22 +29,26 @@ static void expand_rect(rift_rect_t *bounds, double x, double y, double w, doubl
 		bounds->bottom = y+h;
 }
 
-static vec3f *find_best_matching_led (vec3f *led_points, int num_leds, struct blob *blob, double led_radius, double *out_sqerror)
+static int find_best_matching_led (struct visible_led_info *led_points, int num_leds, struct blob *blob, double *out_sqerror)
 {
-  vec3f *best_led = NULL;
-  double best_sqerror = 1e20;
+	double best_z;
+	int best_led_index = -1;
+	double best_sqerror = 1e20;
 
 	for (int i = 0; i < num_leds; i++) {
-		vec3f *led = led_points + i;
-		double dx = abs(led->x - blob->x);
-		double dy = abs(led->y - blob->y);
+		struct visible_led_info *led_info = led_points + i;
+		vec3f *pos = &led_info->pos;
+		double led_radius = led_info->led_radius;
+		double dx = abs(pos->x - blob->x);
+		double dy = abs(pos->y - blob->y);
 		double sqerror = dx*dx + dy*dy;
 
 		/* Check if the LED falls within the bounding box
 		 * has smaller error distance, or is closer to the camera (smaller Z) */
-		if (sqerror < led_radius * led_radius) {
-			if (best_led == NULL || sqerror < best_sqerror || best_led->z > led->z) {
-				best_led = led;
+		if (sqerror < (led_radius*led_radius)) {
+			if (best_led_index < 0 || sqerror < best_sqerror || best_z > pos->z) {
+				best_z = pos->z;
+				best_led_index = i;
 				best_sqerror = sqerror;
 			}
 		}
@@ -46,7 +56,7 @@ static vec3f *find_best_matching_led (vec3f *led_points, int num_leds, struct bl
 
 	if (out_sqerror)
 		*out_sqerror = best_sqerror;
-	return best_led;
+	return best_led_index;
 }
 
 static bool
@@ -86,14 +96,16 @@ void rift_evaluate_pose_with_prior (rift_pose_metrics *score, posef *pose,
 	 * 4. Count up the matched LED<->Blob correspodences, and the reprojection error
 	 */
 	vec3f led_out_points[MAX_OBJECT_LEDS];
-	vec3f visible_led_points[MAX_OBJECT_LEDS];
+	struct visible_led_info visible_led_points[MAX_OBJECT_LEDS];
 	
 	int num_matched_blobs = 0;
 	int num_unmatched_blobs = 0;
 	int num_visible_leds = 0;
 	double reprojection_error = 0.0;
 	bool first_visible = true;
-	double led_radius;
+	/* FIXME: Pass LED size in the model */
+	double led_radius_mm = 5.0 / 1000.0;
+	double focal_length;
 	bool good_pose_match = false;
 	bool strong_pose_match = false;
 	rift_rect_t bounds = { 0, };
@@ -107,8 +119,9 @@ void rift_evaluate_pose_with_prior (rift_pose_metrics *score, posef *pose,
 	    camera_matrix, dist_coeffs, dist_fisheye,
 	    pose, led_out_points);
 	
-	/* FIXME: Estimate LED size based on distance */
-	led_radius = 5;
+	/* Compute LED pixel size based on model distance below
+	 * using the larger X/Y focal length and LED's Z value */
+	focal_length = OHMD_MAX(camera_matrix->m[0], camera_matrix->m[4]);
 	
 	/* Calculate the bounding box and visible LEDs */
 	for (i = 0; i < num_leds; i++) {
@@ -134,7 +147,13 @@ void rift_evaluate_pose_with_prior (rift_pose_metrics *score, posef *pose,
 #endif
 
 		if (facing_dot < -0.25) {
-			visible_led_points[num_visible_leds] = *p;
+			double led_radius = 5.0;
+			if (position.z > 0.0) {
+				led_radius = focal_length * led_radius_mm / position.z;
+			}
+
+			visible_led_points[num_visible_leds].pos = *p;
+			visible_led_points[num_visible_leds].led_radius = led_radius;
 			num_visible_leds++;
 			
 			/* Expand the bounding box */
@@ -152,7 +171,6 @@ void rift_evaluate_pose_with_prior (rift_pose_metrics *score, posef *pose,
 	}
 	
 	//printf ("Bounding box for pose is %f,%f -> %f,%f\n", bounds.left, bounds.top, bounds.right, bounds.bottom);
-	assert (bounds.top >= -led_radius);
 	
 	/* Iterate the blobs and see which ones are within the bounding box and have a matching LED */
 	for (i = 0; i < num_blobs; i++) {
@@ -167,8 +185,8 @@ void rift_evaluate_pose_with_prior (rift_pose_metrics *score, posef *pose,
 			b->x < bounds.right && b->y < bounds.bottom) {
 			double sqerror;
 
-			vec3f *match_led_pos = find_best_matching_led (visible_led_points, num_visible_leds, b, led_radius, &sqerror);
-			if (match_led_pos != NULL) {
+			int match_led_index = find_best_matching_led (visible_led_points, num_visible_leds, b, &sqerror);
+			if (match_led_index >= 0) {
 				reprojection_error += sqerror;
 				num_matched_blobs++;
 			} else {
@@ -218,7 +236,7 @@ void rift_evaluate_pose_with_prior (rift_pose_metrics *score, posef *pose,
 		score->visible_leds = num_visible_leds;
 		score->reprojection_error = reprojection_error;
 		score->good_pose_match = good_pose_match;
-    score->strong_pose_match = strong_pose_match;
+		score->strong_pose_match = strong_pose_match;
 	}
 
 	if (out_bounds)
@@ -248,25 +266,27 @@ void rift_mark_matching_blobs (posef *pose,
 	 * 4. Mark each blob with an ID based on the LED id and device ID
 	 */
 	vec3f led_out_points[MAX_OBJECT_LEDS];
-	vec3f visible_led_points[MAX_OBJECT_LEDS];
-	rift_led *visible_leds[MAX_OBJECT_LEDS];
+	struct visible_led_info visible_led_points[MAX_OBJECT_LEDS];
 
 	int num_visible_leds = 0;
 	bool first_visible = true;
-	double led_radius;
+	/* FIXME: Pass LED size in the model */
+	double led_radius_mm = 5.0 / 1000.0;
+	double focal_length;
 	rift_rect_t bounds = { 0, };
 	int i;
 
 	assert (num_leds > 0);
 	assert (num_blobs > 0);
 
+	/* Take the larger focal length for calculating pixel sizes. They are usually
+	 * the same anyway */
+	focal_length = OHMD_MAX(camera_matrix->m[0], camera_matrix->m[4]);
+
 	/* Project HMD LEDs into the distorted image space */
 	rift_project_points(leds, num_leds,
 	    camera_matrix, dist_coeffs, dist_fisheye,
 	    pose, led_out_points);
-
-	/* FIXME: Estimate LED size based on distance */
-	led_radius = 10;
 
 	/* Calculate the bounding box and visible LEDs */
 	for (i = 0; i < num_leds; i++) {
@@ -288,8 +308,16 @@ void rift_mark_matching_blobs (posef *pose,
 		LOGV("LED %d @ %f,%f dot %f\n", i, p->x, p->y, facing_dot);
 
 		if (facing_dot < 0.65) {
-			visible_led_points[num_visible_leds] = *p;
-			visible_leds[num_visible_leds] = leds + i;
+			struct visible_led_info *led_info = visible_led_points + num_visible_leds;
+			double led_radius = 5.0;
+			if (position.z > 0.0) {
+				led_radius = focal_length * led_radius_mm / position.z;
+			}
+
+			led_info->pos = *p;
+			led_info->led_radius = led_radius;
+			led_info->led = leds + i;
+
 			num_visible_leds++;
 
 			/* Expand the bounding box */
@@ -307,7 +335,6 @@ void rift_mark_matching_blobs (posef *pose,
 	}
 
 	//printf ("Bounding box for pose is %f,%f -> %f,%f\n", bounds.left, bounds.top, bounds.right, bounds.bottom);
-	assert (bounds.top >= -led_radius);
 
 	/* Iterate the blobs and see which ones are within the bounding box and have a matching LED */
 	for (i = 0; i < num_blobs; i++) {
@@ -321,10 +348,10 @@ void rift_mark_matching_blobs (posef *pose,
 		if (b->x >= bounds.left && b->y >= bounds.top &&
 			b->x < bounds.right && b->y < bounds.bottom) {
 
-			vec3f *match_led_pos = find_best_matching_led (visible_led_points, num_visible_leds, b, led_radius, NULL);
-			if (match_led_pos != NULL) {
-				int index = match_led_pos - visible_led_points;
-				rift_led *match_led = visible_leds[index];
+			int match_led_index = find_best_matching_led (visible_led_points, num_visible_leds, b, NULL);
+			if (match_led_index >= 0) {
+				struct visible_led_info *led_info = visible_led_points + match_led_index;
+				rift_led *match_led = led_info->led;
 
 				/* FIXME: Get the ID directly from the LED */
 				int led_index = match_led - leds;
