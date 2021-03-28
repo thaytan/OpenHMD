@@ -703,7 +703,7 @@ rift_tracked_device_frame_captured(rift_tracked_device_priv *dev, rift_tracked_d
 		/* The slot was not allocated (we missed the exposure event), or it
 		 * was overridden by a later exposure because there's not enough slots */
 		if (dev_info->fusion_slot != -1) {
-			LOGW ("Lost delay slot for dev %d, ts %llu", dev->base.id, (unsigned long long) dev_info->device_time_ns);
+			LOGD ("Lost delay slot for dev %d, ts %llu", dev->base.id, (unsigned long long) dev_info->device_time_ns);
 		}
 		dev_info->fusion_slot = -1;
 	}
