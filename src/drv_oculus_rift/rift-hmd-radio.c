@@ -95,10 +95,47 @@ done:
 	return ret;
 }
 
+static int rift_radio_write_complete(rift_hmd_radio_state *radio)
+{
+	int ret;
+
+	radio->command_result_pending = false;
+	if ((ret = rift_hmd_radio_get_cmd_response(radio->handle, false)) < 0) {
+		if (ret == -EINPROGRESS) {
+			radio->command_result_pending = true;
+		}
+	}
+
+	return ret;
+}
+
+static int rift_radio_write(rift_hmd_radio_state *radio, uint8_t cmd_byte1, uint8_t cmd_byte2, uint8_t device_type,
+          unsigned char *buf, int length)
+{
+	int ret;
+
+	if (buf[0] != RIFT_CMD_RADIO_READ_DATA)
+		return -EINVAL;
+
+	if (!radio->command_result_pending) {
+		ret = send_feature_report(radio->handle, buf, length);
+		if (ret < 0)
+			return ret;
+
+		if ((ret = rift_hmd_radio_send_cmd(radio->handle, cmd_byte1, cmd_byte2, device_type)) < 0)
+			goto done;
+	}
+
+	ret = rift_radio_write_complete(radio);
+done:
+	return ret;
+}
+
+
 static int rift_radio_read_calibration_hash(rift_hmd_radio_state *radio, uint8_t device_type,
 					    uint8_t hash[16])
 {
-	if (radio->cur_read_cmd == RIFT_FW_READ_CMD_NONE) {
+	if (radio->cur_read_cmd == RIFT_RADIO_CMD_NONE) {
 		LOGV("Starting FW hash read for controller %d\n", device_type);
 		radio->cur_read_cmd = RIFT_FW_READ_CMD_CALIBRATION_HASH;
 	}
@@ -111,12 +148,12 @@ static int rift_radio_read_calibration(rift_hmd_radio_state *radio, uint8_t devi
 	int ret;
 
 	/* First, read the flash header to get the block size */
-	if (radio->cur_read_cmd == RIFT_FW_READ_CMD_NONE ||
+	if (radio->cur_read_cmd == RIFT_RADIO_CMD_NONE ||
 	    radio->cur_read_cmd == RIFT_FW_READ_CMD_CALIBRATION_HDR) {
 		uint16_t json_length;
 		uint8_t flash_data[20];
 
-		if (radio->cur_read_cmd == RIFT_FW_READ_CMD_NONE) {
+		if (radio->cur_read_cmd == RIFT_RADIO_CMD_NONE) {
 			LOGV("Starting FW calibration hdr read for controller %d\n", device_type);
 			radio->cur_read_cmd = RIFT_FW_READ_CMD_CALIBRATION_HDR;
 		}
@@ -124,12 +161,12 @@ static int rift_radio_read_calibration(rift_hmd_radio_state *radio, uint8_t devi
 		ret = rift_radio_read_flash(radio, device_type, 0, 20, flash_data);
 		if (ret < 0) {
 			if (ret != -EINPROGRESS)
-				radio->cur_read_cmd = RIFT_FW_READ_CMD_NONE;
+				radio->cur_read_cmd = RIFT_RADIO_CMD_NONE;
 			return ret;
 		}
 
 		if (flash_data[0] != 1 || flash_data[1] != 0) {
-			radio->cur_read_cmd = RIFT_FW_READ_CMD_NONE;
+			radio->cur_read_cmd = RIFT_RADIO_CMD_NONE;
 			return -1; /* Invalid data */
 		}
 		json_length = (flash_data[3] << 8) | flash_data[2];
@@ -157,7 +194,7 @@ static int rift_radio_read_calibration(rift_hmd_radio_state *radio, uint8_t devi
 				radio->read_block + json_offset);
 		if (ret < 0) {
 			if (ret != -EINPROGRESS)
-				radio->cur_read_cmd = RIFT_FW_READ_CMD_NONE;
+				radio->cur_read_cmd = RIFT_RADIO_CMD_NONE;
 			return ret;
 		}
 
@@ -165,7 +202,7 @@ static int rift_radio_read_calibration(rift_hmd_radio_state *radio, uint8_t devi
 
 	*json_out = (char *) radio->read_block;
 	*length = radio->read_data_size;
-	radio->cur_read_cmd = RIFT_FW_READ_CMD_NONE;
+	radio->cur_read_cmd = RIFT_RADIO_CMD_NONE;
 
 	return 0;
 }
@@ -311,12 +348,18 @@ int rift_touch_get_calibration(rift_hmd_radio_state *radio, int device_id,
 	char *json = NULL;
 	int ret = -1;
 
-	if (radio->cur_read_cmd != RIFT_FW_READ_CMD_NONE && radio->device_in_progress != device_id)
+	if (radio->cur_read_cmd != RIFT_RADIO_CMD_NONE && radio->device_in_progress != device_id)
 		return -EBUSY; /* Another device is being read right now */
+
+	if (radio->cur_read_cmd != RIFT_RADIO_CMD_NONE &&
+	    radio->cur_read_cmd != RIFT_FW_READ_CMD_CALIBRATION_HASH &&
+	    radio->cur_read_cmd != RIFT_FW_READ_CMD_CALIBRATION_HDR &&
+	    radio->cur_read_cmd != RIFT_FW_READ_CMD_CALIBRATION)
+		return -EBUSY; /* A different command is in progress */
 
 	radio->device_in_progress = device_id;
 
-	if (radio->cur_read_cmd == RIFT_FW_READ_CMD_NONE ||
+	if (radio->cur_read_cmd == RIFT_RADIO_CMD_NONE ||
 	    radio->cur_read_cmd == RIFT_FW_READ_CMD_CALIBRATION_HASH) {
 		/* If the controller isn't on yet, we might fail to read the calibration data */
 		ret = rift_radio_read_calibration_hash(radio, device_id, hash);
@@ -326,7 +369,7 @@ int rift_touch_get_calibration(rift_hmd_radio_state *radio, int device_id,
 			}
 			return ret;
 		}
-		radio->cur_read_cmd = RIFT_FW_READ_CMD_NONE;
+		radio->cur_read_cmd = RIFT_RADIO_CMD_NONE;
 	}
 
 	/* TODO: We need a persistent store for the calibration data to
@@ -344,7 +387,7 @@ int rift_touch_get_calibration(rift_hmd_radio_state *radio, int device_id,
 	rift_leds_dump (&calibration->leds, control_name);
 
 	radio->device_in_progress = -1;
-	radio->cur_read_cmd = RIFT_FW_READ_CMD_NONE;
+	radio->cur_read_cmd = RIFT_RADIO_CMD_NONE;
 
 	return 0;
 }
@@ -393,3 +436,49 @@ bool rift_hmd_radio_get_address(hid_device *handle, uint8_t radio_address[5])
 	return true;
 }
 
+int rift_touch_send_haptics(rift_hmd_radio_state *radio, int device_id, bool low_freq, uint8_t amplitude)
+{
+	int ret = -1;
+
+	if (radio->cur_read_cmd != RIFT_RADIO_CMD_NONE && radio->device_in_progress != device_id)
+		return -EBUSY; /* Another device is being read right now */
+
+	if (radio->cur_read_cmd != RIFT_RADIO_CMD_NONE &&
+	    radio->cur_read_cmd != RIFT_RADIO_WRITE_CMD_HAPTICS)
+		return -EBUSY; /* A different command is in progress */
+
+	radio->device_in_progress = device_id;
+
+	if (radio->cur_read_cmd == RIFT_RADIO_CMD_NONE) {
+		/* Prepare command buffer then dispatch and await */
+		unsigned char buf[31];
+		int buf_size = 31;
+
+		memset(buf, 0, sizeof(buf));
+		if (amplitude != 0) {
+			if (low_freq)
+				buf[3] = 0xa0; /* 160Hz vibration */
+			else
+				buf[4] = 0xa0; /* 320Hz vibration */
+			buf[7] = amplitude; /* Intensity byte */
+		}
+
+		buf[0] = RIFT_CMD_RADIO_READ_DATA;
+
+		radio->cur_read_cmd = RIFT_RADIO_WRITE_CMD_HAPTICS;
+		ret = rift_radio_write(radio, 0x02, 0x03, device_id, buf, buf_size);
+	}
+	else {
+		/* Just waiting for command result */
+		ret = rift_radio_write_complete(radio);
+	}
+
+	if (ret < 0) {
+		return ret;
+	}
+
+	radio->device_in_progress = -1;
+	radio->cur_read_cmd = RIFT_RADIO_CMD_NONE;
+
+	return 0;
+}

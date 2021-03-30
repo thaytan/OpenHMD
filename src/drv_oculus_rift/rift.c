@@ -535,6 +535,28 @@ static void handle_rift_radio_report(rift_hmd_t* hmd, uint64_t ts, unsigned char
 		handle_rift_radio_message(hmd, ts, &r.message[1]);
 }
 
+static void check_haptics_state(rift_hmd_t *hmd, uint64_t ts, rift_touch_controller_t *touch)
+{
+		/* Check if we need to clear the active haptic event */
+		if (touch->haptic_state.haptics_on && touch->haptic_state.end_time < ts) {
+				touch->haptic_state.haptics_on = false;
+				touch->haptic_state.dirty = true;
+		}
+
+		/* Check if we're trying / need to send the haptic state to the controller */
+		if (touch->haptic_state.dirty) {
+				uint8_t amplitude = 0;
+
+				if (touch->haptic_state.haptics_on)
+					amplitude = touch->haptic_state.amplitude;
+
+				if (rift_touch_send_haptics(&hmd->radio, touch->device_num, touch->haptic_state.low_freq, amplitude) == 0) {
+					/* Radio message was successfully sent */
+					touch->haptic_state.dirty = false;
+				}
+		}
+}
+
 static void update_hmd(rift_hmd_t *priv)
 {
 	unsigned char buffer[FEATURE_BUFFER_SIZE];
@@ -553,6 +575,9 @@ static void update_hmd(rift_hmd_t *priv)
 	// Read all the messages from the device.
 	do {
 		int size;
+		/* FIXME: Collect all HID messages that are pending, then work backward to calculate capture timestamps? */
+		uint64_t ts = ohmd_monotonic_get(priv->ctx);
+
 		got_a_msg = false;
 
 		size = hid_read(priv->handle, buffer, FEATURE_BUFFER_SIZE);
@@ -560,12 +585,10 @@ static void update_hmd(rift_hmd_t *priv)
 			LOGE("error reading from HMD");
 			break;
 		} else if(size > 0) {
-			/* FIXME: Collect all HID messages that are pending, then work backward to calculate capture timestamps? */
-			uint64_t ts = ohmd_monotonic_get(priv->ctx);
-
 			// currently the only message type the hardware supports (I think)
 			if(buffer[0] == RIFT_IRQ_SENSORS_DK1 || buffer[0] == RIFT_IRQ_SENSORS_DK2) {
 				handle_tracker_sensor_msg(priv, ts, buffer, size);
+				ts = ohmd_monotonic_get(priv->ctx);
 				got_a_msg = true;
 			}else{
 				LOGE("unknown HMD message type: %u", buffer[0]);
@@ -573,7 +596,7 @@ static void update_hmd(rift_hmd_t *priv)
 		}
 
 		if (priv->radio_handle == NULL)
-			continue;;
+			continue;
 
 		// Read all the controller messages from the radio device.
 		size = hid_read(priv->radio_handle, buffer, FEATURE_BUFFER_SIZE);
@@ -581,14 +604,17 @@ static void update_hmd(rift_hmd_t *priv)
 			LOGE("error reading from controllers");
 			break;
 		} else if(size > 0) {
-			/* FIXME: Collect all HID messages that are pending, then work backward to calculate capture timestamps? */
-			uint64_t ts = ohmd_monotonic_get(priv->ctx);
-
 			if (buffer[0] == RIFT_RADIO_REPORT_ID) {
 				handle_rift_radio_report (priv, ts, buffer, size);
 				got_a_msg = true;
+				ts = ohmd_monotonic_get(priv->ctx);
 			}
 		}
+
+
+		/* Update any haptics state */
+		check_haptics_state(priv, ts, &priv->touch_dev[0]);
+		check_haptics_state(priv, ts, &priv->touch_dev[1]);
 
 		/* Don't loop for more than 5ms, or the app doesn't get a chance to draw anything */
 		if (got_a_msg) {
@@ -729,6 +755,7 @@ static int getf_touch_controller(rift_device_priv* dev_priv, ohmd_float_value ty
 			out[1] = (touch->buttons & RIFT_TOUCH_CONTROLLER_BUTTON_B) != 0;
 			out[2] = (touch->buttons & RIFT_TOUCH_CONTROLLER_BUTTON_OCULUS) != 0;
 			out[3] = (touch->buttons & RIFT_TOUCH_CONTROLLER_BUTTON_STICK) != 0;
+
 		}
 		else { // left control, id == 2
 			out[0] = (touch->buttons & RIFT_TOUCH_CONTROLLER_BUTTON_X) != 0;
@@ -758,6 +785,32 @@ static int getf(ohmd_device* device, ohmd_float_value type, float* out)
 		return getf_touch_controller (dev_priv, type, out);
 
 	return -1;
+}
+
+static int set_touch_haptics(ohmd_device *device, bool enable, float duration, float frequency, float amplitude)
+{
+	rift_device_priv* dev_priv = rift_device_priv_get(device);
+	rift_touch_controller_t *touch = (rift_touch_controller_t *)(dev_priv);
+	ohmd_context *ctx = dev_priv->hmd->ctx;
+
+	/* Change the haptics state. It will actually be sent to the controllers
+	 * in the update loop */
+	if (enable) {
+			uint64_t now = ohmd_monotonic_get(ctx);
+
+			touch->haptic_state.haptics_on = true;
+			touch->haptic_state.dirty = true;
+			touch->haptic_state.low_freq = (frequency <= 160.0);
+			touch->haptic_state.amplitude = roundf(0xff * amplitude);
+
+			touch->haptic_state.end_time = now + roundf(duration * ohmd_monotonic_per_sec(ctx));
+	}
+	else if (touch->haptic_state.haptics_on) {
+			touch->haptic_state.haptics_on = false;
+			touch->haptic_state.dirty = true;
+	}
+
+	return 0;
 }
 
 static void close_device(ohmd_device* device)
@@ -1279,6 +1332,7 @@ static ohmd_device* open_device(ohmd_driver* driver, ohmd_device_desc* desc)
 {
 	rift_device_priv *dev = NULL;
 	rift_hmd_t *hmd = find_hmd(desc->path);
+	bool is_controller = false;
 
 	if (hmd == NULL) {
 		hmd = open_hmd (driver, desc);
@@ -1289,10 +1343,13 @@ static ohmd_device* open_device(ohmd_driver* driver, ohmd_device_desc* desc)
 
 	if (desc->id == 0)
 		dev = &hmd->hmd_dev;
-	else if (desc->id == 1)
+	else if (desc->id == 1) {
 		dev = &hmd->touch_dev[0].base;
-	else if (desc->id == 2)
+		is_controller = true;
+	} else if (desc->id == 2) {
 		dev = &hmd->touch_dev[1].base;
+		is_controller = true;
+	}
 	else {
 		LOGE ("Invalid device description passed to open_device()");
 		release_hmd(hmd);
@@ -1307,6 +1364,9 @@ static ohmd_device* open_device(ohmd_driver* driver, ohmd_device_desc* desc)
 	dev->base.update = update_device;
 	dev->base.close = close_device;
 	dev->base.getf = getf;
+
+	if (is_controller)
+		dev->base.set_haptics = set_touch_haptics;
 
 	return &dev->base;
 }
@@ -1384,7 +1444,8 @@ static void get_device_list(ohmd_driver* driver, ohmd_device_list* list)
 					desc->device_flags =
 						OHMD_DEVICE_FLAGS_POSITIONAL_TRACKING |
 						OHMD_DEVICE_FLAGS_ROTATIONAL_TRACKING |
-						OHMD_DEVICE_FLAGS_RIGHT_CONTROLLER;
+						OHMD_DEVICE_FLAGS_RIGHT_CONTROLLER |
+						OHMD_DEVICE_FLAGS_HAPTIC_FEEDBACK;
 
 					desc->device_class = OHMD_DEVICE_CLASS_CONTROLLER;
 					desc->driver_ptr = driver;
@@ -1403,7 +1464,8 @@ static void get_device_list(ohmd_driver* driver, ohmd_device_list* list)
 					desc->device_flags =
 						OHMD_DEVICE_FLAGS_POSITIONAL_TRACKING |
 						OHMD_DEVICE_FLAGS_ROTATIONAL_TRACKING |
-						OHMD_DEVICE_FLAGS_LEFT_CONTROLLER;
+						OHMD_DEVICE_FLAGS_LEFT_CONTROLLER |
+						OHMD_DEVICE_FLAGS_HAPTIC_FEEDBACK;
 
 					desc->device_class = OHMD_DEVICE_CLASS_CONTROLLER;
 					desc->driver_ptr = driver;

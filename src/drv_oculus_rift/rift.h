@@ -226,6 +226,17 @@ struct rift_device_priv_s {
 	rift_hmd_t *hmd;
 };
 
+/* Struct for tracking the haptic
+ * feedback setting for each controller */
+typedef struct {
+	bool dirty; /* Set if the state needs sending to the controller */
+	bool haptics_on; /* if true, haptics are on */
+	bool low_freq; /* true for 160Hz vibrate, false for 320Hz */
+	uint8_t amplitude; /* Vibration amplitude from 0..0xff */
+
+	uint64_t end_time; /* End timeout for any active pulse */
+} rift_haptic_state;
+
 struct rift_touch_controller_s {
 	rift_device_priv base;
 
@@ -249,6 +260,9 @@ struct rift_touch_controller_s {
 	float cap_stick;
 	float cap_trigger;
 	uint8_t haptic_counter;
+
+	/* Haptics test tracking */
+	rift_haptic_state haptic_state;
 };
 
 #define RIFT_RADIO_REPORT_ID			0x0c
