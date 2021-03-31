@@ -102,6 +102,7 @@ struct ohmd_device {
 	int (*setf)(ohmd_device* device, ohmd_float_value type, const float* in);
 	int (*seti)(ohmd_device* device, ohmd_int_value type, const int* in);
 	int (*set_data)(ohmd_device* device, ohmd_data_value type, const void* in);
+	int (*set_haptics)(ohmd_device* device, bool enable, float duration, float frequency, float amplitude);
 
 	void (*update)(ohmd_device* device);
 	void (*close)(ohmd_device* device);

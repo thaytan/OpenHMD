@@ -515,6 +515,30 @@ OHMD_APIENTRYDLL int OHMD_APIENTRY ohmd_device_set_data(ohmd_device* device, ohm
 	return ret;
 }
 
+OHMD_APIENTRYDLL int OHMD_APIENTRY ohmd_device_set_haptics_on(ohmd_device* device, float duration, float frequency, float amplitude)
+{
+  int ret = -1;
+
+	ohmd_lock_mutex(device->ctx->update_mutex);
+  if (device->set_haptics)
+    ret = device->set_haptics(device, true, duration, frequency, amplitude);
+	ohmd_unlock_mutex(device->ctx->update_mutex);
+
+  return ret;
+}
+
+OHMD_APIENTRYDLL int OHMD_APIENTRY ohmd_device_set_haptics_off(ohmd_device* device)
+{
+  int ret = -1;
+
+	ohmd_lock_mutex(device->ctx->update_mutex);
+  if (device->set_haptics)
+    ret = device->set_haptics(device, false, 0.0, 0.0, 0.0);
+	ohmd_unlock_mutex(device->ctx->update_mutex);
+
+  return ret;
+}
+
 OHMD_APIENTRYDLL ohmd_status OHMD_APIENTRY ohmd_device_settings_seti(ohmd_device_settings* settings, ohmd_int_settings key, const int* val)
 {
 	switch(key){
