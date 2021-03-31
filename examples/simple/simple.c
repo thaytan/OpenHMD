@@ -87,11 +87,14 @@ int main(int argc, char** argv)
 	// Open specified device idx or 0 (default) if nothing specified
 	printf("opening device: %d\n", device_idx);
 	ohmd_device* hmd = ohmd_list_open_device(ctx, device_idx);
+	int device_flags;
 	
 	if(!hmd){
 		printf("failed to open device: %s\n", ohmd_ctx_get_error(ctx));
 		return -1;
 	}
+
+	ohmd_list_geti(ctx, device_idx, OHMD_DEVICE_FLAGS, &device_flags);
 
 	// Print hardware information for the opened device
 	int ivals[2];
@@ -156,6 +159,9 @@ int main(int argc, char** argv)
 			for(int i = 0; i < control_count; i++)
 			{
 				printf("%f ", control_state[i]);
+				if ((device_flags & OHMD_DEVICE_FLAGS_HAPTIC_FEEDBACK) && control_state[i] > 0.95) {
+					ohmd_device_set_haptics_on(hmd, 0.1, 160, 0.75);
+				}
 			}
 		}
 		puts("");
