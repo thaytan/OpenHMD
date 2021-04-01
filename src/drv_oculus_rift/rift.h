@@ -236,7 +236,7 @@ typedef struct {
 	bool low_freq; /* true for 160Hz vibrate, false for 320Hz */
 	uint8_t amplitude; /* Vibration amplitude from 0..0xff */
 
-	double duration; /* Target duration in seconds */
+	float duration; /* Target duration in seconds */
 	uint64_t end_time; /* End timeout for any active pulse */
 } rift_haptic_state;
 

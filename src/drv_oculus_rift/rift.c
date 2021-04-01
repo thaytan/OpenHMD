@@ -559,6 +559,7 @@ static void check_haptics_state(rift_hmd_t *hmd, uint64_t ts, rift_touch_control
 			ret = rift_touch_send_haptics(&hmd->radio, touch->device_num, touch->haptic_state.low_freq, amplitude);
 			if (ret == 0) {
 				/* Radio message was successfully sent, calculate the end time */
+				LOGD("Haptics sent, dev %d %s freq amplitude %u\n", touch->device_num, touch->haptic_state.low_freq ? "low" : "high", amplitude);
 				touch->haptic_state.in_progress = false;
 				if (touch->haptic_state.haptics_on) {
 					float duration = touch->haptic_state.duration;
@@ -807,17 +808,20 @@ static int getf(ohmd_device* device, ohmd_float_value type, float* out)
 
 static int set_touch_haptics(ohmd_device *device, bool enable, float duration, float frequency, float amplitude)
 {
+	const float MIN_HAPTIC_DURATION = 0.01;
+
 	rift_device_priv* dev_priv = rift_device_priv_get(device);
 	rift_touch_controller_t *touch = (rift_touch_controller_t *)(dev_priv);
 
 	/* Change the haptics state. It will actually be sent to the controllers
 	 * in the update loop */
+	LOGD("New Haptics event, dev %d duration %f freq %f amplitude %f\n", touch->device_num, duration, frequency, amplitude);
 	if (enable) {
 			touch->haptic_state.haptics_on = true;
 			touch->haptic_state.dirty = true;
 			touch->haptic_state.low_freq = (frequency <= 160.0);
 			touch->haptic_state.amplitude = roundf(0xff * amplitude);
-			touch->haptic_state.duration = duration;
+			touch->haptic_state.duration = OHMD_MAX(duration, MIN_HAPTIC_DURATION);
 
 			touch->haptic_state.end_time = (uint64_t)(-1);
 	}
