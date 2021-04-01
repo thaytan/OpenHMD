@@ -17,6 +17,7 @@
 #include <stdio.h>
 #include <time.h>
 #include <assert.h>
+#include <errno.h>
 
 #include "rift.h"
 #include "rift-hmd-radio.h"
@@ -539,21 +540,38 @@ static void check_haptics_state(rift_hmd_t *hmd, uint64_t ts, rift_touch_control
 {
 		/* Check if we need to clear the active haptic event */
 		if (touch->haptic_state.haptics_on && touch->haptic_state.end_time < ts) {
-				touch->haptic_state.haptics_on = false;
-				touch->haptic_state.dirty = true;
+			touch->haptic_state.haptics_on = false;
+			touch->haptic_state.dirty = true;
 		}
 
 		/* Check if we're trying / need to send the haptic state to the controller */
-		if (touch->haptic_state.dirty) {
-				uint8_t amplitude = 0;
+		if (touch->haptic_state.dirty || touch->haptic_state.in_progress) {
+			uint8_t amplitude = 0;
+			int ret;
 
-				if (touch->haptic_state.haptics_on)
-					amplitude = touch->haptic_state.amplitude;
+			if (touch->haptic_state.haptics_on)
+				amplitude = touch->haptic_state.amplitude;
 
-				if (rift_touch_send_haptics(&hmd->radio, touch->device_num, touch->haptic_state.low_freq, amplitude) == 0) {
-					/* Radio message was successfully sent */
-					touch->haptic_state.dirty = false;
+			if (touch->haptic_state.dirty && touch->haptic_state.in_progress)
+				rift_touch_cancel_in_progress(&hmd->radio, touch->device_num);
+			touch->haptic_state.dirty = false;
+
+			ret = rift_touch_send_haptics(&hmd->radio, touch->device_num, touch->haptic_state.low_freq, amplitude);
+			if (ret == 0) {
+				/* Radio message was successfully sent, calculate the end time */
+				touch->haptic_state.in_progress = false;
+				if (touch->haptic_state.haptics_on) {
+					float duration = touch->haptic_state.duration;
+					touch->haptic_state.end_time = ts + roundf(duration * ohmd_monotonic_per_sec(hmd->ctx));
 				}
+			}
+			else if (ret == -EINPROGRESS || ret == -EBUSY) {
+				touch->haptic_state.in_progress = true;
+			} else {
+				/* For any other errors, cancel any on-going transmission */
+				rift_touch_cancel_in_progress(&hmd->radio, touch->device_num);
+				touch->haptic_state.in_progress = false;
+			}
 		}
 }
 
@@ -571,6 +589,10 @@ static void update_hmd(rift_hmd_t *priv)
 		// Update the time of the last keep alive we have sent.
 		priv->last_keep_alive = t;
 	}
+
+	/* Update any haptics state first */
+	check_haptics_state(priv, start, &priv->touch_dev[0]);
+	check_haptics_state(priv, start, &priv->touch_dev[1]);
 
 	// Read all the messages from the device.
 	do {
@@ -611,10 +633,6 @@ static void update_hmd(rift_hmd_t *priv)
 			}
 		}
 
-
-		/* Update any haptics state */
-		check_haptics_state(priv, ts, &priv->touch_dev[0]);
-		check_haptics_state(priv, ts, &priv->touch_dev[1]);
 
 		/* Don't loop for more than 5ms, or the app doesn't get a chance to draw anything */
 		if (got_a_msg) {
@@ -791,19 +809,17 @@ static int set_touch_haptics(ohmd_device *device, bool enable, float duration, f
 {
 	rift_device_priv* dev_priv = rift_device_priv_get(device);
 	rift_touch_controller_t *touch = (rift_touch_controller_t *)(dev_priv);
-	ohmd_context *ctx = dev_priv->hmd->ctx;
 
 	/* Change the haptics state. It will actually be sent to the controllers
 	 * in the update loop */
 	if (enable) {
-			uint64_t now = ohmd_monotonic_get(ctx);
-
 			touch->haptic_state.haptics_on = true;
 			touch->haptic_state.dirty = true;
 			touch->haptic_state.low_freq = (frequency <= 160.0);
 			touch->haptic_state.amplitude = roundf(0xff * amplitude);
+			touch->haptic_state.duration = duration;
 
-			touch->haptic_state.end_time = now + roundf(duration * ohmd_monotonic_per_sec(ctx));
+			touch->haptic_state.end_time = (uint64_t)(-1);
 	}
 	else if (touch->haptic_state.haptics_on) {
 			touch->haptic_state.haptics_on = false;
