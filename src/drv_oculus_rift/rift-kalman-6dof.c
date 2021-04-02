@@ -719,15 +719,17 @@ static void
 rift_kalman_6dof_update(rift_kalman_6dof_filter *state, uint64_t time, ukf_measurement *m)
 {
 	/* Calculate dt */
-	int64_t dt;
-	if (state->first_update) {
-		dt = 0;
-		state->first_update = false;
+	int64_t dt = 0;
+	if (time != 0) {
+		if (state->first_update) {
+			dt = 0;
+			state->first_update = false;
+		}
+		else {
+			dt = (int64_t)(time - state->current_ts);
+		}
+		state->current_ts = time;
 	}
-	else {
-		dt = (int64_t)(time - state->current_ts);
-	}
-	state->current_ts = time;
 
 	if (!ukf_base_predict(&state->ukf, NS_TO_SEC(dt))) {
 			LOGE ("Failed to compute UKF prediction at time %llu (dt %f)", (unsigned long long) state->current_ts, NS_TO_SEC(dt));
@@ -796,8 +798,13 @@ void rift_kalman_6dof_pose_update(rift_kalman_6dof_filter *state, uint64_t time,
 
 	/* If doing a delayed update, then the slot must be in use (
 	 * or else it contains empty data */
-	if (delay_slot != -1)
+	if (delay_slot != -1) {
 		assert(state->slot_inuse[delay_slot]);
+		/* HACK: Ignore the time when doing a delay slot update,
+		 * since we don't want time to go backward. The delay slot is
+		 * already tracking the delay */
+		time = 0;
+	}
 
 	m = &state->m2;
 	MATRIX2D_Y(m->z, POSE_MEAS_POSITION+0) = pose->pos.x;
