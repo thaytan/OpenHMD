@@ -14,6 +14,7 @@
 #include <assert.h>
 #include <stdarg.h>
 
+#include "../exponential-filter.h"
 #include "rift-tracker.h"
 #include "rift-sensor.h"
 
@@ -74,9 +75,13 @@ struct rift_tracked_device_priv {
 	uint64_t device_time_ns;
 
 	uint64_t last_observed_pose_ts;
-	/* Reported view pose and model pose respectively */
+
+	/* Reported view pose (to the user) and model pose (for the tracking) respectively */
+	uint64_t last_reported_pose;
 	posef reported_pose;
 	posef model_pose;
+
+	exp_filter_pose pose_output_filter;
 
 	int num_pending_imu_observations;
 	rift_tracked_device_imu_observation pending_imu_observations[RIFT_MAX_PENDING_IMU_OBSERVATIONS];
@@ -128,7 +133,9 @@ rift_tracker_add_device (rift_tracker_ctx *ctx, int device_id, posef *imu_pose, 
 
 	next_dev->base.id = device_id;
 	rift_kalman_6dof_init(&next_dev->ukf_fusion, NUM_POSE_DELAY_SLOTS);
-	next_dev->last_observed_pose_ts = next_dev->device_time_ns = 0;
+	next_dev->last_reported_pose = next_dev->last_observed_pose_ts = next_dev->device_time_ns = 0;
+
+	exp_filter_pose_init(&next_dev->pose_output_filter);
 
 	/* Init delay slot bookkeeping */
 	for (s = 0; s < NUM_POSE_DELAY_SLOTS; s++) {
@@ -475,12 +482,17 @@ void rift_tracked_device_get_view_pose(rift_tracked_device *dev_base, posef *pos
 	posef imu_pose;
 
 	ohmd_lock_mutex (dev->device_lock);
-	rift_kalman_6dof_get_pose_at(&dev->ukf_fusion, dev->device_time_ns, &imu_pose, NULL, NULL);
+	if (dev->device_time_ns > dev->last_reported_pose) {
+	  rift_kalman_6dof_get_pose_at(&dev->ukf_fusion, dev->device_time_ns, &imu_pose, NULL, NULL);
 
-	dev->reported_pose.orient = imu_pose.orient;
-	if (dev->device_time_ns - dev->last_observed_pose_ts < (POSE_LOST_THRESHOLD * 1000000UL)) {
-		/* Don't let the device move unless there's a recent observation of actual position */
-		dev->reported_pose.pos = imu_pose.pos;
+	  dev->reported_pose.orient = imu_pose.orient;
+	  if (dev->device_time_ns - dev->last_observed_pose_ts >= (POSE_LOST_THRESHOLD * 1000000UL)) {
+		  /* Don't let the device move unless there's a recent observation of actual position */
+		  imu_pose.pos = dev->reported_pose.pos;
+	  }
+
+		exp_filter_pose_run(&dev->pose_output_filter, dev->device_time_ns, &imu_pose, &dev->reported_pose);
+		dev->last_reported_pose = dev->device_time_ns;
 	}
 
 	*pose = dev->reported_pose;
