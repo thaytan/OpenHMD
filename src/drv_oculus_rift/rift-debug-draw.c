@@ -285,11 +285,12 @@ void rift_debug_draw_frame (uint8_t *pixels, struct blobservation* bwobs,
 				}
 			}
 
+			if (!dev_state->found_device_pose)
+				continue;
+
 			/* Draw a marker that says we think we saw this device */
-			if (dev_state->score.good_pose_match) {
-				draw_rgb_filled_rect (pixels, width, out_stride, height,
-						16 * dev->id, 0, 16, 16, colours[dev->id]);
-			}
+			draw_rgb_filled_rect (pixels, width, out_stride, height,
+				16 * dev->id, 0, 16, 16, colours[dev->id]);
 
 			/* Loop over the LED points a final time and draw markers
 			 * into the video over the top */
