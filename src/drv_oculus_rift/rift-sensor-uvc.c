@@ -338,8 +338,13 @@ int rift_sensor_uvc_stream_setup (libusb_context *ctx, libusb_device_handle *dev
 		stream->width = RIFT_SENSOR_WIDTH;
 		stream->height = RIFT_SENSOR_HEIGHT;
 
+		packet_size = 16384;
 		alt_setting = 2;
 		break;
+	default:
+		printf("Unknown / unhandled USB device VID/PID 0x%04x / 0x%04x\n",
+			desc.idVendor, desc.idProduct);
+		return -1;
 	}
 
 	ret = rift_sensor_uvc_set_cur(devh, 1, 0, VS_PROBE_CONTROL, &control,
@@ -367,10 +372,6 @@ int rift_sensor_uvc_stream_setup (libusb_context *ctx, libusb_device_handle *dev
 	control.dwClockFrequency = __le32_to_cpu(control.dwClockFrequency);
 
 	control.dwMaxPayloadTransferSize = __le32_to_cpu(control.dwMaxPayloadTransferSize);
-
-	switch (desc.idProduct) {
-		case CV1_PID: packet_size = 16384;
-	}
 
 	ret = libusb_set_interface_alt_setting(devh, 1, alt_setting);
 	if (ret) {
