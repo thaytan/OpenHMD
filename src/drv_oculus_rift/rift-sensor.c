@@ -234,25 +234,21 @@ static void tracker_process_blobs_fast(rift_sensor_ctx *ctx, rift_sensor_capture
 					dev->id, dev->leds->points, dev->leds->num_points,
 					&ctx->camera_matrix, ctx->dist_coeffs, ctx->dist_fisheye, NULL);
 
-				if (dev_state->score.strong_pose_match) {
+				if (dev_state->score.good_pose_match) {
 					LOGD("Sensor %d re-acquired match for device %d matched %u blobs of %u",
 						ctx->id, dev->id, dev_state->score.matched_blobs, dev_state->score.visible_leds);
-				}
-				else {
-					dev_state->score.good_pose_match = false; /* clear the good pose match flag so the long analysis thread will search */
 				}
 			}
 		}
 
-		if (!dev_state->score.good_pose_match) {
+		if (dev_state->score.good_pose_match) {
+			update_device_and_blobs (ctx, frame, dev, dev_state, &obj_cam_pose);
+		} else {
 			/* Didn't find this device - send the frame for long analysis */
 			LOGD("Sensor %d frame %d needs full search for device %d - sending to long analysis thread",
 				ctx->id, frame->id, dev->id);
 			frame->need_long_analysis = true;
 			continue;
-		}
-		else {
-			update_device_and_blobs (ctx, frame, dev, dev_state, &obj_cam_pose);
 		}
 	}
 }
@@ -283,7 +279,11 @@ static void tracker_process_blobs_long(rift_sensor_ctx *ctx, rift_sensor_capture
 			rift_sensor_frame_device_state *dev_state = frame->capture_state + d;
 			const rift_tracked_device_exposure_info *exp_dev_info = exposure_info->devices + d;
 			posef obj_cam_pose;
+			bool do_aligned_checks;
 			CorrespondenceSearchFlags flags = CS_FLAG_STOP_FOR_STRONG_MATCH;
+
+			if (dev_state->found_device_pose)
+				continue; /* We already found a pose for this device */
 
 			if (dev->id == 0)
 				flags |= CS_FLAG_MATCH_ALL_BLOBS; /* Let the HMD match whatever it can */
@@ -298,17 +298,32 @@ static void tracker_process_blobs_long(rift_sensor_ctx *ctx, rift_sensor_capture
 				continue;
 			}
 
-			if (dev_state->score.good_pose_match) {
-				if (pass == 0 || dev_state->score.strong_pose_match) {
-					/* We already found this device during fast analysis, or
-					 * we found a strong match on the first search. Skip it */
-					continue;
-				}
+			/* If the gravity vector error standard deviation is small enough, try for an aligned pose from the prior,
+			 * within 2 standard deviation */
+			do_aligned_checks = (ctx->have_camera_pose && dev_state->gravity_error_rad < DEG_TO_RAD(45));
+			if (do_aligned_checks)
+				oposef_apply_inverse(&dev_state->capture_world_pose, &ctx->camera_pose, &obj_cam_pose);
 
+			if (dev_state->score.good_pose_match && had_strong_matches) {
 				/* We have a good pose match for this device, that we found on the first
 				 * pass. If any other device found a strong match though, then that may
-				 * have claimed blobs we were relying on and should start again */
-				if (had_strong_matches)
+				 * have claimed blobs we were relying on  - so re-check our pose and possibly start again */
+				if (do_aligned_checks) {
+					rift_evaluate_pose_with_prior(&dev_state->score, &obj_cam_pose,
+						&dev_state->final_cam_pose, &exp_dev_info->pos_error, &exp_dev_info->rot_error,
+						bwobs->blobs, bwobs->num_blobs,
+						dev->id, dev->leds->points, dev->leds->num_points,
+						&ctx->camera_matrix, ctx->dist_coeffs, ctx->dist_fisheye, NULL);
+				}
+				else {
+					rift_evaluate_pose (&dev_state->score, &obj_cam_pose,
+						frame->bwobs->blobs, frame->bwobs->num_blobs,
+						dev->id, dev->leds->points, dev->leds->num_points,
+						&ctx->camera_matrix, ctx->dist_coeffs,
+						ctx->dist_fisheye, NULL);
+				}
+
+				if (!dev_state->score.good_pose_match)
 					flags |= CS_FLAG_SHALLOW_SEARCH;
 			}
 
@@ -316,16 +331,12 @@ static void tracker_process_blobs_long(rift_sensor_ctx *ctx, rift_sensor_capture
 				LOGD("Sensor %d long search for device %d\n", ctx->id, dev->id);
 			}
 
-			/* If the gravity vector error standard deviation is small enough, try for an aligned pose from the prior,
-			 * within 2 standard deviation */
-			if (ctx->have_camera_pose && dev_state->gravity_error_rad < DEG_TO_RAD(45)) {
+			if (do_aligned_checks) {
 #if LOGLEVEL == 0
 				quatf ref_orient = obj_cam_pose.orient;
 #endif
 				quatf pose_gravity_swing, pose_gravity_twist;
 				float pose_tolerance = OHMD_MAX(2 * dev_state->gravity_error_rad, DEG_TO_RAD(10));
-
-				oposef_apply_inverse(&dev_state->capture_world_pose, &ctx->camera_pose, &obj_cam_pose);
 
 				oquatf_decompose_swing_twist(&obj_cam_pose.orient, &gravity_vector, &pose_gravity_swing, &pose_gravity_twist);
 				if (correspondence_search_find_one_pose_aligned (ctx->cs, dev->id, flags, &obj_cam_pose,
@@ -617,8 +628,9 @@ update_device_and_blobs (rift_sensor_ctx *ctx, rift_sensor_capture_frame *frame,
 			dev->leds->points, dev->leds->num_points,
 			camera_matrix, dist_coeffs, ctx->is_cv1);
 
-  dev_state->final_cam_pose.pos = obj_cam_pose->pos;
-  dev_state->final_cam_pose.orient = obj_cam_pose->orient;
+	dev_state->final_cam_pose.pos = obj_cam_pose->pos;
+	dev_state->final_cam_pose.orient = obj_cam_pose->orient;
+	dev_state->found_device_pose = true;
 
 	LOGD ("sensor %d PnP for device %d yielded quat %f %f %f %f pos %f %f %f",
 		ctx->id, dev->id, dev_state->final_cam_pose.orient.x, dev_state->final_cam_pose.orient.y, dev_state->final_cam_pose.orient.z, dev_state->final_cam_pose.orient.w,
@@ -644,6 +656,7 @@ update_device_pose (rift_sensor_ctx *sensor_ctx, rift_tracked_device *dev,
 	if (score->good_pose_match) {
 		LOGV("Found good pose match - %u LEDs matched %u visible ones\n",
 			score->matched_blobs, score->visible_leds);
+
 		if (sensor_ctx->have_camera_pose) {
 			uint64_t now = ohmd_monotonic_get(sensor_ctx->ohmd_ctx);
 
@@ -770,6 +783,8 @@ static void frame_captured_cb(rift_sensor_uvc_stream *stream, rift_sensor_uvc_fr
 
 		/* Mark the score as un-evaluated to start */
 		dev_state->score.good_pose_match = false;
+		dev_state->score.strong_pose_match = false;
+		dev_state->found_device_pose = false;
 	}
 	frame->n_devices = exposure_info->n_devices;
 

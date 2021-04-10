@@ -23,6 +23,7 @@ struct rift_sensor_frame_device_state {
 	posef capture_world_pose;
 	float gravity_error_rad; /* Gravity vector uncertainty in radians 0..M_PI */
 	posef final_cam_pose;
+	bool found_device_pose; /* Set to true when the device was found in this exposure */
 	rift_pose_metrics score;
 };
 
