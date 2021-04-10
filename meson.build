@@ -52,6 +52,7 @@ sources = [
 	'src/openhmd.c',
 	'src/drv_dummy/dummy.c',
 	'src/omath.c',
+	'src/exponential-filter.c',
 	'src/fusion.c',
 	'src/matrices.c',
 	'src/shaders.c',

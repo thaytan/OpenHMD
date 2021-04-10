@@ -32,6 +32,7 @@ set(openhmd_source_files
 	${CMAKE_CURRENT_LIST_DIR}/src/platform-win32.c
 	${CMAKE_CURRENT_LIST_DIR}/src/drv_dummy/dummy.c
 	${CMAKE_CURRENT_LIST_DIR}/src/omath.c
+	${CMAKE_CURRENT_LIST_DIR}/src/exponential-filter.c
 	${CMAKE_CURRENT_LIST_DIR}/src/platform-posix.c
 	${CMAKE_CURRENT_LIST_DIR}/src/fusion.c
 	${CMAKE_CURRENT_LIST_DIR}/src/matrices.c
