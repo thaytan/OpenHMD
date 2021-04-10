@@ -623,7 +623,7 @@ static bool pose_sum_func(const unscented_transform *ut, const matrix2d *Y, cons
 
 void rift_kalman_6dof_init(rift_kalman_6dof_filter *state, int num_delay_slots)
 {
-	int i;
+	int i, d;
 
 	assert(num_delay_slots <= MAX_DELAY_SLOTS);
 
@@ -639,9 +639,9 @@ void rift_kalman_6dof_init(rift_kalman_6dof_filter *state, int num_delay_slots)
 		MATRIX2D_XY(state->Q_noise, i, i) = 1e-5;
 
 	for (i = COV_POSITION; i < COV_POSITION + 3; i++)
-		MATRIX2D_XY(state->Q_noise, i, i) = 1e-3;
+		MATRIX2D_XY(state->Q_noise, i, i) = 1e-4;
 	for (i = COV_VELOCITY; i < COV_VELOCITY + 3; i++)
-		MATRIX2D_XY(state->Q_noise, i, i) = 0.25;
+		MATRIX2D_XY(state->Q_noise, i, i) = 1e-3;
 
 	/* Accelerometer and Gyro estimates can change sharply -
 	 * even "gentle" motion leads to +/- 5g in a millisecond,
@@ -659,6 +659,13 @@ void rift_kalman_6dof_init(rift_kalman_6dof_filter *state, int num_delay_slots)
 
 	for (i = COV_GYRO_BIAS; i < COV_GYRO_BIAS + 3; i++)
 		MATRIX2D_XY(state->Q_noise, i, i) = IMU_GYRO_BIAS_NOISE;
+
+	/* Delay slots - copy the noise from the main slot */
+	for (d = 0; d < num_delay_slots; d++) {
+		int cov_index = BASE_COV_SIZE + (DELAY_SLOT_COV_SIZE * d);
+		for (i = 0; i < 6; i++)
+			MATRIX2D_XY(state->Q_noise, cov_index + i, cov_index + i) = MATRIX2D_XY(state->Q_noise, i, i);
+	}
 
 	/* Takes ownership of Q_noise */
 	ukf_base_init(&state->ukf, STATE_SIZE, COV_SIZE, state->Q_noise, process_func, state_mean_func, state_residual_func, state_sum_func);
@@ -691,7 +698,7 @@ void rift_kalman_6dof_init(rift_kalman_6dof_filter *state, int num_delay_slots)
 	 * the orientation. */
 	ukf_measurement_init(&state->m2, 7, 6, &state->ukf, pose_measurement_func, pose_mean_func, pose_residual_func, pose_sum_func);
 	for (int i = 0; i < 3; i++)
-		MATRIX2D_XY(state->m2.R, i, i) = 0.02 * 0.02; /* 2cm error std dev */
+		MATRIX2D_XY(state->m2.R, i, i) = 0.05 * 0.05; /* 5cm error std dev */
 
 	MATRIX2D_XY(state->m2.R, 3, 3) = (DEG_TO_RAD(90) * DEG_TO_RAD(90)); /* 90 degrees std dev (don't trust observations much for X/Z, 20 degrees for yaw) */
 	MATRIX2D_XY(state->m2.R, 4, 4) = (DEG_TO_RAD(20) * DEG_TO_RAD(20)); /* Y */
