@@ -514,7 +514,7 @@ release_capture_frame(rift_sensor_ctx *sensor, rift_sensor_capture_frame *frame)
 		 (double) (frame->long_analysis_start_ts - frame->image_analysis_finish_ts) / 1000000.0,
 		 (uint32_t) (frame->long_analysis_finish_ts - frame->long_analysis_start_ts) / 1000000);
 
-	rift_tracker_frame_release (sensor->tracker, now, frame->uvc.start_ts, &frame->exposure_info, sensor->serial_no);
+	rift_tracker_frame_release (sensor->tracker, now, frame->uvc.start_ts, frame->exposure_info_valid ? &frame->exposure_info : NULL, sensor->serial_no);
 
 	if (frame->bwobs) {
 		blobwatch_release_observation(sensor->bw, frame->bwobs);
@@ -591,7 +591,7 @@ static void new_frame_start_cb(struct rift_sensor_uvc_stream *stream, uint64_t s
 
 	if (release_old_frame)
 		rift_tracker_frame_release (sensor->tracker, start_time, old_frame_ts, &old_exposure_info, sensor->serial_no);
-	rift_tracker_frame_start (sensor->tracker, start_time, sensor->serial_no);
+	rift_tracker_frame_start (sensor->tracker, start_time, sensor->serial_no, exposure_info_valid ? &exposure_info : NULL);
 }
 
 static void
@@ -1116,6 +1116,9 @@ static unsigned int fast_analysis_thread(void *arg)
 
 void rift_sensor_update_exposure (rift_sensor_ctx *sensor, const rift_tracker_exposure_info *exposure_info)
 {
+	rift_tracker_exposure_info old_exposure_info;
+	bool old_exposure_info_valid = false, exposure_changed = false;
+
 	ohmd_lock_mutex (sensor->sensor_lock);
 	rift_sensor_capture_frame *frame = (rift_sensor_capture_frame *)(sensor->cur_capture_frame);
 
@@ -1134,6 +1137,7 @@ void rift_sensor_update_exposure (rift_sensor_ctx *sensor, const rift_tracker_ex
 
 		frame->exposure_info = *exposure_info;
 		frame->exposure_info_valid = true;
+		exposure_changed = true;
 	}
 	else if (frame->exposure_info.count != exposure_info->count) {
 		/* The exposure info changed mid-frame. Update if this exposure arrived within 5 ms
@@ -1141,7 +1145,11 @@ void rift_sensor_update_exposure (rift_sensor_ctx *sensor, const rift_tracker_ex
 		uint64_t frame_ts_threshold = frame->uvc.start_ts + 5000000;
 
 		if (exposure_info->local_ts < frame_ts_threshold) {
+			old_exposure_info_valid = true;
+			old_exposure_info = frame->exposure_info;
+
 			frame->exposure_info = *exposure_info;
+			exposure_changed = true;
 
 			LOGV ("%f Sensor %d Frame (sof %f) updating exposure info TS %u count %u phase %d",
 				(double) (now) / 1000000.0, sensor->id,
@@ -1150,6 +1158,9 @@ void rift_sensor_update_exposure (rift_sensor_ctx *sensor, const rift_tracker_ex
 				exposure_info->count, exposure_info->led_pattern_phase);
 		}
 	}
+
+	if (exposure_changed)
+		rift_tracker_frame_changed_exposure(sensor->tracker, old_exposure_info_valid ? &old_exposure_info : NULL, &frame->exposure_info);
 
 done:
 	ohmd_unlock_mutex (sensor->sensor_lock);

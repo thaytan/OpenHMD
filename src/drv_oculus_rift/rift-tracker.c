@@ -75,6 +75,7 @@ struct rift_tracked_device_priv {
 	uint64_t device_time_ns;
 
 	uint64_t last_observed_pose_ts;
+	posef last_observed_pose;
 
 	/* Reported view pose (to the user) and model pose (for the tracking) respectively */
 	uint64_t last_reported_pose;
@@ -113,8 +114,8 @@ static void rift_tracked_device_send_imu_debug(rift_tracked_device_priv *dev);
 static void rift_tracked_device_send_debug_printf(rift_tracked_device_priv *dev, uint64_t local_ts, const char *fmt, ...);
 
 static void rift_tracked_device_update_exposure (rift_tracked_device_priv *dev, rift_tracked_device_exposure_info *dev_info);
-static void rift_tracked_device_frame_captured(rift_tracked_device_priv *dev, rift_tracked_device_exposure_info *dev_info);
-static void rift_tracked_device_frame_release_locked(rift_tracked_device_priv *dev, rift_tracked_device_exposure_info *dev_info);
+static void rift_tracked_device_exposure_claim(rift_tracked_device_priv *dev, rift_tracked_device_exposure_info *dev_info);
+static void rift_tracked_device_exposure_release_locked(rift_tracked_device_priv *dev, rift_tracked_device_exposure_info *dev_info);
 
 rift_tracked_device *
 rift_tracker_add_device (rift_tracker_ctx *ctx, int device_id, posef *imu_pose, rift_leds *leds)
@@ -270,7 +271,7 @@ void rift_tracker_update_exposure (rift_tracker_ctx *ctx, uint32_t hmd_ts, uint1
 	ohmd_lock_mutex (ctx->tracker_lock);
 	if (ctx->exposure_info.led_pattern_phase != led_pattern_phase) {
 		LOGD ("%f LED pattern phase changed to %d",
-			(double) (now) / 1000000.0, led_pattern_phase);
+			(double) (ohmd_monotonic_get(ctx->ohmd_ctx)) / 1000000.0, led_pattern_phase);
 		ctx->exposure_info.led_pattern_phase = led_pattern_phase;
 	}
 
@@ -285,7 +286,7 @@ void rift_tracker_update_exposure (rift_tracker_ctx *ctx, uint32_t hmd_ts, uint1
 		ctx->exposure_info.led_pattern_phase = led_pattern_phase;
 		ctx->have_exposure_info = true;
 
-		LOGD ("%f Have new exposure TS %u count %d LED pattern phase %d",
+		LOGD ("%f Have new exposure TS %u count %u LED pattern phase %d",
 			(double) (now) / 1000000.0, exposure_count, exposure_hmd_ts, led_pattern_phase);
 
 		if ((int32_t)(exposure_hmd_ts - hmd_ts) < -1500) {
@@ -327,7 +328,7 @@ void rift_tracker_update_exposure (rift_tracker_ctx *ctx, uint32_t hmd_ts, uint1
 }
 
 void
-rift_tracker_frame_start (rift_tracker_ctx *ctx, uint64_t local_ts, const char *source)
+rift_tracker_frame_start (rift_tracker_ctx *ctx, uint64_t local_ts, const char *source, rift_tracker_exposure_info *info)
 {
 	int i;
 	ohmd_lock_mutex (ctx->tracker_lock);
@@ -337,11 +338,43 @@ rift_tracker_frame_start (rift_tracker_ctx *ctx, uint64_t local_ts, const char *
 		ohmd_lock_mutex (dev->device_lock);
 		rift_tracked_device_send_imu_debug(dev);
 
+		/* This device might not have exposure info for this frame if it
+		 * recently came online */
+		if (info && i < info->n_devices) {
+			rift_tracked_device_exposure_info *dev_info = info->devices + i;
+			rift_tracked_device_exposure_claim(dev, dev_info);
+		}
+
 		if (dev->debug_file != NULL) {
 			fprintf(dev->debug_file, ",\n{ \"type\": \"frame-start\", \"local-ts\": %llu, "
 				"\"source\": \"%s\" }",
 				(unsigned long long) local_ts, source);
 		}
+		ohmd_unlock_mutex (dev->device_lock);
+	}
+	ohmd_unlock_mutex (ctx->tracker_lock);
+}
+
+/* Frame to exposure association changed mid-arrival - update our accounting */
+void
+rift_tracker_frame_changed_exposure(rift_tracker_ctx *ctx, rift_tracker_exposure_info *old_info, rift_tracker_exposure_info *new_info)
+{
+	int i;
+	ohmd_lock_mutex (ctx->tracker_lock);
+	for (i = 0; i < ctx->n_devices; i++) {
+		rift_tracked_device_priv *dev = ctx->devices + i;
+
+		ohmd_lock_mutex (dev->device_lock);
+		if (old_info && i < old_info->n_devices) {
+			rift_tracked_device_exposure_info *dev_info = old_info->devices + i;
+			rift_tracked_device_exposure_release_locked(dev, dev_info);
+		}
+
+		if (new_info && i < new_info->n_devices) {
+			rift_tracked_device_exposure_info *dev_info = new_info->devices + i;
+			rift_tracked_device_exposure_claim(dev, dev_info);
+		}
+
 		ohmd_unlock_mutex (dev->device_lock);
 	}
 	ohmd_unlock_mutex (ctx->tracker_lock);
@@ -357,11 +390,12 @@ rift_tracker_frame_captured (rift_tracker_ctx *ctx, uint64_t local_ts, uint64_t 
 
 		ohmd_lock_mutex (dev->device_lock);
 
-		/* This device might not have exposure info for this frame if it
-		 * recently came online */
 		if (i < info->n_devices) {
+#if LOGLEVEL == 0
 			rift_tracked_device_exposure_info *dev_info = info->devices + i;
-			rift_tracked_device_frame_captured(dev, dev_info);
+			LOGD("Frame capture - ts %llu, delay slot %d for dev %d",
+				(unsigned long long) dev_info->device_time_ns, dev_info->fusion_slot, dev->base.id);
+#endif
 		}
 
 		rift_tracked_device_send_imu_debug(dev);
@@ -388,9 +422,9 @@ rift_tracker_frame_release (rift_tracker_ctx *ctx, uint64_t local_ts, uint64_t f
 
 		/* This device might not have exposure info for this frame if it
 		 * recently came online */
-		if (i < info->n_devices) {
+		if (info && i < info->n_devices) {
 			rift_tracked_device_exposure_info *dev_info = info->devices + i;
-			rift_tracked_device_frame_release_locked(dev, dev_info);
+			rift_tracked_device_exposure_release_locked(dev, dev_info);
 		}
 
 		rift_tracked_device_send_imu_debug(dev);
@@ -536,6 +570,7 @@ void rift_tracked_device_model_pose_update(rift_tracked_device *dev_base, uint64
 			rift_kalman_6dof_pose_update(&dev->ukf_fusion, dev->device_time_ns, pose, slot->slot_id);
 #endif
 			dev->last_observed_pose_ts = dev->device_time_ns;
+			dev->last_observed_pose = *pose;
 		}
 	}
 
@@ -710,7 +745,7 @@ rift_tracked_device_update_exposure(rift_tracked_device_priv *dev, rift_tracked_
 }
 
 static void
-rift_tracked_device_frame_captured(rift_tracked_device_priv *dev, rift_tracked_device_exposure_info *dev_info)
+rift_tracked_device_exposure_claim(rift_tracked_device_priv *dev, rift_tracked_device_exposure_info *dev_info)
 {
 	rift_tracker_pose_delay_slot *slot = get_matching_delay_slot(dev, dev_info);
 
@@ -718,32 +753,46 @@ rift_tracked_device_frame_captured(rift_tracked_device_priv *dev, rift_tracked_d
 	if (slot) {
 		slot->use_count++;
 		dev_info->fusion_slot = slot->slot_id;
+
+		LOGD ("Claimed delay slot %d for dev %d, ts %llu. use_count now %d",
+			dev_info->fusion_slot, dev->base.id, (unsigned long long) dev_info->device_time_ns, slot->use_count);
 	}
 	else {
 		/* The slot was not allocated (we missed the exposure event), or it
 		 * was overridden by a later exposure because there's not enough slots */
 		if (dev_info->fusion_slot != -1) {
-			LOGD ("Lost delay slot for dev %d, ts %llu", dev->base.id, (unsigned long long) dev_info->device_time_ns);
+#if LOGLEVEL == 0
+			rift_tracker_pose_delay_slot *slot = dev->delay_slots + dev_info->fusion_slot;
+
+			LOGD ("Lost delay slot %d for dev %d, ts %llu (slot valid %d ts %llu)",
+				dev_info->fusion_slot, dev->base.id, (unsigned long long) dev_info->device_time_ns,
+				slot->valid, (unsigned long long) slot->device_time_ns);
+#endif
+			dev_info->fusion_slot = -1;
 		}
-		dev_info->fusion_slot = -1;
 	}
 }
 
 static void
-rift_tracked_device_frame_release_locked(rift_tracked_device_priv *dev, rift_tracked_device_exposure_info *dev_info)
+rift_tracked_device_exposure_release_locked(rift_tracked_device_priv *dev, rift_tracked_device_exposure_info *dev_info)
 {
 	rift_tracker_pose_delay_slot *slot = get_matching_delay_slot(dev, dev_info);
 
 	/* There is a delay slot for this frame, release it */
 	if (slot) {
-		if (slot->use_count > 0)
+		if (slot->use_count > 0) {
 			slot->use_count--;
+			LOGD ("Released delay slot %d for dev %d, ts %llu. use_count now %d",
+				dev_info->fusion_slot, dev->base.id, (unsigned long long) dev_info->device_time_ns,
+				slot->use_count);
+		}
 
 		if (slot->use_count == 0) {
-			slot->valid = false;
-
 			/* Tell the kalman filter the slot is invalid */
 			rift_kalman_6dof_release_delay_slot(&dev->ukf_fusion, slot->slot_id);
+			slot->valid = false;
+			LOGD ("Invalidating delay slot %d for dev %d, ts %llu",
+				dev_info->fusion_slot, dev->base.id, (unsigned long long) dev_info->device_time_ns);
 		}
 
 		/* Clear the slot from this device info so it doesn't get released a second time */
@@ -759,7 +808,7 @@ void rift_tracked_device_frame_release(rift_tracked_device *dev_base, rift_track
 	if (dev->index < exposure_info->n_devices) {
 		/* This device existed when the exposure was taken and therefore has info */
 		rift_tracked_device_exposure_info *dev_info = exposure_info->devices + dev->index;
-		rift_tracked_device_frame_release_locked(dev, dev_info);
+		rift_tracked_device_exposure_release_locked(dev, dev_info);
 	}
 	ohmd_unlock_mutex (dev->device_lock);
 }
