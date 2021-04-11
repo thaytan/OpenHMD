@@ -630,7 +630,6 @@ update_device_and_blobs (rift_sensor_ctx *ctx, rift_sensor_capture_frame *frame,
 
 	dev_state->final_cam_pose.pos = obj_cam_pose->pos;
 	dev_state->final_cam_pose.orient = obj_cam_pose->orient;
-	dev_state->found_device_pose = true;
 
 	LOGD ("sensor %d PnP for device %d yielded quat %f %f %f %f pos %f %f %f",
 		ctx->id, dev->id, dev_state->final_cam_pose.orient.x, dev_state->final_cam_pose.orient.y, dev_state->final_cam_pose.orient.z, dev_state->final_cam_pose.orient.w,
@@ -674,6 +673,8 @@ update_device_pose (rift_sensor_ctx *sensor_ctx, rift_tracked_device *dev,
 				pose.pos.x, pose.pos.y, pose.pos.z);
 
 			rift_tracked_device_model_pose_update(dev, now, frame->uvc.start_ts, &frame->exposure_info, &pose, sensor_ctx->serial_no);
+			rift_tracked_device_frame_release(dev, &frame->exposure_info);
+			dev_state->found_device_pose = true;
 
 #if 0
 		  rift_tracked_device_get_model_pose(dev, (double) (frame->uvc.start_ts) / 1000000000.0, &pose, NULL);

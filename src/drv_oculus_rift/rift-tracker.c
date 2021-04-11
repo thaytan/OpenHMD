@@ -114,7 +114,7 @@ static void rift_tracked_device_send_debug_printf(rift_tracked_device_priv *dev,
 
 static void rift_tracked_device_update_exposure (rift_tracked_device_priv *dev, rift_tracked_device_exposure_info *dev_info);
 static void rift_tracked_device_frame_captured(rift_tracked_device_priv *dev, rift_tracked_device_exposure_info *dev_info);
-static void rift_tracked_device_frame_released(rift_tracked_device_priv *dev, rift_tracked_device_exposure_info *dev_info);
+static void rift_tracked_device_frame_release_locked(rift_tracked_device_priv *dev, rift_tracked_device_exposure_info *dev_info);
 
 rift_tracked_device *
 rift_tracker_add_device (rift_tracker_ctx *ctx, int device_id, posef *imu_pose, rift_leds *leds)
@@ -390,7 +390,7 @@ rift_tracker_frame_release (rift_tracker_ctx *ctx, uint64_t local_ts, uint64_t f
 		 * recently came online */
 		if (i < info->n_devices) {
 			rift_tracked_device_exposure_info *dev_info = info->devices + i;
-			rift_tracked_device_frame_released(dev, dev_info);
+			rift_tracked_device_frame_release_locked(dev, dev_info);
 		}
 
 		rift_tracked_device_send_imu_debug(dev);
@@ -730,7 +730,7 @@ rift_tracked_device_frame_captured(rift_tracked_device_priv *dev, rift_tracked_d
 }
 
 static void
-rift_tracked_device_frame_released(rift_tracked_device_priv *dev, rift_tracked_device_exposure_info *dev_info)
+rift_tracked_device_frame_release_locked(rift_tracked_device_priv *dev, rift_tracked_device_exposure_info *dev_info)
 {
 	rift_tracker_pose_delay_slot *slot = get_matching_delay_slot(dev, dev_info);
 
@@ -745,5 +745,21 @@ rift_tracked_device_frame_released(rift_tracked_device_priv *dev, rift_tracked_d
 			/* Tell the kalman filter the slot is invalid */
 			rift_kalman_6dof_release_delay_slot(&dev->ukf_fusion, slot->slot_id);
 		}
+
+		/* Clear the slot from this device info so it doesn't get released a second time */
+		dev_info->fusion_slot = -1;
 	}
+}
+
+void rift_tracked_device_frame_release(rift_tracked_device *dev_base, rift_tracker_exposure_info *exposure_info)
+{
+	rift_tracked_device_priv *dev = (rift_tracked_device_priv *) (dev_base);
+
+	ohmd_lock_mutex (dev->device_lock);
+	if (dev->index < exposure_info->n_devices) {
+		/* This device existed when the exposure was taken and therefore has info */
+		rift_tracked_device_exposure_info *dev_info = exposure_info->devices + dev->index;
+		rift_tracked_device_frame_release_locked(dev, dev_info);
+	}
+	ohmd_unlock_mutex (dev->device_lock);
 }
