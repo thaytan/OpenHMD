@@ -262,6 +262,8 @@ static void iso_transfer_cb(struct libusb_transfer *transfer)
 		ret = libusb_submit_transfer(transfer);
 		if (ret >= 0)
 			break;
+		/* Sleep 0.5ms between retries */
+		ohmd_sleep(0.0005);
 	}
 
 	if (ret < 0) {
