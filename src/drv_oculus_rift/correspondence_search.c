@@ -474,7 +474,7 @@ check_led_against_model_subset (correspondence_search_t *cs, cs_model_info_t *mi
       ovec3f_multiply_scalar (&checkpos, 1.0/checkpos.z, &checkpos);
       ovec3f_subtract (&checkpos, &blob0, &tmp);
       l = ovec3f_get_length (&tmp);
-      if (l > 0.0025) {
+      if (!(l <= 0.0025)) {
 	      printf ("Error pose candidate orient %f %f %f %f pos %f %f %f "
             "Anchor LED %f %f %f projected to %f %f %f (err %f)\n",
             pose.orient.x, pose.orient.y, pose.orient.z, pose.orient.w,
@@ -483,7 +483,6 @@ check_led_against_model_subset (correspondence_search_t *cs, cs_model_info_t *mi
             checkpos.x, checkpos.y, checkpos.z, l);
         continue; /* FIXME: Figure out why this happened */
       }
-      assert (l <= 0.0025);
 
       /* check against the 4th point to check the proposed P3P solution */
       oquatf_get_rotated (&pose.orient, xcheck, &checkpos);
