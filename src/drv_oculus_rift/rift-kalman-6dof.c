@@ -34,7 +34,8 @@
 #define ACCEL_DAMP 0.9
 #define VEL_DAMP 0.999
 
-const double GRAVITY_MAG = 9.80665;
+#define GRAVITY_MAG 9.80665
+
 /* Maximum sensible acceleration */
 const double MAX_ACCEL = 16.0 * GRAVITY_MAG;
 
