@@ -1,4 +1,3 @@
-#include <asm/byteorder.h>
 #include <errno.h>
 #include <libusb.h>
 #include <stdbool.h>
@@ -11,6 +10,27 @@
 
 #include "rift-sensor-esp570.h"
 #include "rift-sensor-uvc.h"
+
+#ifdef __linux__
+#include <asm/byteorder.h>
+#else
+/* FIXME: Assumption of little endianness, which is pretty valid on non-LINUX */
+#define __le32 uint32_t
+#define __le16 uint16_t
+#define __u8 uint8_t
+#define __cpu_to_le16
+#define __le16_to_cpu
+#define __cpu_to_le32
+#define __le32_to_cpu
+#endif
+
+#ifdef _MSC_VER
+#define PACKED_STRUCT(name) \
+    __pragma(pack(push, 1)) struct name __pragma(pack(pop))
+#elif defined(__GNUC__)
+#define PACKED_STRUCT(name) struct __attribute__((packed)) name
+#endif
+
 
 #define SET_CUR 0x01
 #define GET_CUR 0x81
@@ -28,7 +48,7 @@
 
 #define VERBOSE_DEBUG 0
 
-struct uvc_probe_commit_control {
+PACKED_STRUCT(uvc_probe_commit_control) {
 	__le16 bmHint;
 	__u8 bFormatIndex;
 	__u8 bFrameIndex;
@@ -42,15 +62,15 @@ struct uvc_probe_commit_control {
 	__le32 dwMaxPayloadTransferSize;
 	__le32 dwClockFrequency;
 	__u8 bmFramingInfo;
-} __attribute__((packed));
+};
 
-struct uvc_payload_header {
+PACKED_STRUCT(uvc_payload_header) {
 	__u8 bHeaderLength;
 	__u8 bmHeaderInfo;
 	__le32 dwPresentationTime;
 	__le16 wSofCounter;
 	__le32 scrSourceClock;
-} __attribute__((packed));
+};
 
 int rift_sensor_uvc_set_cur(libusb_device_handle *dev, uint8_t interface, uint8_t entity,
 		uint8_t selector, void *data, uint16_t wLength)
@@ -111,7 +131,7 @@ void process_payload(struct rift_sensor_uvc_stream *stream, unsigned char *paylo
 		return;
 
 	if (h->bHeaderLength != 12) {
-		printf("invalid header: len %u/%ld\n", h->bHeaderLength, len);
+		printf("invalid header: len %u/%u\n", h->bHeaderLength, (uint32_t) len);
 		return;
 	}
 

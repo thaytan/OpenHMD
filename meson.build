@@ -32,8 +32,17 @@ if not dep_hidapi.found()
 	dep_hidapi = proj_hidapi.get_variable('hidapi_dep')
 endif
 dep_threads = dependency('threads')
-dep_libusb = dependency('libusb-1.0')
+dep_libusb = dependency('libusb-1.0', required: false)
+if not dep_libusb.found()
+	proj_hidapi = subproject('hidapi')
+	dep_libusb = proj_hidapi.get_variable('libusb_dep')
+endif
+dep_threads = dependency('threads')
 dep_opencv = dependency('opencv4', required: false)
+if not dep_opencv.found()
+	# On Windows, search via cmake
+        dep_opencv = dependency('opencv', method: 'cmake', modules: ['opencv_core'])
+endif
 if not dep_opencv.found()
 	dep_opencv = dependency('opencv')
 endif

@@ -36,7 +36,7 @@
 
 const double GRAVITY_MAG = 9.80665;
 /* Maximum sensible acceleration */
-const double MAX_ACCEL = 16 * GRAVITY_MAG;
+const double MAX_ACCEL = 16.0 * GRAVITY_MAG;
 
 typedef struct imu_filter_state imu_filter_state;
 
