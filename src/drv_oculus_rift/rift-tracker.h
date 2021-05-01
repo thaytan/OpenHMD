@@ -9,7 +9,6 @@
 #include "rift.h"
 #include "rift-kalman-6dof.h"
 #include "correspondence_search.h"
-#include "ohmd-pipewire.h"
 
 #ifndef __RIFT_TRACKER_H__
 #define __RIFT_TRACKER_H__

@@ -15,6 +15,9 @@
 #include "rift-tracker.h"
 #include "rift-sensor-uvc.h"
 
+#include "ohmd-pipewire.h"
+#include "ohmd-gstreamer.h"
+
 typedef struct rift_sensor_ctx_s rift_sensor_ctx;
 typedef struct rift_sensor_frame_device_state rift_sensor_frame_device_state;
 typedef struct rift_sensor_capture_frame rift_sensor_capture_frame;
@@ -67,7 +70,8 @@ struct rift_sensor_capture_frame {
 };
 
 rift_sensor_ctx *rift_sensor_new (ohmd_context* ohmd_ctx, int id, const char *serial_no,
-	libusb_context *usb_ctx, libusb_device_handle *usb_devh, rift_tracker_ctx *tracker, const uint8_t radio_id[5]);
+	libusb_context *usb_ctx, libusb_device_handle *usb_devh, rift_tracker_ctx *tracker, const uint8_t radio_id[5],
+  ohmd_gst_pipeline *debug_pipe);
 void rift_sensor_free (rift_sensor_ctx *sensor_ctx);
 bool rift_sensor_add_device (rift_sensor_ctx *ctx, rift_tracked_device *device);
 void rift_sensor_update_exposure (rift_sensor_ctx *sensor, const rift_tracker_exposure_info *exposure_info);
