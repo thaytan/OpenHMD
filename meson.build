@@ -92,6 +92,20 @@ if have_pipewire
 	sources += [ 'src/drv_oculus_rift/ohmd-pipewire.c' ]
 endif
 
+have_gstreamer = false
+if debugging_mode
+  gst_dep = dependency('gstreamer-1.0', fallback : ['gstreamer', 'gst_dep'], required: false)
+  gstvideo_dep = dependency('gstreamer-video-1.0', fallback: ['gst-plugins-base', 'video_dep'], required: false)
+  gstapp_dep = dependency('gstreamer-app-1.0', fallback: ['gst-plugins-base', 'app_dep'], required: false)
+
+  have_gstreamer = gst_dep.found() and gstvideo_dep.found() and gstapp_dep.found()
+  if have_gstreamer
+	  c_args += '-DHAVE_GSTREAMER=1'
+	  deps += [ gst_dep, gstvideo_dep, gstapp_dep ]
+		sources += ['src/drv_oculus_rift/ohmd-gstreamer.c']
+  endif
+endif
+
 if get_option('default_library') == 'shared'
 	if host_machine.system() == 'windows'
 		c_args += '-DDLL_EXPORT'
