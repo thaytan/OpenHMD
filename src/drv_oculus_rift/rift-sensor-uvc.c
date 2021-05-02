@@ -469,7 +469,7 @@ int rift_sensor_uvc_stream_stop(struct rift_sensor_uvc_stream *stream)
 	}
 
 	while (stream->active_transfers > 0) {
-		if (libusb_try_lock_events (stream->ctx))
+		if (!libusb_try_lock_events (stream->ctx))
 			libusb_unlock_events (stream->ctx);
 	}
 

@@ -13,6 +13,7 @@
 #include <stdlib.h>
 #include <assert.h>
 #include <stdarg.h>
+#include <time.h>
 
 #include "../exponential-filter.h"
 #include "rift-tracker.h"
@@ -170,8 +171,14 @@ static unsigned int uvc_handle_events(void *arg)
 {
 	rift_tracker_ctx *tracker_ctx = arg;
 
-	while (!tracker_ctx->usb_completed)
-		libusb_handle_events_completed(tracker_ctx->usb_ctx, &tracker_ctx->usb_completed);
+	while (!tracker_ctx->usb_completed) {
+		struct timeval timeout;
+
+		timeout.tv_sec = 0;
+		timeout.tv_usec = 100000;
+
+		libusb_handle_events_timeout_completed(tracker_ctx->usb_ctx, &timeout, &tracker_ctx->usb_completed);
+	}
 
 	return 0;
 }
