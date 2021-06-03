@@ -92,7 +92,7 @@ static void vec3f_from_hololens_gyro(int16_t smp[3][32], int i, vec3f* out_vec)
 			     smp[0][8*i+4] +
 			     smp[0][8*i+5] +
 			     smp[0][8*i+6] +
-			     smp[0][8*i+7]) * 0.001f * -0.125f;
+			     smp[0][8*i+7]) * 0.001f * -0.125f * -1.0f;
 	out_vec->y = (float)(smp[1][8*i+0] +
 			     smp[1][8*i+1] +
 			     smp[1][8*i+2] +
