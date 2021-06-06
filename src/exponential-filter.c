@@ -8,9 +8,9 @@
 
 #include "exponential-filter.h"
 
-#define DEFAULT_FCMIN 25.0
-#define DEFAULT_FCMIN_D 10.0
-#define DEFAULT_BETA 0.01
+#define DEFAULT_FCMIN 30.0
+#define DEFAULT_FCMIN_D 25.0
+#define DEFAULT_BETA 0.6
 
 static double calc_smoothing_alpha(double Fc, double dt) {
 	/* Calculate alpha = (1 / (1 + tau/dt)) where tau = 1.0 / (2 * pi * Fc),
