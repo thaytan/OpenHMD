@@ -632,7 +632,7 @@ static int getf_hmd(rift_hmd_t *hmd, ohmd_float_value type, float* out)
 
 	case OHMD_ROTATION_QUAT: {
 			if (hmd->tracked_dev) {
-				rift_tracked_device_get_view_pose(hmd->tracked_dev, &pose);
+				rift_tracked_device_get_view_pose(hmd->tracked_dev, &pose, NULL, NULL);
 			}
 			*(quatf*)out = pose.orient;
 			break;
@@ -640,11 +640,29 @@ static int getf_hmd(rift_hmd_t *hmd, ohmd_float_value type, float* out)
 
 	case OHMD_POSITION_VECTOR:
 		if (hmd->tracked_dev) {
-			rift_tracked_device_get_view_pose(hmd->tracked_dev, &pose);
+			rift_tracked_device_get_view_pose(hmd->tracked_dev, &pose, NULL, NULL);
 		}
 		*(vec3f*)out = pose.pos;
 		break;
 
+	case OHMD_VELOCITY_VECTOR: {
+		vec3f vel = { 0, };
+
+		if (hmd->tracked_dev) {
+			rift_tracked_device_get_view_pose(hmd->tracked_dev, NULL, &vel, NULL);
+		}
+		*(vec3f*)out = vel;
+		break;
+	}
+	case OHMD_ACCELERATION_VECTOR: {
+		vec3f accel = { 0, };
+
+		if (hmd->tracked_dev) {
+			rift_tracked_device_get_view_pose(hmd->tracked_dev, NULL, NULL, &accel);
+		}
+		*(vec3f*)out = accel;
+		break;
+	}
 	case OHMD_CONTROLS_STATE:
 		out[0] = (hmd->remote_buttons_state & RIFT_REMOTE_BUTTON_UP) != 0;
 		out[1] = (hmd->remote_buttons_state & RIFT_REMOTE_BUTTON_DOWN) != 0;
@@ -674,17 +692,35 @@ static int getf_touch_controller(rift_device_priv* dev_priv, ohmd_float_value ty
 	switch(type){
 	case OHMD_ROTATION_QUAT: {
 			if (touch->tracked_dev) {
-				rift_tracked_device_get_view_pose(touch->tracked_dev, &pose);
+				rift_tracked_device_get_view_pose(touch->tracked_dev, &pose, NULL, NULL);
 			}
 			*(quatf*)out = pose.orient;
 			break;
 		}
 	case OHMD_POSITION_VECTOR:
 		if (touch->tracked_dev) {
-			rift_tracked_device_get_view_pose(touch->tracked_dev, &pose);
+			rift_tracked_device_get_view_pose(touch->tracked_dev, &pose, NULL, NULL);
 		}
 		*(vec3f*)out = pose.pos;
 		break;
+	case OHMD_VELOCITY_VECTOR: {
+		vec3f vel = { 0, };
+
+		if (touch->tracked_dev) {
+			rift_tracked_device_get_view_pose(touch->tracked_dev, NULL, &vel, NULL);
+		}
+		*(vec3f*)out = vel;
+		break;
+	}
+	case OHMD_ACCELERATION_VECTOR: {
+		vec3f accel = { 0, };
+
+		if (touch->tracked_dev) {
+			rift_tracked_device_get_view_pose(touch->tracked_dev, NULL, NULL, &accel);
+		}
+		*(vec3f*)out = accel;
+		break;
+	}
 	case OHMD_DISTORTION_K:
 		return -1;
 	case OHMD_CONTROLS_STATE:

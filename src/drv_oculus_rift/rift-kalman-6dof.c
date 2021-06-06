@@ -847,7 +847,7 @@ void rift_kalman_6dof_position_update(rift_kalman_6dof_filter *state, uint64_t t
 	rift_kalman_6dof_update(state, time, m);
 }
 
-void rift_kalman_6dof_get_pose_at(rift_kalman_6dof_filter *state, uint64_t time, posef *pose, vec3f *pos_error, vec3f *rot_error)
+void rift_kalman_6dof_get_pose_at(rift_kalman_6dof_filter *state, uint64_t time, posef *pose, vec3f *vel, vec3f *accel, vec3f *pos_error, vec3f *rot_error)
 {
 	matrix2d *x = state->ukf.x_prior;
 	matrix2d *P = state->ukf.P_prior; /* Covariance */
@@ -861,6 +861,18 @@ void rift_kalman_6dof_get_pose_at(rift_kalman_6dof_filter *state, uint64_t time,
 	pose->orient.y = MATRIX2D_Y(x, STATE_ORIENTATION+1);
 	pose->orient.z = MATRIX2D_Y(x, STATE_ORIENTATION+2);
 	pose->orient.w = MATRIX2D_Y(x, STATE_ORIENTATION+3);
+
+	if (vel) {
+		vel->x = MATRIX2D_Y(x, STATE_VELOCITY);
+		vel->y = MATRIX2D_Y(x, STATE_VELOCITY+1);
+		vel->z = MATRIX2D_Y(x, STATE_VELOCITY+2);
+	}
+
+	if (accel) {
+		accel->x = MATRIX2D_Y(x, STATE_ACCEL);
+		accel->y = MATRIX2D_Y(x, STATE_ACCEL+1);
+		accel->z = MATRIX2D_Y(x, STATE_ACCEL+2);
+	}
 
 	if (pos_error) {
 		pos_error->x = sqrtf(MATRIX2D_XY(P, COV_POSITION, COV_POSITION));
