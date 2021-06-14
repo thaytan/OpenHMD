@@ -211,15 +211,15 @@ rift_tracker_add_device (rift_tracker_ctx *ctx, int device_id, posef *imu_pose, 
 	if (next_dev->debug_metadata_gst != NULL) {
 		uint64_t now = ohmd_monotonic_get(ctx->ohmd_ctx);
 
-    char *leds_str = make_led_debug_string(leds);
+		char *leds_str = make_led_debug_string(leds);
 
 		rift_tracked_device_send_debug_printf(next_dev, now,
 			"{ \"type\": \"device\", \"device-id\": %d,\n"
 			"\"imu-calibration\": { \"accel-offset\": [ %f, %f, %f ], \"accel-matrix\": [ %f, %f, %f, %f, %f, %f, %f, %f, %f ], \n"
 			"\"gyro_offset\": [ %f, %f, %f ], \"gyro-matrix\": [ %f, %f, %f, %f, %f, %f, %f, %f, %f ] }, \n"
-      "\"imu-position\": [ %f, %f, %f ], \"imu-orient\": [ %f, %f, %f, %f ], \n"
-      "\"leds\": %s "
-      "}\n", device_id,
+			"\"imu-position\": [ %f, %f, %f ], \"imu-orient\": [ %f, %f, %f, %f ], \n"
+			"\"leds\": %s "
+			"}\n", device_id,
 			calib->accel_offset.x, calib->accel_offset.y, calib->accel_offset.z,
 			calib->accel_matrix[0], calib->accel_matrix[1], calib->accel_matrix[2],
 			calib->accel_matrix[3], calib->accel_matrix[4], calib->accel_matrix[5],
@@ -228,11 +228,11 @@ rift_tracker_add_device (rift_tracker_ctx *ctx, int device_id, posef *imu_pose, 
 			calib->gyro_matrix[0], calib->gyro_matrix[1], calib->gyro_matrix[2],
 			calib->gyro_matrix[3], calib->gyro_matrix[4], calib->gyro_matrix[5],
 			calib->gyro_matrix[6], calib->gyro_matrix[7], calib->gyro_matrix[8],
-      imu_pose->pos.x, imu_pose->pos.y, imu_pose->pos.z, 
-      imu_pose->orient.x, imu_pose->orient.y, imu_pose->orient.z, imu_pose->orient.w,
-      leds_str
-      );
-    free(leds_str);
+			imu_pose->pos.x, imu_pose->pos.y, imu_pose->pos.z,
+			imu_pose->orient.x, imu_pose->orient.y, imu_pose->orient.z, imu_pose->orient.w,
+			leds_str
+			);
+		free(leds_str);
 	}
 
 	ohmd_unlock_mutex (ctx->tracker_lock);
@@ -452,8 +452,8 @@ rift_tracker_frame_start (rift_tracker_ctx *ctx, uint64_t local_ts, const char *
 			rift_tracked_device_exposure_claim(dev, dev_info);
 		}
 
-	  rift_tracked_device_send_debug_printf(dev, local_ts,
-        "{ \"type\": \"frame-start\", \"local-ts\": %llu, "
+		rift_tracked_device_send_debug_printf(dev, local_ts,
+				"{ \"type\": \"frame-start\", \"local-ts\": %llu, "
 				"\"source\": \"%s\" }",
 				(unsigned long long) local_ts, source);
 		ohmd_unlock_mutex (dev->device_lock);
@@ -794,10 +794,10 @@ static void
 rift_tracked_device_send_debug_printf(rift_tracked_device_priv *dev, uint64_t local_ts, const char *fmt, ...)
 {
 	bool to_pw = (dev->debug_metadata && ohmd_pw_debug_stream_connected(dev->debug_metadata));
-  bool to_gst = dev->debug_metadata_gst;
+	bool to_gst = (dev->debug_metadata_gst != NULL);
 
 	if (to_pw || to_gst) {
-#define MAX_STR 4096
+		const size_t MAX_STR = 4096;
 		char debug_str[MAX_STR];
 		va_list args;
 
@@ -813,7 +813,7 @@ rift_tracked_device_send_debug_printf(rift_tracked_device_priv *dev, uint64_t lo
 
 		if (to_pw)
 			ohmd_pw_debug_stream_push (dev->debug_metadata, local_ts, debug_str);
-    if (to_gst)
+		if (to_gst)
 			ohmd_gst_debug_stream_push (dev->debug_metadata_gst, local_ts, debug_str);
 	}
 }
