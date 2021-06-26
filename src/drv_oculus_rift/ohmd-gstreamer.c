@@ -119,13 +119,13 @@ static void ohmd_gst_pipeline_add_source(ohmd_gst_pipeline *pipe, GstPad *sinkpa
 	event = gst_event_new_stream_start(stream_id);
 	gst_pad_send_event (sinkpad, event);
 
-	gst_segment_init(&segment, GST_FORMAT_TIME);
-	event = gst_event_new_segment(&segment);
-	gst_pad_send_event (sinkpad, event);
-
 	event = gst_event_new_caps(caps);
 	gst_pad_send_event (sinkpad, event);
 	gst_caps_unref(caps);
+
+	gst_segment_init(&segment, GST_FORMAT_TIME);
+	event = gst_event_new_segment(&segment);
+	gst_pad_send_event (sinkpad, event);
 
 	tags = gst_tag_list_new (GST_TAG_TITLE, stream_id, NULL);
 	gst_tag_list_set_scope(tags, GST_TAG_SCOPE_STREAM);
@@ -318,9 +318,9 @@ ohmd_gst_video_stream *ohmd_gst_video_stream_new (ohmd_gst_pipeline *pipe, const
 
 	gst_element_set_state(input_bin, GST_STATE_PLAYING);
 
-	input_pad = gst_element_get_static_pad(input_bin, "sink");
+	ret->sinkpad = gst_element_get_static_pad(input_bin, "sink");
 
-	ohmd_gst_pipeline_add_source(pipe, input_pad, caps, stream_id);
+	ohmd_gst_pipeline_add_source(pipe, ret->sinkpad, caps, stream_id);
 
 	return ret;
 
@@ -406,10 +406,11 @@ ohmd_gst_debug_stream *ohmd_gst_debug_stream_new (ohmd_gst_pipeline *pipe, const
 
 	gst_element_set_state(input_bin, GST_STATE_PLAYING);
 
-	input_pad = gst_element_get_static_pad(input_bin, "sink");
+	ret->sinkpad = gst_element_get_static_pad(input_bin, "sink");
+
 	caps = gst_caps_new_simple("text/x-raw", "format", G_TYPE_STRING, "utf8", NULL);
 
-	ohmd_gst_pipeline_add_source(pipe, input_pad, caps, stream_id);
+	ohmd_gst_pipeline_add_source(pipe, ret->sinkpad, caps, stream_id);
 
 	return ret;
 
