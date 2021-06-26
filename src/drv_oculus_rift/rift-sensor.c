@@ -924,21 +924,6 @@ rift_sensor_new(ohmd_context* ohmd_ctx, int id, const char *serial_no,
 	snprintf(stream_id,64,"openhmd-rift-sensor-%s", sensor_ctx->serial_no);
 	stream_id[63] = 0;
 
-	/* Raw debug video stream */
-	sensor_ctx->debug_vid_raw = ohmd_pw_video_stream_new (stream_id, "Rift Sensor", OHMD_PW_VIDEO_FORMAT_GRAY8, sensor_ctx->stream.width, sensor_ctx->stream.height, 625, 12);
-
-	/* Raw debug video stream - GStreamer recording */
-  if (debug_pipe)
-    sensor_ctx->debug_vid_raw_gst = ohmd_gst_video_stream_new (debug_pipe, OHMD_PW_VIDEO_FORMAT_GRAY8, sensor_ctx->stream.width, sensor_ctx->stream.height, 625, 12);
-
-	/* Annotated debug video stream */
-	sensor_ctx->debug_vid = ohmd_pw_video_stream_new (stream_id, "Rift Tracking", OHMD_PW_VIDEO_FORMAT_RGB, sensor_ctx->stream.width * 2, sensor_ctx->stream.height, 625, 12);
-
-	if (sensor_ctx->debug_vid) {
-		/* Allocate an RGB debug frame, twice the width of the input */
-		sensor_ctx->debug_frame = ohmd_alloc(ohmd_ctx, 2 * 3 * sensor_ctx->stream.width * sensor_ctx->stream.height);
-	}
-
 	sensor_ctx->bw = blobwatch_new(sensor_ctx->is_cv1 ? BLOB_THRESHOLD_CV1 : BLOB_THRESHOLD_DK2, sensor_ctx->stream.width, sensor_ctx->stream.height);
 
 	LOGV("Sensor %d - reading Calibration\n", id);
@@ -946,6 +931,38 @@ rift_sensor_new(ohmd_context* ohmd_ctx, int id, const char *serial_no,
 	if (ret < 0) {
 		LOGE("Failed to read Rift sensor calibration data");
 		goto fail;
+	}
+
+	/* Raw debug video stream */
+	sensor_ctx->debug_vid_raw = ohmd_pw_video_stream_new (stream_id, "Rift Sensor", OHMD_PW_VIDEO_FORMAT_GRAY8, sensor_ctx->stream.width, sensor_ctx->stream.height, 625, 12);
+
+	/* Raw debug video stream - GStreamer recording */
+  if (debug_pipe) {
+		char debug_str[1024];
+
+    sensor_ctx->debug_vid_raw_gst = ohmd_gst_video_stream_new (debug_pipe, stream_id, OHMD_PW_VIDEO_FORMAT_GRAY8, sensor_ctx->stream.width, sensor_ctx->stream.height, 625, 12);
+
+		snprintf (debug_str, 1024, "{ \"type\": \"device\", \"device-id\": \"%s\",\n"
+        "\"is-cv1\": %d, "
+				"\"camera-matrix\": [ %f, %f, %f, %f, %f, %f, %f, %f, %f ], \"dist-coeefs\": [ %f, %f, %f, %f, %f ]\n"
+        "}",
+        stream_id, sensor_ctx->is_cv1 ? 1 : 0,
+        sensor_ctx->camera_matrix.m[0], sensor_ctx->camera_matrix.m[1], sensor_ctx->camera_matrix.m[2],
+        sensor_ctx->camera_matrix.m[3], sensor_ctx->camera_matrix.m[4], sensor_ctx->camera_matrix.m[5],
+        sensor_ctx->camera_matrix.m[6], sensor_ctx->camera_matrix.m[7], sensor_ctx->camera_matrix.m[8],
+        sensor_ctx->dist_coeffs[0], sensor_ctx->dist_coeffs[1], sensor_ctx->dist_coeffs[2], sensor_ctx->dist_coeffs[3],
+        sensor_ctx->dist_coeffs[4]);
+		debug_str[1023] = '\0';
+
+    ohmd_gst_pipeline_push_metadata (debug_pipe, 0, debug_str);
+  }
+
+	/* Annotated debug video stream */
+	sensor_ctx->debug_vid = ohmd_pw_video_stream_new (stream_id, "Rift Tracking", OHMD_PW_VIDEO_FORMAT_RGB, sensor_ctx->stream.width * 2, sensor_ctx->stream.height, 625, 12);
+
+	if (sensor_ctx->debug_vid) {
+		/* Allocate an RGB debug frame, twice the width of the input */
+		sensor_ctx->debug_frame = ohmd_alloc(ohmd_ctx, 2 * 3 * sensor_ctx->stream.width * sensor_ctx->stream.height);
 	}
 
 	sensor_ctx->cs = correspondence_search_new (&sensor_ctx->camera_matrix, sensor_ctx->dist_coeffs, sensor_ctx->dist_fisheye);
