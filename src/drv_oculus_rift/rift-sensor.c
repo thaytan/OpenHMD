@@ -944,8 +944,8 @@ rift_sensor_new(ohmd_context* ohmd_ctx, int id, const char *serial_no,
 
 		snprintf (debug_str, 1024, "{ \"type\": \"device\", \"device-id\": \"%s\",\n"
         "\"is-cv1\": %d, "
-				"\"camera-matrix\": [ %f, %f, %f, %f, %f, %f, %f, %f, %f ], \"dist-coeefs\": [ %f, %f, %f, %f, %f ]\n"
-        "}",
+				"\"camera-matrix\": [ %f, %f, %f, %f, %f, %f, %f, %f, %f ], \"dist-coeffs\": [ %f, %f, %f, %f, %f ]\n"
+        "}\n",
         stream_id, sensor_ctx->is_cv1 ? 1 : 0,
         sensor_ctx->camera_matrix.m[0], sensor_ctx->camera_matrix.m[1], sensor_ctx->camera_matrix.m[2],
         sensor_ctx->camera_matrix.m[3], sensor_ctx->camera_matrix.m[4], sensor_ctx->camera_matrix.m[5],
