@@ -37,6 +37,7 @@ struct ohmd_gst_video_stream_s {
 	gint height;
 
 	uint64_t base_ts;
+	uint64_t last_ts;
 };
 
 struct ohmd_gst_debug_stream_s {
@@ -44,6 +45,7 @@ struct ohmd_gst_debug_stream_s {
 	GstElement *src_q;
 
 	uint64_t base_ts;
+	uint64_t last_ts;
 };
 
 static gboolean
@@ -358,7 +360,7 @@ void ohmd_gst_video_stream_push (ohmd_gst_video_stream *v, int64_t pts, const ui
 
 	gst_video_frame_unmap(&frame);
 
-	GST_BUFFER_PTS(buf) = pts - v->base_ts;
+	v->last_ts = GST_BUFFER_PTS(buf) = pts - v->base_ts;
 
 	if (gst_pad_chain(v->sinkpad, buf) != GST_FLOW_OK) {
 		LOGW("Failed to push buffer to GStreamer recording pipeline");
@@ -431,10 +433,29 @@ void ohmd_gst_debug_stream_push (ohmd_gst_debug_stream *s, int64_t pts, const ch
 	gchar *buf_content = g_strdup(debug_str);
 
 	buf = gst_buffer_new_wrapped(buf_content, strlen(buf_content) + 1);
-	GST_BUFFER_PTS(buf) = pts - s->base_ts;
+	s->last_ts = GST_BUFFER_PTS(buf) = pts - s->base_ts;
 
 	if (gst_pad_chain(s->sinkpad, buf) != GST_FLOW_OK) {
 		LOGW("Failed to push buffer to GStreamer recording pipeline");
+	}
+}
+
+void
+ohmd_gst_debug_stream_advance_to (ohmd_gst_debug_stream *s, int64_t pts)
+{
+	const uint64_t advance_threshold = 20 * GST_MSECOND;
+
+	uint64_t new_pts = pts - s->base_ts;
+	if (new_pts < advance_threshold)
+		return;
+
+	/* Advance to the indicated time minus the threshold */
+	new_pts -= advance_threshold;
+	if (new_pts - s->last_ts > 0) {
+		GstEvent *gap = gst_event_new_gap (new_pts, GST_CLOCK_TIME_NONE);
+		gst_pad_send_event(s->sinkpad, gap);
+
+		s->last_ts = new_pts;
 	}
 }
 

@@ -24,6 +24,7 @@ void ohmd_gst_video_stream_free (ohmd_gst_video_stream *v);
 
 ohmd_gst_debug_stream *ohmd_gst_debug_stream_new (ohmd_gst_pipeline *pipe, const char *stream_id);
 void ohmd_gst_debug_stream_push (ohmd_gst_debug_stream *s, int64_t pts, const char *debug_str);
+void ohmd_gst_debug_stream_advance_to (ohmd_gst_debug_stream *s, int64_t pts);
 void ohmd_gst_debug_stream_free (ohmd_gst_debug_stream *s);
 
 #else

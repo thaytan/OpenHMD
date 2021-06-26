@@ -551,6 +551,15 @@ rift_tracker_frame_release (rift_tracker_ctx *ctx, uint64_t local_ts, uint64_t f
 			fusion_slot);
 		ohmd_unlock_mutex (dev->device_lock);
 	}
+
+	for (i = 0; i < RIFT_MAX_TRACKED_DEVICES; i++) {
+		rift_tracked_device_priv *dev = ctx->devices + i;
+
+		ohmd_lock_mutex (dev->device_lock);
+		ohmd_gst_debug_stream_advance_to (dev->debug_metadata_gst, local_ts);
+		ohmd_unlock_mutex (dev->device_lock);
+	}
+
 	ohmd_unlock_mutex (ctx->tracker_lock);
 }
 
