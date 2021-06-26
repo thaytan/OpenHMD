@@ -17,6 +17,7 @@ typedef struct ohmd_gst_debug_stream_s ohmd_gst_debug_stream;
 ohmd_gst_pipeline *ohmd_gst_pipeline_new (const char *stream_id, uint64_t base_ts);
 void ohmd_gst_pipeline_free(ohmd_gst_pipeline *pipe);
 void ohmd_gst_pipeline_push_metadata (ohmd_gst_pipeline *pipe, int64_t pts, const char *debug_str);
+void ohmd_gst_pipeline_advance_to (ohmd_gst_pipeline *pipe, int64_t pts);
 
 ohmd_gst_video_stream *ohmd_gst_video_stream_new (ohmd_gst_pipeline *pipe, const char *stream_id, ohmd_pw_video_format format, uint16_t w, uint16_t h, uint16_t fps_n, uint16_t fps_d);
 void ohmd_gst_video_stream_push (ohmd_gst_video_stream *v, int64_t pts, const uint8_t *pixels);
