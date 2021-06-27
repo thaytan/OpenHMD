@@ -30,15 +30,17 @@ void ohmd_gst_debug_stream_free (ohmd_gst_debug_stream *s);
 
 #else
 
-#define ohmd_gst_pipeline_new(s) NULL
+#define ohmd_gst_pipeline_new(s,b) NULL
 #define ohmd_gst_pipeline_free(p)
+#define ohmd_gst_pipeline_advance_to(p, pts)
 
-#define ohmd_gst_video_stream_new(p,f,w,h,fps_n,fps_d) NULL
+#define ohmd_gst_video_stream_new(p,s,f,w,h,fps_n,fps_d) NULL
 #define ohmd_gst_video_stream_push(v,pts,pixels)
 #define ohmd_gst_video_stream_free(v)
 
-#define ohmd_gst_debug_stream_new(p) NULL
+#define ohmd_gst_debug_stream_new(p,s) NULL
 #define ohmd_gst_debug_stream_push(s,pts,debug_str)
+#define ohmd_gst_debug_stream_advance_to(s,pts)
 #define ohmd_gst_debug_stream_free(s)
 #endif
 
