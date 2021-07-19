@@ -886,8 +886,10 @@ void rift_kalman_6dof_get_pose_at(rift_kalman_6dof_filter *state, uint64_t time,
 		rot_error->z = sqrtf(MATRIX2D_XY(P, COV_ORIENTATION+2, COV_ORIENTATION+2));
 	}
 
-	ang_vel->x = state->ang_vel.x;
-	ang_vel->y = state->ang_vel.y;
-	ang_vel->z = state->ang_vel.z;
+  if (ang_vel) {
+	  ang_vel->x = state->ang_vel.x;
+	  ang_vel->y = state->ang_vel.y;
+	  ang_vel->z = state->ang_vel.z;
+  }
 }
 
