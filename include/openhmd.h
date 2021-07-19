@@ -100,6 +100,11 @@ typedef enum {
  */
 #define OHMD_HAVE_VEL_ACCEL_API_v0
 
+/**
+ * Define that says ANGULAR VELOCITY and ANGULAR ACCELERATION properties are available in this API
+ */
+#define OHMD_HAVE_VEL_ACCEL_API_v1
+
 /** A collection of float value information types, used for getting and setting information with
     ohmd_device_getf() and ohmd_device_setf(). */
 typedef enum {
@@ -174,6 +179,12 @@ typedef enum {
 
 	/** float[3] (get): A 3-D vector representing the acceleration of the device (m/s^2). */
 	OHMD_ACCELERATION_VECTOR              =  24,
+
+	/** float[3] (get): A 3-D vector representing the angular velocity of the device (rad/s). */
+	OHMD_ANGULAR_VELOCITY_VECTOR          =  25,
+
+	/** float[3] (get): A 3-D vector representing the angular acceleration of the device (rad/s^2). */
+	OHMD_ANGULAR_ACCELERATION_VECTOR      =  26,
 } ohmd_float_value;
 
 /** A collection of int value information types used for getting information with ohmd_device_geti(). */

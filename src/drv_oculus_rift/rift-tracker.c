@@ -517,15 +517,16 @@ void rift_tracked_device_imu_update(rift_tracked_device *dev_base, uint64_t loca
 	ohmd_unlock_mutex (dev->device_lock);
 }
 
-void rift_tracked_device_get_view_pose(rift_tracked_device *dev_base, posef *pose, vec3f *vel, vec3f *accel)
+void rift_tracked_device_get_view_pose(rift_tracked_device *dev_base, posef *pose, vec3f *vel, vec3f *accel, vec3f *ang_vel)
 {
 	rift_tracked_device_priv *dev = (rift_tracked_device_priv *) (dev_base);
 	posef imu_pose;
 	vec3f imu_vel = { 0, }, imu_accel = { 0, };
+	vec3f imu_ang_vel = { 0, };
 
 	ohmd_lock_mutex (dev->device_lock);
 	if (dev->device_time_ns > dev->last_reported_pose) {
-	  rift_kalman_6dof_get_pose_at(&dev->ukf_fusion, dev->device_time_ns, &imu_pose, &imu_vel, &imu_accel, NULL, NULL);
+	  rift_kalman_6dof_get_pose_at(&dev->ukf_fusion, dev->device_time_ns, &imu_pose, &imu_vel, &imu_accel, &imu_ang_vel, NULL, NULL);
 
 	  dev->reported_pose.orient = imu_pose.orient;
 	  if (dev->device_time_ns - dev->last_observed_pose_ts >= (POSE_LOST_THRESHOLD * 1000000UL)) {
@@ -545,6 +546,9 @@ void rift_tracked_device_get_view_pose(rift_tracked_device *dev_base, posef *pos
 		*vel = imu_vel;
 	if (accel)
 		*accel = imu_accel;
+	if (ang_vel)
+		*ang_vel = imu_ang_vel;
+
 	ohmd_unlock_mutex (dev->device_lock);
 }
 
@@ -613,7 +617,7 @@ void rift_tracked_device_get_model_pose_locked(rift_tracked_device_priv *dev, do
 	posef global_pose, model_pose;
 	vec3f global_pos_error, global_rot_error;
 
-	rift_kalman_6dof_get_pose_at(&dev->ukf_fusion, dev->device_time_ns, &global_pose, NULL, NULL, &global_pos_error, &global_rot_error);
+	rift_kalman_6dof_get_pose_at(&dev->ukf_fusion, dev->device_time_ns, &global_pose, NULL, NULL, NULL, &global_pos_error, &global_rot_error);
 
 	if (dev->base.id == 0) {
 		/* Mirror the pose in XZ to go from view-plane to device axes for the HMD */
