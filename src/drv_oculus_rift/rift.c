@@ -351,12 +351,16 @@ static void handle_touch_controller_message(rift_hmd_t *hmd, uint64_t local_ts,
 				&touch->calibration) < 0)
 			return;
 
-		/* Touch controller models are rotated 180 degrees */
-		quatf imu_orient = {{ 0.0, 1.0, 0.0, 0.0 }};
+		quatf imu_orient = {{ 0.0, 0.0, 0.0, 1.0 }};
 		posef imu_pose;
 		oposef_init(&imu_pose, &touch->calibration.imu_position, &imu_orient);
 
-		touch->tracked_dev = rift_tracker_add_device (hmd->tracker_ctx, touch->base.id, &imu_pose, &touch->calibration.leds);
+		quatf model_orient = {{ 0.0, 0.0, 0.0, 1.0 }};
+		vec3f model_pos = {{ 0.0, 0.0, 0.0 }};
+		posef model_pose;
+		oposef_init(&model_pose, &model_pos, &model_orient);
+
+		touch->tracked_dev = rift_tracker_add_device (hmd->tracker_ctx, touch->base.id, &imu_pose, &model_pose, &touch->calibration.leds);
 		touch->have_calibration = true;
 		dump_controller_calibration(touch);
 	}
@@ -1306,7 +1310,13 @@ static rift_hmd_t *open_hmd(ohmd_driver* driver, ohmd_device_desc* desc)
 	posef imu_pose;
 	oposef_init(&imu_pose, &priv->imu.pos, &imu_orient);
 
-	priv->tracked_dev = rift_tracker_add_device (priv->tracker_ctx, 0, &imu_pose, &priv->leds);
+	/* The HMD LED model is rotated 180 deg around Y */
+	quatf model_orient = {{ 0.0, 1.0, 0.0, 0.0 }};
+	vec3f model_pos = {{ 0.0, 0.0, 0.0 }};
+	posef model_pose;
+	oposef_init(&model_pose, &model_pos, &model_orient);
+
+	priv->tracked_dev = rift_tracker_add_device (priv->tracker_ctx, 0, &imu_pose, &model_pose, &priv->leds);
 
 	return priv;
 
