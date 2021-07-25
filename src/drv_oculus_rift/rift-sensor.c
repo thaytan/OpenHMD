@@ -179,8 +179,8 @@ static void tracker_process_blobs_fast(rift_sensor_ctx *ctx, rift_sensor_capture
 
 		obj_world_pose = dev_state->capture_world_pose;
 
-		LOGV ("Fusion provided pose for device %d, %f %f %f %f pos %f %f %f",
-			dev->id, obj_world_pose.orient.x, obj_world_pose.orient.y, obj_world_pose.orient.z, obj_world_pose.orient.w,
+		LOGV ("Sensor %d Fusion provided pose for device %d, %f %f %f %f pos %f %f %f",
+			ctx->id, dev->id, obj_world_pose.orient.x, obj_world_pose.orient.y, obj_world_pose.orient.z, obj_world_pose.orient.w,
 			obj_world_pose.pos.x, obj_world_pose.pos.y, obj_world_pose.pos.z);
 
 		/* If we have a camera pose, get the object's camera-relative pose by taking
@@ -294,7 +294,7 @@ static void tracker_process_blobs_long(rift_sensor_ctx *ctx, rift_sensor_capture
 				flags |= CS_FLAG_DEEP_SEARCH;
 
 			if (exp_dev_info->fusion_slot == -1) {
-				LOGV ("Skipping long analysis of device %d. No fusion slot assigned\n", d);
+				LOGV ("Sensor %d Skipping long analysis of device %d. No fusion slot assigned\n", ctx->id, d);
 				continue;
 			}
 
@@ -536,11 +536,12 @@ static void new_frame_start_cb(struct rift_sensor_uvc_stream *stream, uint64_t s
 	exposure_info_valid = rift_tracker_get_exposure_info (sensor->tracker, &exposure_info);
 
 	if (exposure_info_valid) {
-		LOGD("%f ms Sensor %d SOF phase %d", (double) (start_time) / 1000000.0,
-			sensor->id, exposure_info.led_pattern_phase);
+		LOGD("Sensor %d - new frame @ %f ms SOF phase %d", sensor->id,
+		  (double) (start_time) / 1000000.0, exposure_info.led_pattern_phase);
 	}
 	else {
-		LOGD("%f ms Sensor %d SOF no phase info", (double) (start_time) / 1000000.0, sensor->id);
+		LOGD("Sensor %d - new frame @ %f SOF no phase info", sensor->id,
+		  (double) (start_time) / 1000000.0);
 	}
 
 	ohmd_lock_mutex(sensor->sensor_lock);
@@ -653,8 +654,8 @@ update_device_pose (rift_sensor_ctx *sensor_ctx, rift_tracked_device *dev,
 		sensor_ctx->dist_fisheye, NULL);
 
 	if (score->good_pose_match) {
-		LOGV("Found good pose match - %u LEDs matched %u visible ones\n",
-			score->matched_blobs, score->visible_leds);
+		LOGV("Sensor %d Found good pose match - %u LEDs matched %u visible ones\n",
+			sensor_ctx->id, score->matched_blobs, score->visible_leds);
 
 		if (sensor_ctx->have_camera_pose) {
 			uint64_t now = ohmd_monotonic_get(sensor_ctx->ohmd_ctx);
@@ -667,8 +668,8 @@ update_device_pose (rift_sensor_ctx *sensor_ctx, rift_tracked_device *dev,
 			 * the camera->world pose. */
 			oposef_apply(&pose, &sensor_ctx->camera_pose, &pose);
 
-			LOGD("TS %llu Updating fusion for device %d pose quat %f %f %f %f  pos %f %f %f",
-				(unsigned long long)(now),
+			LOGD("Sensor %d TS %llu Updating fusion for device %d pose quat %f %f %f %f  pos %f %f %f",
+				sensor_ctx->id, (unsigned long long)(now),
 				dev->id, pose.orient.x, pose.orient.y, pose.orient.z, pose.orient.w,
 				pose.pos.x, pose.pos.y, pose.pos.z);
 
@@ -733,13 +734,13 @@ update_device_pose (rift_sensor_ctx *sensor_ctx, rift_tracked_device *dev,
 			sensor_ctx->have_camera_pose = true;
 		}
 		else if (dev->id == 0) {
-			LOGD("No camera pose yet - gravity error is %f degrees\n", RAD_TO_DEG(dev_state->gravity_error_rad));
+			LOGD("Sensor %d No camera pose yet - gravity error is %f degrees\n", sensor_ctx->id, RAD_TO_DEG(dev_state->gravity_error_rad));
 		}
 
 	}
 	else {
-		LOGV("Failed pose match - only %u LEDs matched %u visible ones",
-			score->matched_blobs, score->visible_leds);
+		LOGV("Sensor %d Failed pose match - only %u LEDs matched %u visible ones",
+			sensor_ctx->id, score->matched_blobs, score->visible_leds);
 	}
 }
 
@@ -1151,8 +1152,8 @@ void rift_sensor_update_exposure (rift_sensor_ctx *sensor, const rift_tracker_ex
 			frame->exposure_info = *exposure_info;
 			exposure_changed = true;
 
-			LOGV ("%f Sensor %d Frame (sof %f) updating exposure info TS %u count %u phase %d",
-				(double) (now) / 1000000.0, sensor->id,
+			LOGV ("Sensor %d TS now %f Frame (sof %f) updating exposure info TS %u count %u phase %d",
+				sensor->id, (double) (now) / 1000000.0,
 				(double) (exposure_info->local_ts) / 1000000.0,
 				exposure_info->hmd_ts,
 				exposure_info->count, exposure_info->led_pattern_phase);
