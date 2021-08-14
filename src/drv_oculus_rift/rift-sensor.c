@@ -670,7 +670,12 @@ update_device_and_blobs (rift_sensor_ctx *sensor_ctx, rift_sensor_capture_frame 
 				dev->id, pose.orient.x, pose.orient.y, pose.orient.z, pose.orient.w,
 				pose.pos.x, pose.pos.y, pose.pos.z);
 
-			rift_tracked_device_model_pose_update(dev, now, frame->uvc.start_ts, &frame->exposure_info, &pose, sensor_ctx->serial_no);
+			/* If we have a strong match, update both position and orientation */
+			bool update_orientation = false;
+			if (score->strong_pose_match)
+				update_orientation = true;
+
+			rift_tracked_device_model_pose_update(dev, now, frame->uvc.start_ts, &frame->exposure_info, update_orientation, &pose, sensor_ctx->serial_no);
 			rift_tracked_device_frame_release(dev, &frame->exposure_info);
 			dev_state->found_device_pose = true;
 

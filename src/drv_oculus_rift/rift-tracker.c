@@ -627,7 +627,7 @@ bool rift_tracked_device_get_latest_exposure_info_pose (rift_tracked_device *dev
 	return res;
 }
 
-void rift_tracked_device_model_pose_update(rift_tracked_device *dev_base, uint64_t local_ts, uint64_t frame_start_local_ts, rift_tracker_exposure_info *exposure_info, posef *pose, const char *source)
+void rift_tracked_device_model_pose_update(rift_tracked_device *dev_base, uint64_t local_ts, uint64_t frame_start_local_ts, rift_tracker_exposure_info *exposure_info, bool update_orientation, posef *pose, const char *source)
 {
 	rift_tracked_device_priv *dev = (rift_tracked_device_priv *) (dev_base);
 	uint64_t frame_device_time_ns = 0;
@@ -655,11 +655,10 @@ void rift_tracked_device_model_pose_update(rift_tracked_device *dev_base, uint64
 				pose->orient.x, pose->orient.y, pose->orient.z, pose->orient.w,
 				pose->pos.x, pose->pos.y, pose->pos.z);
 			frame_fusion_slot = slot->slot_id;
-#if SENSORS_POSITION_ONLY
-			rift_kalman_6dof_position_update(&dev->ukf_fusion, dev->device_time_ns, &pose->pos, slot->slot_id);
-#else
-			rift_kalman_6dof_pose_update(&dev->ukf_fusion, dev->device_time_ns, pose, slot->slot_id);
-#endif
+			if (update_orientation)
+				rift_kalman_6dof_pose_update(&dev->ukf_fusion, dev->device_time_ns, pose, slot->slot_id);
+			else
+				rift_kalman_6dof_position_update(&dev->ukf_fusion, dev->device_time_ns, &pose->pos, slot->slot_id);
 			dev->last_observed_pose_ts = dev->device_time_ns;
 			dev->last_observed_pose = *pose;
 		}
