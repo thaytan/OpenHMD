@@ -157,7 +157,7 @@ static void update_device_and_blobs (rift_sensor_ctx *ctx, rift_sensor_capture_f
 
 static void tracker_process_blobs_fast(rift_sensor_ctx *ctx, rift_sensor_capture_frame *frame)
 {
-	const rift_tracker_exposure_info *exposure_info = &frame->exposure_info;
+	rift_tracker_exposure_info *exposure_info = &frame->exposure_info;
 	blobservation* bwobs = frame->bwobs;
 	dmat3 *camera_matrix = &ctx->camera_matrix;
 	double *dist_coeffs = ctx->dist_coeffs;
@@ -167,10 +167,11 @@ static void tracker_process_blobs_fast(rift_sensor_ctx *ctx, rift_sensor_capture
 	for (d = 0; d < frame->n_devices; d++) {
 		rift_tracked_device *dev = ctx->devices[d];
 		rift_sensor_frame_device_state *dev_state = frame->capture_state + d;
-		const rift_tracked_device_exposure_info *exp_dev_info = exposure_info->devices + d;
+		rift_tracked_device_exposure_info *exp_dev_info = exposure_info->devices + d;
 		posef obj_world_pose, obj_cam_pose;
 
-		if (exp_dev_info->fusion_slot == -1) {
+		/* Get the latest pose estimate for this device */
+		if (!rift_tracked_device_get_latest_exposure_info_pose(dev, exp_dev_info)) {
 			LOGV ("Skipping fast analysis of device %d. No fusion slot assigned\n", d);
 			continue;
 		}
@@ -253,7 +254,7 @@ static void tracker_process_blobs_fast(rift_sensor_ctx *ctx, rift_sensor_capture
 
 static void tracker_process_blobs_long(rift_sensor_ctx *ctx, rift_sensor_capture_frame *frame)
 {
-	const rift_tracker_exposure_info *exposure_info = &frame->exposure_info;
+	rift_tracker_exposure_info *exposure_info = &frame->exposure_info;
 	blobservation* bwobs = frame->bwobs;
 	int d, pass;
 	vec3f gravity_vector = {{ 0.0, 1.0, 0.0 }};
@@ -275,13 +276,18 @@ static void tracker_process_blobs_long(rift_sensor_ctx *ctx, rift_sensor_capture
 		for (d = 0; d < frame->n_devices; d++) {
 			rift_tracked_device *dev = ctx->devices[d];
 			rift_sensor_frame_device_state *dev_state = frame->capture_state + d;
-			const rift_tracked_device_exposure_info *exp_dev_info = exposure_info->devices + d;
+			rift_tracked_device_exposure_info *exp_dev_info = exposure_info->devices + d;
 			posef obj_cam_pose;
 			bool do_aligned_checks;
 			CorrespondenceSearchFlags flags = CS_FLAG_STOP_FOR_STRONG_MATCH;
 
 			if (dev_state->found_device_pose)
 				continue; /* We already found a pose for this device */
+
+			if (!rift_tracked_device_get_latest_exposure_info_pose(dev, exp_dev_info)) {
+				LOGV ("Skipping long analysis of device %d. No fusion slot assigned\n", d);
+				continue;
+			}
 
 			if (dev->id == 0)
 				flags |= CS_FLAG_MATCH_ALL_BLOBS; /* Let the HMD match whatever it can */
