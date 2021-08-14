@@ -250,7 +250,7 @@ static void handle_tracker_sensor_msg(rift_hmd_t* priv, uint64_t local_ts, unsig
 
 		/* if the exposure timestamp is earlier than this sample, report it now */
 		if (!sent_exposure_update && TICK_DIFF(device_ts, s->exposure_timestamp) >= 0) { 
-			rift_tracker_update_exposure (priv->tracker_ctx, device_ts, s->exposure_count,
+			rift_tracker_on_new_exposure (priv->tracker_ctx, device_ts, s->exposure_count,
 					s->exposure_timestamp, s->led_pattern_phase);
 			sent_exposure_update = true;
 		}
@@ -299,7 +299,7 @@ static void handle_tracker_sensor_msg(rift_hmd_t* priv, uint64_t local_ts, unsig
 	priv->have_imu_timestamp = true;
 
 	if (!sent_exposure_update) {
-		rift_tracker_update_exposure (priv->tracker_ctx, s->timestamp, s->exposure_count,
+		rift_tracker_on_new_exposure (priv->tracker_ctx, s->timestamp, s->exposure_count,
 				s->exposure_timestamp, s->led_pattern_phase);
 	}
 }

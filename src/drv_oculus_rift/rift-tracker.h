@@ -28,6 +28,8 @@ struct rift_tracked_device_exposure_info {
 	uint64_t device_time_ns; /* Device time this sensor exposure was captured */
 	int fusion_slot; /* Fusion slot assigned to the exposure, or -1 */
 
+	bool had_pose_lock;
+
 	/* World pose and error std dev at exposure time */
 	posef capture_pose;
 	vec3f pos_error;
@@ -68,7 +70,7 @@ rift_tracker_ctx *rift_tracker_new (ohmd_context* ohmd_ctx,
 		const uint8_t radio_id[5]);
 
 rift_tracked_device *rift_tracker_add_device (rift_tracker_ctx *ctx, int device_id, posef *imu_pose, posef *model_pose, rift_leds *leds);
-void rift_tracker_update_exposure (rift_tracker_ctx *ctx, uint32_t hmd_ts, uint16_t exposure_count, uint32_t exposure_hmd_ts, uint8_t led_pattern_phase);
+void rift_tracker_on_new_exposure (rift_tracker_ctx *ctx, uint32_t hmd_ts, uint16_t exposure_count, uint32_t exposure_hmd_ts, uint8_t led_pattern_phase);
 bool rift_tracker_get_exposure_info (rift_tracker_ctx *ctx, rift_tracker_exposure_info *info);
 uint8_t rift_tracker_get_device_list(rift_tracker_ctx *tracker_ctx, rift_tracked_device **dev_list);
 

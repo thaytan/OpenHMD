@@ -116,7 +116,7 @@ struct rift_tracker_ctx_s
 static void rift_tracked_device_send_imu_debug(rift_tracked_device_priv *dev);
 static void rift_tracked_device_send_debug_printf(rift_tracked_device_priv *dev, uint64_t local_ts, const char *fmt, ...);
 
-static void rift_tracked_device_update_exposure (rift_tracked_device_priv *dev, rift_tracked_device_exposure_info *dev_info);
+static void rift_tracked_device_on_new_exposure (rift_tracked_device_priv *dev, rift_tracked_device_exposure_info *dev_info);
 static void rift_tracked_device_exposure_claim(rift_tracked_device_priv *dev, rift_tracked_device_exposure_info *dev_info);
 static void rift_tracked_device_exposure_release_locked(rift_tracked_device_priv *dev, rift_tracked_device_exposure_info *dev_info);
 
@@ -265,6 +265,8 @@ fail:
 	return NULL;
 }
 
+/* Called from rift-sensor.c when a new frame starts arriving,
+ * to retrieve info about the current exposure and device states / fusion slots */
 bool rift_tracker_get_exposure_info (rift_tracker_ctx *ctx, rift_tracker_exposure_info *info)
 {
 	bool ret;
@@ -277,7 +279,12 @@ bool rift_tracker_get_exposure_info (rift_tracker_ctx *ctx, rift_tracker_exposur
 	return ret;
 }
 
-void rift_tracker_update_exposure (rift_tracker_ctx *ctx, uint32_t hmd_ts, uint16_t exposure_count, uint32_t exposure_hmd_ts, uint8_t led_pattern_phase)
+/* Called from the rift IMU / packet handling loop
+ * when processing an IMU update from the HMD. If the
+ * packet signalled a new camera exposure, we take
+ * a snapshot of the predicted state of each device
+ * into a lagged fusion slot */
+void rift_tracker_on_new_exposure (rift_tracker_ctx *ctx, uint32_t hmd_ts, uint16_t exposure_count, uint32_t exposure_hmd_ts, uint8_t led_pattern_phase)
 {
 	bool exposure_changed = false;
 	int i;
@@ -315,7 +322,7 @@ void rift_tracker_update_exposure (rift_tracker_ctx *ctx, uint32_t hmd_ts, uint1
 			rift_tracked_device_exposure_info *dev_info = ctx->exposure_info.devices + i;
 
 			ohmd_lock_mutex (dev->device_lock);
-			rift_tracked_device_update_exposure(dev, dev_info);
+			rift_tracked_device_on_new_exposure(dev, dev_info);
 
 			rift_tracked_device_send_imu_debug(dev);
 
@@ -369,7 +376,8 @@ rift_tracker_frame_start (rift_tracker_ctx *ctx, uint64_t local_ts, const char *
 	ohmd_unlock_mutex (ctx->tracker_lock);
 }
 
-/* Frame to exposure association changed mid-arrival - update our accounting */
+/* Frame to exposure association changed mid-arrival - update our accounting, releasing
+ * any slots claimed by the old exposure and claiming new ones */
 void
 rift_tracker_frame_changed_exposure(rift_tracker_ctx *ctx, rift_tracker_exposure_info *old_info, rift_tracker_exposure_info *new_info)
 {
@@ -770,25 +778,32 @@ get_matching_delay_slot(rift_tracked_device_priv *dev, rift_tracked_device_expos
 	return NULL;
 }
 
-/* Called with the device lock held */
+/* Called with the device lock held. Allocate a delay slot and populate the device exposure info */
 static void
-rift_tracked_device_update_exposure(rift_tracked_device_priv *dev, rift_tracked_device_exposure_info *dev_info) {
+rift_tracked_device_on_new_exposure(rift_tracked_device_priv *dev, rift_tracked_device_exposure_info *dev_info) {
 	rift_tracker_pose_delay_slot *slot = find_free_delay_slot(dev);
 
 	dev_info->device_time_ns = dev->device_time_ns;
-	rift_tracked_device_get_model_pose_locked(dev, dev->device_time_ns, &dev_info->capture_pose, &dev_info->pos_error, &dev_info->rot_error);
 
 	if (slot) {
 		slot->device_time_ns = dev_info->device_time_ns;
 		slot->valid = true;
 		dev_info->fusion_slot = slot->slot_id;
 
+		if (dev->device_time_ns - dev->last_observed_pose_ts < (POSE_LOST_THRESHOLD * 1000000UL))
+			dev_info->had_pose_lock = true;
+		else
+			dev_info->had_pose_lock = false;
+
 		LOGD ("Assigning free delay slot %d for dev %d, ts %llu", slot->slot_id, dev->base.id, (unsigned long long) dev->device_time_ns);
+
+		rift_tracked_device_get_model_pose_locked(dev, dev->device_time_ns, &dev_info->capture_pose, &dev_info->pos_error, &dev_info->rot_error);
 
 		/* Tell the kalman filter to prepare the delay slot */
 		rift_kalman_6dof_prepare_delay_slot(&dev->ukf_fusion, dev_info->device_time_ns, slot->slot_id);
 	}
 	else {
+		/* FIXME: We could reclaim a busy delay slot if some frame search is being slow and we already got an observation from another camera */
 		LOGW ("No free delay slot for dev %d, ts %llu", dev->base.id, (unsigned long long) dev->device_time_ns);
 		dev_info->fusion_slot = -1;
 	}
