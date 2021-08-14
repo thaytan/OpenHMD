@@ -531,7 +531,7 @@ static bool position_measurement_func(const ukf_base *ukf, const ukf_measurement
 		int slot_index = BASE_STATE_SIZE + (DELAY_SLOT_STATE_SIZE * filter_state->pose_slot);
 		state_position_index = slot_index + DELAY_SLOT_STATE_POSITION;
 	}
-	/* Measure position and orientation */
+	/* Measure position */
 	MATRIX2D_Y(z, POSE_MEAS_POSITION)   = MATRIX2D_Y(x, state_position_index);
 	MATRIX2D_Y(z, POSE_MEAS_POSITION+1) = MATRIX2D_Y(x, state_position_index+1);
 	MATRIX2D_Y(z, POSE_MEAS_POSITION+2) = MATRIX2D_Y(x, state_position_index+2);
@@ -847,21 +847,45 @@ void rift_kalman_6dof_position_update(rift_kalman_6dof_filter *state, uint64_t t
 	rift_kalman_6dof_update(state, time, m);
 }
 
-void rift_kalman_6dof_get_pose_at(rift_kalman_6dof_filter *state, uint64_t time, posef *pose, vec3f *vel, vec3f *accel, vec3f *ang_vel, vec3f *pos_error, vec3f *rot_error)
+/* Get the pose info from a delay slot, or the main state
+ * if delay_slot = -1 */
+void rift_kalman_6dof_get_delay_slot_pose_at(rift_kalman_6dof_filter *state, uint64_t time, int delay_slot, posef *pose,
+  vec3f *vel, vec3f *accel, vec3f *ang_vel, vec3f *pos_error, vec3f *rot_error)
 {
 	matrix2d *x = state->ukf.x_prior;
 	matrix2d *P = state->ukf.P_prior; /* Covariance */
 
+	int state_position_index = STATE_POSITION;
+	int state_orientation_index = STATE_ORIENTATION;
+	int cov_position_index = COV_POSITION;
+	int cov_orientation_index = COV_ORIENTATION;
+
+	if (delay_slot != -1) {
+	  assert(state->slot_inuse[delay_slot]);
+	  assert(delay_slot < MAX_DELAY_SLOTS);
+
+		/* We want the position / orientation info from a delay slot */
+		int slot_index = BASE_STATE_SIZE + (DELAY_SLOT_STATE_SIZE * delay_slot);
+		state_position_index = slot_index + DELAY_SLOT_STATE_POSITION;
+		state_orientation_index = slot_index + DELAY_SLOT_STATE_ORIENTATION;
+
+		slot_index = BASE_COV_SIZE + (DELAY_SLOT_COV_SIZE * delay_slot);
+		cov_position_index = slot_index + DELAY_SLOT_COV_POSITION;
+		cov_orientation_index = slot_index + DELAY_SLOT_COV_ORIENTATION;
+	}
+
 	/* FIXME: Do prediction using the time? */
-	pose->pos.x = MATRIX2D_Y(x, STATE_POSITION);
-	pose->pos.y = MATRIX2D_Y(x, STATE_POSITION+1);
-	pose->pos.z = MATRIX2D_Y(x, STATE_POSITION+2);
+	pose->pos.x = MATRIX2D_Y(x, state_position_index);
+	pose->pos.y = MATRIX2D_Y(x, state_position_index+1);
+	pose->pos.z = MATRIX2D_Y(x, state_position_index+2);
 
-	pose->orient.x = MATRIX2D_Y(x, STATE_ORIENTATION);
-	pose->orient.y = MATRIX2D_Y(x, STATE_ORIENTATION+1);
-	pose->orient.z = MATRIX2D_Y(x, STATE_ORIENTATION+2);
-	pose->orient.w = MATRIX2D_Y(x, STATE_ORIENTATION+3);
+	pose->orient.x = MATRIX2D_Y(x, state_orientation_index);
+	pose->orient.y = MATRIX2D_Y(x, state_orientation_index+1);
+	pose->orient.z = MATRIX2D_Y(x, state_orientation_index+2);
+	pose->orient.w = MATRIX2D_Y(x, state_orientation_index+3);
 
+	/* Velocity, accel and ang_vel aren't tracked in the delay slots,
+	 * so always return the current state */
 	if (vel) {
 		vel->x = MATRIX2D_Y(x, STATE_VELOCITY);
 		vel->y = MATRIX2D_Y(x, STATE_VELOCITY+1);
@@ -874,22 +898,27 @@ void rift_kalman_6dof_get_pose_at(rift_kalman_6dof_filter *state, uint64_t time,
 		accel->z = MATRIX2D_Y(x, STATE_ACCEL+2);
 	}
 
-	if (pos_error) {
-		pos_error->x = sqrtf(MATRIX2D_XY(P, COV_POSITION, COV_POSITION));
-		pos_error->y = sqrtf(MATRIX2D_XY(P, COV_POSITION+1, COV_POSITION+1));
-		pos_error->z = sqrtf(MATRIX2D_XY(P, COV_POSITION+2, COV_POSITION+2));
-	}
-
-	if (rot_error) {
-		rot_error->x = sqrtf(MATRIX2D_XY(P, COV_ORIENTATION, COV_ORIENTATION));
-		rot_error->y = sqrtf(MATRIX2D_XY(P, COV_ORIENTATION+1, COV_ORIENTATION+1));
-		rot_error->z = sqrtf(MATRIX2D_XY(P, COV_ORIENTATION+2, COV_ORIENTATION+2));
-	}
-
-  if (ang_vel) {
+	if (ang_vel) {
 	  ang_vel->x = state->ang_vel.x;
 	  ang_vel->y = state->ang_vel.y;
 	  ang_vel->z = state->ang_vel.z;
-  }
+	}
+
+	if (pos_error) {
+		pos_error->x = sqrtf(MATRIX2D_XY(P, cov_position_index, cov_position_index));
+		pos_error->y = sqrtf(MATRIX2D_XY(P, cov_position_index+1, cov_position_index+1));
+		pos_error->z = sqrtf(MATRIX2D_XY(P, cov_position_index+2, cov_position_index+2));
+	}
+
+	if (rot_error) {
+		rot_error->x = sqrtf(MATRIX2D_XY(P, cov_orientation_index, cov_orientation_index));
+		rot_error->y = sqrtf(MATRIX2D_XY(P, cov_orientation_index+1, cov_orientation_index+1));
+		rot_error->z = sqrtf(MATRIX2D_XY(P, cov_orientation_index+2, cov_orientation_index+2));
+	}
 }
 
+void rift_kalman_6dof_get_pose_at(rift_kalman_6dof_filter *state, uint64_t time, posef *pose, vec3f *vel, vec3f *accel,
+  vec3f *ang_vel, vec3f *pos_error, vec3f *rot_error)
+{
+	rift_kalman_6dof_get_delay_slot_pose_at(state, time, -1, pose, vel, accel, ang_vel, pos_error, rot_error);
+}
