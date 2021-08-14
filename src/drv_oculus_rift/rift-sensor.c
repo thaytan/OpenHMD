@@ -152,8 +152,6 @@ struct rift_sensor_ctx_s
 	uint64_t prev_capture_ts;
 };
 
-static void update_device_pose (rift_sensor_ctx *sensor_ctx, rift_tracked_device *dev,
-	rift_sensor_capture_frame *frame, rift_sensor_frame_device_state *dev_state);
 static void update_device_and_blobs (rift_sensor_ctx *ctx, rift_sensor_capture_frame *frame,
 	rift_tracked_device *dev, rift_sensor_frame_device_state *dev_state, posef *obj_cam_pose);
 
@@ -596,12 +594,12 @@ static void new_frame_start_cb(struct rift_sensor_uvc_stream *stream, uint64_t s
 }
 
 static void
-update_device_and_blobs (rift_sensor_ctx *ctx, rift_sensor_capture_frame *frame,
+update_device_and_blobs (rift_sensor_ctx *sensor_ctx, rift_sensor_capture_frame *frame,
 	rift_tracked_device *dev, rift_sensor_frame_device_state *dev_state, posef *obj_cam_pose)
 {
 	blobservation* bwobs = frame->bwobs;
-	dmat3 *camera_matrix = &ctx->camera_matrix;
-	double *dist_coeffs = ctx->dist_coeffs;
+	dmat3 *camera_matrix = &sensor_ctx->camera_matrix;
+	double *dist_coeffs = sensor_ctx->dist_coeffs;
 
 	/* Clear existing blob IDs for this device, then
 	 * back project LED ids into blobs if we find them and the dot product
@@ -616,33 +614,26 @@ update_device_and_blobs (rift_sensor_ctx *ctx, rift_sensor_capture_frame *frame,
 
 	rift_mark_matching_blobs (obj_cam_pose, bwobs->blobs, bwobs->num_blobs, dev->id,
 			dev->leds->points, dev->leds->num_points,
-			camera_matrix, dist_coeffs, ctx->is_cv1);
+			camera_matrix, dist_coeffs, sensor_ctx->is_cv1);
 
 	/* Refine the pose with PnP now that we've labelled the blobs */
 	estimate_initial_pose (bwobs->blobs, bwobs->num_blobs,
 		dev->id, dev->leds->points, dev->leds->num_points, camera_matrix,
-		dist_coeffs, ctx->is_cv1,
+		dist_coeffs, sensor_ctx->is_cv1,
 		obj_cam_pose, NULL, NULL, true);
 
 	/* And label the blobs again in case we collected any more */
 	rift_mark_matching_blobs (obj_cam_pose, bwobs->blobs, bwobs->num_blobs, dev->id,
 			dev->leds->points, dev->leds->num_points,
-			camera_matrix, dist_coeffs, ctx->is_cv1);
+			camera_matrix, dist_coeffs, sensor_ctx->is_cv1);
 
 	dev_state->final_cam_pose.pos = obj_cam_pose->pos;
 	dev_state->final_cam_pose.orient = obj_cam_pose->orient;
 
 	LOGD ("sensor %d PnP for device %d yielded quat %f %f %f %f pos %f %f %f",
-		ctx->id, dev->id, dev_state->final_cam_pose.orient.x, dev_state->final_cam_pose.orient.y, dev_state->final_cam_pose.orient.z, dev_state->final_cam_pose.orient.w,
+		sensor_ctx->id, dev->id, dev_state->final_cam_pose.orient.x, dev_state->final_cam_pose.orient.y, dev_state->final_cam_pose.orient.z, dev_state->final_cam_pose.orient.w,
 		dev_state->final_cam_pose.pos.x, dev_state->final_cam_pose.pos.y, dev_state->final_cam_pose.pos.z);
 
-	update_device_pose (ctx, dev, frame, dev_state);
-}
-
-static void
-update_device_pose (rift_sensor_ctx *sensor_ctx, rift_tracked_device *dev,
-	rift_sensor_capture_frame *frame, rift_sensor_frame_device_state *dev_state)
-{
 	posef pose = dev_state->final_cam_pose;
 	posef *capture_pose = &dev_state->capture_world_pose;
 	rift_pose_metrics *score = &dev_state->score;
