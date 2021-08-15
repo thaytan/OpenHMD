@@ -627,12 +627,17 @@ bool rift_tracked_device_get_latest_exposure_info_pose (rift_tracked_device *dev
 	return res;
 }
 
-void rift_tracked_device_model_pose_update(rift_tracked_device *dev_base, uint64_t local_ts, uint64_t frame_start_local_ts, rift_tracker_exposure_info *exposure_info, bool update_orientation, posef *pose, const char *source)
+void rift_tracked_device_model_pose_update(rift_tracked_device *dev_base, uint64_t local_ts, uint64_t frame_start_local_ts, rift_tracker_exposure_info *exposure_info, rift_pose_metrics *score, posef *pose, const char *source)
 {
 	rift_tracked_device_priv *dev = (rift_tracked_device_priv *) (dev_base);
 	uint64_t frame_device_time_ns = 0;
 	rift_tracker_pose_delay_slot *slot = NULL;
 	int frame_fusion_slot = -1;
+
+	/* If we have a strong match, update both position and orientation */
+	bool update_orientation = false;
+	if (score->strong_pose_match)
+		update_orientation = true;
 
 	ohmd_lock_mutex (dev->device_lock);
 

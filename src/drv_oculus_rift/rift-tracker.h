@@ -87,7 +87,7 @@ void rift_tracked_device_get_view_pose(rift_tracked_device *dev, posef *pose, ve
 
 bool rift_tracked_device_get_latest_exposure_info_pose (rift_tracked_device *dev, rift_tracked_device_exposure_info *dev_info);
 
-void rift_tracked_device_model_pose_update(rift_tracked_device *dev_base, uint64_t local_ts, uint64_t frame_start_local_ts, rift_tracker_exposure_info *exposure_info, bool update_orientation, posef *pose, const char *source);
+void rift_tracked_device_model_pose_update(rift_tracked_device *dev_base, uint64_t local_ts, uint64_t frame_start_local_ts, rift_tracker_exposure_info *exposure_info, rift_pose_metrics *score, posef *pose, const char *source);
 void rift_tracked_device_get_model_pose(rift_tracked_device *dev_base, double ts, posef *pose, vec3f *pos_error, vec3f *rot_error);
 void rift_tracked_device_frame_release (rift_tracked_device *dev_base, rift_tracker_exposure_info *info);
 
