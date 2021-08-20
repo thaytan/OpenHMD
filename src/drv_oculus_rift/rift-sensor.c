@@ -468,7 +468,7 @@ rift_sensor_get_calibration(rift_sensor_ctx *ctx, uint16_t usb_idProduct)
 			 * k = [ k₁ k₂, p1, p2, k₃, k4 ] for DK2 distortion
 			 */
 			k[0] = k1; k[1] = k2;
-			k[1] = p1; k[2] = p2;
+			k[2] = p1; k[3] = p2;
 			k[4] = k3;
 			ctx->dist_fisheye = false;
 			break;
