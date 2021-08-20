@@ -133,6 +133,8 @@ rift_tracker_add_device (rift_tracker_ctx *ctx, int device_id, posef *imu_pose, 
 	int i, s;
 	rift_tracked_device_priv *next_dev;
 	char device_name[64];
+  /* Rotate our initial pose 180 deg to point along the -Z axis */
+  posef init_pose = { .pos = {{ 0.0, 0.0, 0.0 }}, .orient = {{ 0.0, 1.0, 0.0, 0.0 }}};
 
 	snprintf(device_name,64,"openhmd-rift-device-%d", device_id);
 	device_name[63] = 0;
@@ -143,7 +145,7 @@ rift_tracker_add_device (rift_tracker_ctx *ctx, int device_id, posef *imu_pose, 
 	next_dev = ctx->devices + ctx->n_devices;
 
 	next_dev->base.id = device_id;
-	rift_kalman_6dof_init(&next_dev->ukf_fusion, NUM_POSE_DELAY_SLOTS);
+	rift_kalman_6dof_init(&next_dev->ukf_fusion, &init_pose, NUM_POSE_DELAY_SLOTS);
 	next_dev->last_reported_pose = next_dev->last_observed_pose_ts = next_dev->device_time_ns = 0;
 
 	exp_filter_pose_init(&next_dev->pose_output_filter);

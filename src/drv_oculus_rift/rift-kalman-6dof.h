@@ -74,7 +74,7 @@ struct rift_kalman_6dof_filter {
   bool slot_inuse[MAX_DELAY_SLOTS];
 };
 
-void rift_kalman_6dof_init(rift_kalman_6dof_filter *state, int num_delay_slots);
+void rift_kalman_6dof_init(rift_kalman_6dof_filter *state, posef *init_pose, int num_delay_slots);
 void rift_kalman_6dof_clear(rift_kalman_6dof_filter *state);
 
 void rift_kalman_6dof_prepare_delay_slot(rift_kalman_6dof_filter *state, uint64_t time, int delay_slot);

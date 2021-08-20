@@ -622,7 +622,7 @@ static bool pose_sum_func(const unscented_transform *ut, const matrix2d *Y, cons
 	return true;
 }
 
-void rift_kalman_6dof_init(rift_kalman_6dof_filter *state, int num_delay_slots)
+void rift_kalman_6dof_init(rift_kalman_6dof_filter *state, posef *init_pose, int num_delay_slots)
 {
 	int i, d;
 
@@ -671,8 +671,11 @@ void rift_kalman_6dof_init(rift_kalman_6dof_filter *state, int num_delay_slots)
 	/* Takes ownership of Q_noise */
 	ukf_base_init(&state->ukf, STATE_SIZE, COV_SIZE, state->Q_noise, process_func, state_mean_func, state_residual_func, state_sum_func);
 
-		/* Init unit quaternion in the state */
-	MATRIX2D_Y(state->ukf.x_prior, STATE_ORIENTATION + 3) = 1.0;
+	/* Initialise the state with the init_pose */
+	for (i = 0; i < 3; i++)
+		MATRIX2D_Y(state->ukf.x_prior, STATE_POSITION + i) = init_pose->pos.arr[i];
+	for (i = 0; i < 4; i++)
+		MATRIX2D_Y(state->ukf.x_prior, STATE_ORIENTATION + i) = init_pose->orient.arr[i];
 
 	for (i = 0; i < num_delay_slots; i++) {
 		int slot_index = BASE_STATE_SIZE + (DELAY_SLOT_STATE_SIZE * i);
