@@ -50,8 +50,7 @@ struct cs_model_info_s {
     int best_pose_blob_depth;    /* Blob neighbor depth the best pose is from */
     int best_pose_led_depth;    /* LED neigbour depth the best pose is from */
 		posef best_pose;
-    bool good_pose_match;
-    bool strong_pose_match;
+    rift_pose_match_flags match_flags;
 
     rift_pose_metrics best_score;
 

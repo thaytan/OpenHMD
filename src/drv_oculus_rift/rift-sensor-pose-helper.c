@@ -106,8 +106,7 @@ void rift_evaluate_pose_with_prior (rift_pose_metrics *score, posef *pose,
 	/* FIXME: Pass LED size in the model */
 	double led_radius_mm = 5.0 / 1000.0;
 	double focal_length;
-	bool good_pose_match = false;
-	bool strong_pose_match = false;
+  rift_pose_match_flags match_flags = 0;
 	rift_rect_t bounds = { 0, };
 	int i;
 	
@@ -201,13 +200,16 @@ void rift_evaluate_pose_with_prior (rift_pose_metrics *score, posef *pose,
 		if (pose_prior) {
 			/* We have a pose prior, require it's a close match for the passed pose */
 			if (check_pose_prior(pose, pose_prior, pos_variance, rot_variance)) {
-				if (num_matched_blobs > 4 && error_per_led < 2.0) {
+				match_flags |= (RIFT_POSE_MATCH_ORIENT | RIFT_POSE_MATCH_POSITION);
+
+			  if (num_visible_leds > 4 && num_matched_blobs > 4 && error_per_led < 2.0 && (num_unmatched_blobs * 4 <= num_matched_blobs ||
+				   (2 * num_visible_leds <= 3 * num_matched_blobs))) {
 #if 0
 				printf("Got good prior match within pos (%f, %f, %f) rot (%f, %f, %f)\n",
 						pos_variance->x, pos_variance->y, pos_variance->z,
 						rot_variance->x, rot_variance->y, rot_variance->z);
 #endif
-					good_pose_match = true;
+					match_flags |= RIFT_POSE_MATCH_GOOD;
 				}
 			}
 		}
@@ -216,13 +218,13 @@ void rift_evaluate_pose_with_prior (rift_pose_metrics *score, posef *pose,
 			 * or if we matched a large proportion (2/3) of the LEDs we expect to be visible, then consider this a good pose match */
 			if (num_visible_leds > 6 && num_matched_blobs > 6 && error_per_led < 3.0 && (num_unmatched_blobs * 4 <= num_matched_blobs ||
 			    (2 * num_visible_leds <= 3 * num_matched_blobs))) {
-				good_pose_match = true;
+				match_flags |= RIFT_POSE_MATCH_GOOD;
 			}
 
 		}
 
-		if (good_pose_match && error_per_led < 1.5)
-			strong_pose_match = true;
+		if ((match_flags & RIFT_POSE_MATCH_GOOD) && error_per_led < 1.5)
+			match_flags |= RIFT_POSE_MATCH_STRONG;
 	}
 
 #if 0
@@ -235,8 +237,7 @@ void rift_evaluate_pose_with_prior (rift_pose_metrics *score, posef *pose,
 		score->unmatched_blobs = num_unmatched_blobs;
 		score->visible_leds = num_visible_leds;
 		score->reprojection_error = reprojection_error;
-		score->good_pose_match = good_pose_match;
-		score->strong_pose_match = strong_pose_match;
+		score->match_flags = match_flags;
 	}
 
 	if (out_bounds)

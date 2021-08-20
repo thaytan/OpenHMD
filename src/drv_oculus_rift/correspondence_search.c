@@ -121,8 +121,7 @@ correspondence_search_set_blobs (correspondence_search_t *cs, struct blob *blobs
     /* Updating the blobs means we don't know if we have good poses any more */
     for (m = 0; m < cs->num_models; m++) {
         cs_model_info_t *mi = &cs->models[m];
-        mi->good_pose_match = false;
-        mi->strong_pose_match = false;
+        mi->match_flags = 0;
     }
 
     if (cs->points != NULL)
@@ -291,7 +290,8 @@ correspondence_search_project_pose (correspondence_search_t *cs, led_search_mode
   rift_evaluate_pose (&score, pose, cs->blobs, cs->num_points,
       mi->id, leds->points, leds->num_points, cs->camera_matrix, cs->dist_coeffs, cs->dist_fisheye, NULL);
 
-  if (score.good_pose_match) {
+  /* If this pose is any good, test it further */
+  if (POSE_HAS_FLAGS(&score, RIFT_POSE_MATCH_GOOD)) {
     bool is_new_best = false;
     double error_per_led = score.reprojection_error / score.matched_blobs;
     double best_error_per_led = 10000.0;
@@ -315,10 +315,9 @@ correspondence_search_project_pose (correspondence_search_t *cs, led_search_mode
 #endif
         mi->best_pose_blob_depth = depth;
         mi->best_pose_led_depth = mi->led_depth;
-        mi->good_pose_match = mi->best_score.good_pose_match;
-        mi->strong_pose_match = mi->best_score.strong_pose_match;
+        mi->match_flags = mi->best_score.match_flags;
 
-        if (mi->strong_pose_match) {
+        if (mi->match_flags & RIFT_POSE_MATCH_STRONG) {
           DEBUG_TIMING("# Found a strong match for model %d - %d points out of %d with error %f pixels^2 after %u trials and %u pose checks\n", mi->id, mi->best_score.matched_blobs,
                     mi->best_score.visible_leds, mi->best_score.reprojection_error, cs->num_trials, cs->num_pose_checks);
           DEBUG_TIMING("# Found at LED depth %d blob depth %d after %f ms. Anchor indices: LED %d blob %d\n",
@@ -551,7 +550,7 @@ select_k_blobs_from_n (correspondence_search_t *cs, cs_model_info_t *mi, rift_le
     select_k_blobs_from_n (cs, mi, model_leds, result_list, output_list+1, candidate_list+1, k-1, n-1, depth);
 
     /* Short circuit if we found a strong pose match already */
-    if (mi->strong_pose_match && (mi->flags & CS_FLAG_STOP_FOR_STRONG_MATCH))
+    if ((mi->match_flags & RIFT_POSE_MATCH_STRONG) && (mi->flags & CS_FLAG_STOP_FOR_STRONG_MATCH))
       return;
 
     if (n > k)
@@ -615,7 +614,7 @@ select_k_leds_from_n (correspondence_search_t *cs,
         check_led_match (cs, mi, result_list, depth);
 
         /* Short circuit if we found a strong pose match already */
-				if (mi->strong_pose_match && (mi->flags & CS_FLAG_STOP_FOR_STRONG_MATCH))
+        if ((mi->match_flags & RIFT_POSE_MATCH_STRONG) && (mi->flags & CS_FLAG_STOP_FOR_STRONG_MATCH))
           return;
 
         /* Check the other orientation of blob 2/3, without
@@ -642,7 +641,7 @@ select_k_leds_from_n (correspondence_search_t *cs,
     select_k_leds_from_n (cs, mi, result_list, output_list+1, candidate_list+1, k-1, n-1, depth);
 
     /* Short circuit if we found a strong pose match already */
-    if (mi->strong_pose_match && (mi->flags & CS_FLAG_STOP_FOR_STRONG_MATCH))
+    if ((mi->match_flags & RIFT_POSE_MATCH_STRONG) && (mi->flags & CS_FLAG_STOP_FOR_STRONG_MATCH))
       return;
 
     if (n > k)
@@ -683,8 +682,7 @@ search_pose_for_model (correspondence_search_t *cs, cs_model_info_t *mi)
 
   /* clear the info for this model */
   memset (&mi->best_score, 0, sizeof (rift_pose_metrics));
-  mi->good_pose_match = false;
-  mi->strong_pose_match = false;
+  mi->match_flags = 0;
 
   /* Clear stats */
   cs->num_trials = cs->num_pose_checks = 0;
@@ -753,11 +751,11 @@ search_pose_for_model (correspondence_search_t *cs, cs_model_info_t *mi)
 
       generate_led_match_candidates (cs, mi, c);
 
-      if (mi->strong_pose_match && (mi->flags & CS_FLAG_STOP_FOR_STRONG_MATCH))
+      if ((mi->match_flags & RIFT_POSE_MATCH_STRONG) && (mi->flags & CS_FLAG_STOP_FOR_STRONG_MATCH))
         return true;
   }
 
-  if (mi->good_pose_match)
+  if (mi->match_flags & RIFT_POSE_MATCH_GOOD)
     return true;
 
   return false;
@@ -774,8 +772,8 @@ correspondence_search_have_pose (correspondence_search_t *cs, int model_id, pose
     if (mi->id != model_id)
         continue;
 
-    if (mi->good_pose_match) {
-			*pose = mi->best_pose;
+    if (mi->match_flags & RIFT_POSE_MATCH_GOOD) {
+      *pose = mi->best_pose;
       *score = mi->best_score;
       return true;
     }
@@ -798,12 +796,11 @@ correspondence_search_find_one_pose (correspondence_search_t *cs, int model_id, 
     if (mi->id != model_id)
         continue;
 
-    mi->good_pose_match = false;
-    mi->strong_pose_match = false;
+    mi->match_flags = 0;
     mi->flags = flags;
 		mi->match_gravity_vector = false;
 
-    if (search_pose_for_model (cs, mi) && mi->good_pose_match) {
+    if (search_pose_for_model (cs, mi) && (mi->match_flags & RIFT_POSE_MATCH_GOOD)) {
 			*pose = mi->best_pose;
       *score = mi->best_score;
 
@@ -824,8 +821,7 @@ correspondence_search_find_one_pose (correspondence_search_t *cs, int model_id, 
     return false;
   }
 
-  score->good_pose_match = false;
-  score->strong_pose_match = false;
+  score->match_flags = 0;
   return false;
 }
 
@@ -844,15 +840,15 @@ correspondence_search_find_one_pose_aligned (correspondence_search_t *cs, int mo
     if (mi->id != model_id)
         continue;
 
-    mi->good_pose_match = false;
-    mi->strong_pose_match = false;
+    mi->match_flags = 0;
+
     mi->flags = flags;
     mi->match_gravity_vector = true;
     mi->gravity_vector = *gravity_vector;
     mi->gravity_swing = *gravity_swing;
     mi->gravity_tolerance_rad = gravity_tolerance_rad;
 
-    if (search_pose_for_model (cs, mi) && mi->good_pose_match) {
+    if (search_pose_for_model (cs, mi) && (mi->match_flags & RIFT_POSE_MATCH_GOOD)) {
 			*pose = mi->best_pose;
       *score = mi->best_score;
 
@@ -872,7 +868,6 @@ correspondence_search_find_one_pose_aligned (correspondence_search_t *cs, int mo
     return false;
   }
 
-  score->good_pose_match = false;
-  score->strong_pose_match = false;
+  score->match_flags = 0;
   return false;
 }

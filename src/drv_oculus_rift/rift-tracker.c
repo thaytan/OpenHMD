@@ -647,7 +647,7 @@ void rift_tracked_device_model_pose_update(rift_tracked_device *dev_base, uint64
 
 	/* If we have a strong match, update both position and orientation */
 	bool update_orientation = false;
-	if (score->strong_pose_match)
+	if (POSE_HAS_FLAGS(score, RIFT_POSE_MATCH_STRONG))
 		update_orientation = true;
 
 	ohmd_lock_mutex (dev->device_lock);

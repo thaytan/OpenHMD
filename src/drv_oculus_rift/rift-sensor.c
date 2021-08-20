@@ -207,10 +207,10 @@ static void tracker_process_blobs_fast(rift_sensor_ctx *ctx, rift_sensor_capture
 			dev->id, dev->leds->points, dev->leds->num_points,
 			&ctx->camera_matrix, ctx->dist_coeffs, ctx->dist_fisheye, NULL);
 
-		if (dev_state->score.good_pose_match)
+		if (POSE_HAS_FLAGS(&dev_state->score, RIFT_POSE_MATCH_GOOD)) {
 			LOGD("Sensor %d already had good pose match for device %d matched %u blobs of %u",
 				ctx->id, dev->id, dev_state->score.matched_blobs, dev_state->score.visible_leds);
-		else {
+		} else {
 			int num_blobs = 0;
 
 			/* See if we still have enough labelled blobs to try to re-acquire the pose without a
@@ -233,14 +233,15 @@ static void tracker_process_blobs_fast(rift_sensor_ctx *ctx, rift_sensor_capture
 					dev->id, dev->leds->points, dev->leds->num_points,
 					&ctx->camera_matrix, ctx->dist_coeffs, ctx->dist_fisheye, NULL);
 
-				if (dev_state->score.good_pose_match) {
+				if (POSE_HAS_FLAGS(&dev_state->score, RIFT_POSE_MATCH_GOOD)) {
 					LOGD("Sensor %d re-acquired match for device %d matched %u blobs of %u",
 						ctx->id, dev->id, dev_state->score.matched_blobs, dev_state->score.visible_leds);
 				}
 			}
 		}
 
-		if (dev_state->score.good_pose_match) {
+		/* If we got at least a good match, pass it on for consideration by the fusion */
+		if (POSE_HAS_FLAGS(&dev_state->score, RIFT_POSE_MATCH_GOOD)) {
 			update_device_and_blobs (ctx, frame, dev, dev_state, &obj_cam_pose);
 		} else {
 			/* Didn't find this device - send the frame for long analysis */
@@ -308,7 +309,7 @@ static void tracker_process_blobs_long(rift_sensor_ctx *ctx, rift_sensor_capture
 			if (do_aligned_checks)
 				oposef_apply_inverse(&dev_state->capture_world_pose, &ctx->camera_pose, &obj_cam_pose);
 
-			if (dev_state->score.good_pose_match && had_strong_matches) {
+			if (POSE_HAS_FLAGS(&dev_state->score, RIFT_POSE_MATCH_GOOD) && had_strong_matches) {
 				/* We have a good pose match for this device, that we found on the first
 				 * pass. If any other device found a strong match though, then that may
 				 * have claimed blobs we were relying on  - so re-check our pose and possibly start again */
@@ -327,7 +328,8 @@ static void tracker_process_blobs_long(rift_sensor_ctx *ctx, rift_sensor_capture
 						ctx->dist_fisheye, NULL);
 				}
 
-				if (!dev_state->score.good_pose_match)
+				/* If we don't have a good match any more, do another shallow search */
+				if (!POSE_HAS_FLAGS(&dev_state->score, RIFT_POSE_MATCH_GOOD))
 					flags |= CS_FLAG_SHALLOW_SEARCH;
 			}
 
@@ -361,14 +363,14 @@ static void tracker_process_blobs_long(rift_sensor_ctx *ctx, rift_sensor_capture
 
 			LOGV("Sensor %d Frame %d - doing long search for device %d matched %u blobs of %u (%s match)",
 				ctx->id, frame->id, dev->id, dev_state->score.matched_blobs, dev_state->score.visible_leds,
-				dev_state->score.good_pose_match ? "good" : "bad");
+				POSE_HAS_FLAGS(&dev_state->score, RIFT_POSE_MATCH_GOOD) ? "good" : "bad");
 
 			/* Require a strong pose match on the quick loop */
-			if (pass == 0 && !dev_state->score.strong_pose_match)
+			if (pass == 0 && !POSE_HAS_FLAGS(&dev_state->score, RIFT_POSE_MATCH_STRONG))
 				continue;
 
-			if (dev_state->score.good_pose_match) {
-				had_strong_matches |= dev_state->score.strong_pose_match;
+			if (POSE_HAS_FLAGS(&dev_state->score, RIFT_POSE_MATCH_GOOD)) {
+				had_strong_matches |= POSE_HAS_FLAGS(&dev_state->score, RIFT_POSE_MATCH_STRONG);
 
 				update_device_and_blobs (ctx, frame, dev, dev_state, &obj_cam_pose);
 				frame->long_analysis_found_new_blobs = true;
@@ -650,7 +652,7 @@ update_device_and_blobs (rift_sensor_ctx *sensor_ctx, rift_sensor_capture_frame 
 		&sensor_ctx->camera_matrix, sensor_ctx->dist_coeffs,
 		sensor_ctx->dist_fisheye, NULL);
 
-	if (score->good_pose_match) {
+	if (POSE_HAS_FLAGS(score, RIFT_POSE_MATCH_GOOD)) {
 		LOGV("Sensor %d Found good pose match - %u LEDs matched %u visible ones\n",
 			sensor_ctx->id, score->matched_blobs, score->visible_leds);
 
@@ -782,8 +784,7 @@ static void frame_captured_cb(rift_sensor_uvc_stream *stream, rift_sensor_uvc_fr
 		dev_state->gravity_error_rad = sqrtf(rot_error->x * rot_error->x + rot_error->z * rot_error->z);
 
 		/* Mark the score as un-evaluated to start */
-		dev_state->score.good_pose_match = false;
-		dev_state->score.strong_pose_match = false;
+		dev_state->score.match_flags = 0;
 		dev_state->found_device_pose = false;
 	}
 	frame->n_devices = exposure_info->n_devices;

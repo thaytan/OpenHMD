@@ -19,6 +19,17 @@ typedef struct {
  double bottom;
 } rift_rect_t;
 
+typedef enum {
+	RIFT_POSE_MATCH_GOOD     = 0x1, /* A reasonable pose match - most LEDs matched to within a few pixels error */
+	RIFT_POSE_MATCH_STRONG   = 0x2, /* A strong pose match is a match with very low error */
+	RIFT_POSE_MATCH_POSITION = 0x4, /* The position of the pose matched the prior well */
+	RIFT_POSE_MATCH_ORIENT   = 0x8, /* The orientation of the pose matched the prior well */
+} rift_pose_match_flags;
+
+#define POSE_SET_FLAG(score,f) ((score)->match_flags |= (f))
+#define POSE_CLEAR_FLAG(score,f) ((score)->match_flags &= ~(f))
+#define POSE_HAS_FLAGS(score,f) (((score)->match_flags & (f)) == (f))
+
 typedef struct {
 	int matched_blobs;
 	int unmatched_blobs;
@@ -26,8 +37,7 @@ typedef struct {
 
 	double reprojection_error;
 
-	bool good_pose_match; /* TRUE if rift_evaluate_pose() considered this a good match */
-	bool strong_pose_match; /* TRUE if rift_evaluate_pose() considered this a STRONG (almost certain) match */
+	rift_pose_match_flags match_flags;
 } rift_pose_metrics;
 
 void rift_evaluate_pose (rift_pose_metrics *score, posef *pose,
