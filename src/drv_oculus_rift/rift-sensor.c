@@ -279,8 +279,9 @@ static void tracker_process_blobs_long(rift_sensor_ctx *ctx, rift_sensor_capture
 			rift_sensor_frame_device_state *dev_state = frame->capture_state + d;
 			rift_tracked_device_exposure_info *exp_dev_info = exposure_info->devices + d;
 			posef obj_cam_pose;
-			bool do_aligned_checks;
-			CorrespondenceSearchFlags flags = CS_FLAG_STOP_FOR_STRONG_MATCH;
+			bool do_aligned_checks = false;
+			float pose_tolerance = 0.0;
+			CorrespondenceSearchFlags search_flags = CS_FLAG_STOP_FOR_STRONG_MATCH;
 
 			if (dev_state->found_device_pose)
 				continue; /* We already found a pose for this device */
@@ -290,13 +291,13 @@ static void tracker_process_blobs_long(rift_sensor_ctx *ctx, rift_sensor_capture
 				continue;
 			}
 
-			if (dev->id == 0)
-				flags |= CS_FLAG_MATCH_ALL_BLOBS; /* Let the HMD match whatever it can */
+			if (pass == 0) {
+				if (dev->id == 0)
+					search_flags |= CS_FLAG_MATCH_ALL_BLOBS; /* Let the HMD match whatever it can on the first pass */
 
-			if (pass == 0)
-				flags |= CS_FLAG_SHALLOW_SEARCH;
-			else
-				flags |= CS_FLAG_DEEP_SEARCH;
+				search_flags |= CS_FLAG_SHALLOW_SEARCH;
+			} else
+				search_flags |= CS_FLAG_DEEP_SEARCH;
 
 			if (exp_dev_info->fusion_slot == -1) {
 				LOGV ("Sensor %d Skipping long analysis of device %d. No fusion slot assigned\n", ctx->id, d);
@@ -305,9 +306,17 @@ static void tracker_process_blobs_long(rift_sensor_ctx *ctx, rift_sensor_capture
 
 			/* If the gravity vector error standard deviation is small enough, try for an aligned pose from the prior,
 			 * within 2 standard deviation */
-			do_aligned_checks = (ctx->have_camera_pose && dev_state->gravity_error_rad < DEG_TO_RAD(45));
-			if (do_aligned_checks)
+			if (ctx->have_camera_pose) {
+				if (dev_state->gravity_error_rad < DEG_TO_RAD(30)) {
+					search_flags |= CS_FLAG_MATCH_GRAVITY;
+					do_aligned_checks = true;
+					pose_tolerance = OHMD_MAX(2 * dev_state->gravity_error_rad, DEG_TO_RAD(10));
+				}
+
 				oposef_apply_inverse(&dev_state->capture_world_pose, &ctx->camera_pose, &obj_cam_pose);
+
+				search_flags |= CS_FLAG_HAVE_POSE_PRIOR;
+			}
 
 			if (POSE_HAS_FLAGS(&dev_state->score, RIFT_POSE_MATCH_GOOD) && had_strong_matches) {
 				/* We have a good pose match for this device, that we found on the first
@@ -330,35 +339,23 @@ static void tracker_process_blobs_long(rift_sensor_ctx *ctx, rift_sensor_capture
 
 				/* If we don't have a good match any more, do another shallow search */
 				if (!POSE_HAS_FLAGS(&dev_state->score, RIFT_POSE_MATCH_GOOD))
-					flags |= CS_FLAG_SHALLOW_SEARCH;
+					search_flags |= CS_FLAG_SHALLOW_SEARCH;
 			}
 
-			if (flags & CS_FLAG_DEEP_SEARCH) {
+			if (search_flags & CS_FLAG_DEEP_SEARCH) {
 				LOGD("Sensor %d long search for device %d\n", ctx->id, dev->id);
 			}
 
-			if (do_aligned_checks) {
-#if LOGLEVEL == 0
-				quatf ref_orient = obj_cam_pose.orient;
-#endif
-				quatf pose_gravity_swing, pose_gravity_twist;
-				float pose_tolerance = OHMD_MAX(2 * dev_state->gravity_error_rad, DEG_TO_RAD(10));
-
-				oquatf_decompose_swing_twist(&obj_cam_pose.orient, &gravity_vector, &pose_gravity_swing, &pose_gravity_twist);
-				if (correspondence_search_find_one_pose_aligned (ctx->cs, dev->id, flags, &obj_cam_pose,
-						&gravity_vector, &pose_gravity_swing, pose_tolerance, &dev_state->score)) {
-					LOGD("Got aligned pose %f, %f, %f, %f (to %f, %f, %f, %f) for device %d with tolerance %f!",
+			if (correspondence_search_find_one_pose (ctx->cs, dev->id, search_flags, &obj_cam_pose,
+					&gravity_vector, pose_tolerance, &dev_state->score)) {
+				if (do_aligned_checks) {
+					LOGD("Got aligned pose %f, %f, %f, %f for device %d with tolerance %f!",
 						obj_cam_pose.orient.x, obj_cam_pose.orient.y, obj_cam_pose.orient.z, obj_cam_pose.orient.w,
-						ref_orient.x, ref_orient.y, ref_orient.z, ref_orient.w,
 						d, RAD_TO_DEG(pose_tolerance));
 				}
-				else {
-					LOGD("No aligned pose (to %f, %f, %f, %f) for device %d with tolerance %f!",
-						ref_orient.x, ref_orient.y, ref_orient.z, ref_orient.w,
-						d, RAD_TO_DEG(pose_tolerance));
-				}
-			} else {
-				correspondence_search_find_one_pose (ctx->cs, dev->id, flags, &obj_cam_pose, &dev_state->score);
+			}
+			else if (do_aligned_checks) {
+				LOGD("No aligned pose for device %d with tolerance %f!", d, RAD_TO_DEG(pose_tolerance));
 			}
 
 			LOGV("Sensor %d Frame %d - doing long search for device %d matched %u blobs of %u (%s match)",

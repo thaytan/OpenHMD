@@ -27,6 +27,8 @@ enum CorrespondenceSearchFlags {
 	CS_FLAG_DEEP_SEARCH = 0x2,              /* do deeper searches @ up to MAX_LED_SEARCH_DEPTH/MAX_BLOB_SEARCH_DEPTH */
 	CS_FLAG_STOP_FOR_STRONG_MATCH = 0x4,    /* Stop searching if a strong match is found, otherwise search all and return best match */
 	CS_FLAG_MATCH_ALL_BLOBS = 0x8,          /* Allow matching against all blobs, not just unlabelled ones or for the current device */
+	CS_FLAG_HAVE_POSE_PRIOR = 0x10,         /* If the input obj_cam_pose contains a valid prior */
+	CS_FLAG_MATCH_GRAVITY   = 0x20,         /* Use the provided gravity vector to check pose verticality */
 };
 
 struct cs_image_point_s {
@@ -60,11 +62,14 @@ struct cs_model_info_s {
     int led_index;
     int blob_index;
 
-		CorrespondenceSearchFlags flags;
+		CorrespondenceSearchFlags search_flags;
 		int min_led_depth, max_led_depth;
 		int max_blob_depth;
 
-    bool match_gravity_vector;
+    /* Valid when CS_FLAG_HAVE_POSE_PRIOR is set */
+    posef pose_prior;
+
+    /* Used when CS_FLAG_MATCH_GRAVITY is set */
     vec3f gravity_vector;
     quatf gravity_swing;
     float gravity_tolerance_rad;
@@ -95,8 +100,7 @@ void correspondence_search_set_blobs (correspondence_search_t *cs, struct blob *
 bool correspondence_search_set_model (correspondence_search_t *cs, int model_id, led_search_model_t *model);
 void correspondence_search_free (correspondence_search_t *cs);
 
-bool correspondence_search_find_one_pose (correspondence_search_t *cs, int model_id, CorrespondenceSearchFlags flags, posef *pose, rift_pose_metrics *score);
-bool correspondence_search_find_one_pose_aligned (correspondence_search_t *cs, int model_id, CorrespondenceSearchFlags flags, posef *pose,
-				vec3f *gravity_vector, quatf *gravity_swing, float gravity_tolerance_rad, rift_pose_metrics *score);
+bool correspondence_search_find_one_pose (correspondence_search_t *cs, int model_id, CorrespondenceSearchFlags search_flags, posef *pose,
+				vec3f *gravity_vector, float gravity_tolerance_rad, rift_pose_metrics *score);
 bool correspondence_search_have_pose (correspondence_search_t *cs, int model_id, posef *pose, rift_pose_metrics *score);
 #endif

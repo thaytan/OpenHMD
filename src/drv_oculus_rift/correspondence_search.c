@@ -268,7 +268,7 @@ correspondence_search_project_pose (correspondence_search_t *cs, led_search_mode
   }
 
 	/* See if we need to make a gravity vector alignment check */
-	if (mi->match_gravity_vector) {
+	if (mi->search_flags & CS_FLAG_MATCH_GRAVITY) {
 		quatf pose_gravity_swing, pose_gravity_twist;
 
 		oquatf_decompose_swing_twist(&pose->orient, &mi->gravity_vector, &pose_gravity_swing, &pose_gravity_twist);
@@ -550,7 +550,7 @@ select_k_blobs_from_n (correspondence_search_t *cs, cs_model_info_t *mi, rift_le
     select_k_blobs_from_n (cs, mi, model_leds, result_list, output_list+1, candidate_list+1, k-1, n-1, depth);
 
     /* Short circuit if we found a strong pose match already */
-    if ((mi->match_flags & RIFT_POSE_MATCH_STRONG) && (mi->flags & CS_FLAG_STOP_FOR_STRONG_MATCH))
+    if ((mi->match_flags & RIFT_POSE_MATCH_STRONG) && (mi->search_flags & CS_FLAG_STOP_FOR_STRONG_MATCH))
       return;
 
     if (n > k)
@@ -614,7 +614,7 @@ select_k_leds_from_n (correspondence_search_t *cs,
         check_led_match (cs, mi, result_list, depth);
 
         /* Short circuit if we found a strong pose match already */
-        if ((mi->match_flags & RIFT_POSE_MATCH_STRONG) && (mi->flags & CS_FLAG_STOP_FOR_STRONG_MATCH))
+        if ((mi->match_flags & RIFT_POSE_MATCH_STRONG) && (mi->search_flags & CS_FLAG_STOP_FOR_STRONG_MATCH))
           return;
 
         /* Check the other orientation of blob 2/3, without
@@ -641,7 +641,7 @@ select_k_leds_from_n (correspondence_search_t *cs,
     select_k_leds_from_n (cs, mi, result_list, output_list+1, candidate_list+1, k-1, n-1, depth);
 
     /* Short circuit if we found a strong pose match already */
-    if ((mi->match_flags & RIFT_POSE_MATCH_STRONG) && (mi->flags & CS_FLAG_STOP_FOR_STRONG_MATCH))
+    if ((mi->match_flags & RIFT_POSE_MATCH_STRONG) && (mi->search_flags & CS_FLAG_STOP_FOR_STRONG_MATCH))
       return;
 
     if (n > k)
@@ -688,7 +688,7 @@ search_pose_for_model (correspondence_search_t *cs, cs_model_info_t *mi)
   cs->num_trials = cs->num_pose_checks = 0;
 
   /* Configure search params from the flags */
-  if (mi->flags & CS_FLAG_SHALLOW_SEARCH) {
+  if (mi->search_flags & CS_FLAG_SHALLOW_SEARCH) {
     mi->max_blob_depth = 4; /* Only test nearest neighbours of blobs +1 */
     mi->max_led_depth = 4;  /* Test LEDs plus 1 neighbour removed */
     mi->min_led_depth = 1;  /* Start with the nearest LED neighbour */
@@ -699,7 +699,7 @@ search_pose_for_model (correspondence_search_t *cs, cs_model_info_t *mi)
     mi->min_led_depth = 3; /* Start with next nearest LED neighbour that shallow search stopped at */
   }
 
-  if (mi->flags & CS_FLAG_DEEP_SEARCH) {
+  if (mi->search_flags & CS_FLAG_DEEP_SEARCH) {
     mi->max_blob_depth = MAX_BLOB_SEARCH_DEPTH;
     mi->max_led_depth = MAX_LED_SEARCH_DEPTH;
   }
@@ -716,7 +716,7 @@ search_pose_for_model (correspondence_search_t *cs, cs_model_info_t *mi)
       int out_index = 0, in_index;
 			int led_id = anchor->blob->led_id;
 
-      if ((mi->flags & CS_FLAG_MATCH_ALL_BLOBS) || led_id == LED_INVALID_ID || LED_OBJECT_ID(led_id) == mi->id) {
+      if ((mi->search_flags & CS_FLAG_MATCH_ALL_BLOBS) || led_id == LED_INVALID_ID || LED_OBJECT_ID(led_id) == mi->id) {
 				for (in_index = 0; in_index < cs->num_points && out_index < MAX_BLOB_SEARCH_DEPTH; in_index++) {
 						cs_image_point_t *p = all_neighbours[in_index];
 
@@ -725,7 +725,7 @@ search_pose_for_model (correspondence_search_t *cs, cs_model_info_t *mi)
 							continue;
 
 						led_id = p->blob->led_id;
-						if ((mi->flags & CS_FLAG_MATCH_ALL_BLOBS) || led_id == LED_INVALID_ID || LED_OBJECT_ID(led_id) == mi->id)
+						if ((mi->search_flags & CS_FLAG_MATCH_ALL_BLOBS) || led_id == LED_INVALID_ID || LED_OBJECT_ID(led_id) == mi->id)
 							anchor->neighbours[out_index++] = p;
 				}
 			}
@@ -751,7 +751,7 @@ search_pose_for_model (correspondence_search_t *cs, cs_model_info_t *mi)
 
       generate_led_match_candidates (cs, mi, c);
 
-      if ((mi->match_flags & RIFT_POSE_MATCH_STRONG) && (mi->flags & CS_FLAG_STOP_FOR_STRONG_MATCH))
+      if ((mi->match_flags & RIFT_POSE_MATCH_STRONG) && (mi->search_flags & CS_FLAG_STOP_FOR_STRONG_MATCH))
         return true;
   }
 
@@ -781,79 +781,49 @@ correspondence_search_have_pose (correspondence_search_t *cs, int model_id, pose
   return false;
 }
 
-bool
-correspondence_search_find_one_pose (correspondence_search_t *cs, int model_id, CorrespondenceSearchFlags flags,
-	posef *pose, rift_pose_metrics *score)
+bool correspondence_search_find_one_pose (correspondence_search_t *cs, int model_id, CorrespondenceSearchFlags search_flags, posef *pose,
+				vec3f *gravity_vector, float gravity_tolerance_rad, rift_pose_metrics *score)
 {
   int i;
 
+  assert (pose != NULL);
+  assert (score != NULL);
+
   /* If neither deep nor shallow search was requested, do a full search */
-  if ((flags & (CS_FLAG_SHALLOW_SEARCH|CS_FLAG_DEEP_SEARCH)) == 0)
-    flags |= CS_FLAG_SHALLOW_SEARCH | CS_FLAG_DEEP_SEARCH;
+  if ((search_flags & (CS_FLAG_SHALLOW_SEARCH|CS_FLAG_DEEP_SEARCH)) == 0)
+    search_flags |= CS_FLAG_SHALLOW_SEARCH | CS_FLAG_DEEP_SEARCH;
 
   for (i = 0; i < cs->num_models; i++) {
     cs_model_info_t *mi = &cs->models[i];
     if (mi->id != model_id)
         continue;
 
+    mi->search_flags = search_flags;
     mi->match_flags = 0;
-    mi->flags = flags;
-		mi->match_gravity_vector = false;
 
-    if (search_pose_for_model (cs, mi) && (mi->match_flags & RIFT_POSE_MATCH_GOOD)) {
-			*pose = mi->best_pose;
-      *score = mi->best_score;
+    if (search_flags & CS_FLAG_HAVE_POSE_PRIOR)
+      mi->pose_prior = *pose;
 
-      DEBUG_TIMING("# Best match for model %d was %d points out of %d with error %f pixels^2\n", model_id, mi->best_score.matched_blobs,
-                mi->best_score.visible_leds, mi->best_score.reprojection_error);
-      DEBUG_TIMING("# Found at LED depth %d blob depth %d after %f ms of %f ms\n",
-                mi->best_pose_led_depth, mi->best_pose_blob_depth, (mi->best_pose_found_time - mi->search_start_time) * 1000.0,
-                (get_cur_time() - mi->search_start_time) * 1000.0);
-      DEBUG_TIMING("# pose orient %f %f %f %f pos %f %f %f\n",
-                mi->best_pose.orient.x, mi->best_pose.orient.y, mi->best_pose.orient.z, mi->best_pose.orient.w,
-                mi->best_pose.pos.x, mi->best_pose.pos.y, mi->best_pose.pos.z);
+    if (search_flags & CS_FLAG_MATCH_GRAVITY) {
+	    quatf pose_gravity_twist;
 
-      return true;
+      /* We need a pose prior to extract the gravity swing to match */
+      assert ((search_flags & CS_FLAG_HAVE_POSE_PRIOR) != 0);
+      assert (gravity_vector != NULL);
+
+      mi->gravity_vector = *gravity_vector;
+      mi->gravity_tolerance_rad = gravity_tolerance_rad;
+
+      oquatf_decompose_swing_twist(&pose->orient, gravity_vector, &mi->gravity_swing, &pose_gravity_twist);
     }
 
-		*pose = mi->best_pose;
-		*score = mi->best_score;
-    return false;
-  }
-
-  score->match_flags = 0;
-  return false;
-}
-
-bool
-correspondence_search_find_one_pose_aligned (correspondence_search_t *cs, int model_id, CorrespondenceSearchFlags flags, posef *pose,
-	vec3f *gravity_vector, quatf *gravity_swing, float gravity_tolerance_rad, rift_pose_metrics *score)
-{
-  int i;
-
-  /* If neither deep nor shallow search was requested, do a full search */
-  if ((flags & (CS_FLAG_SHALLOW_SEARCH|CS_FLAG_DEEP_SEARCH)) == 0)
-    flags |= CS_FLAG_SHALLOW_SEARCH | CS_FLAG_DEEP_SEARCH;
-
-  for (i = 0; i < cs->num_models; i++) {
-    cs_model_info_t *mi = &cs->models[i];
-    if (mi->id != model_id)
-        continue;
-
-    mi->match_flags = 0;
-
-    mi->flags = flags;
-    mi->match_gravity_vector = true;
-    mi->gravity_vector = *gravity_vector;
-    mi->gravity_swing = *gravity_swing;
-    mi->gravity_tolerance_rad = gravity_tolerance_rad;
-
     if (search_pose_for_model (cs, mi) && (mi->match_flags & RIFT_POSE_MATCH_GOOD)) {
 			*pose = mi->best_pose;
       *score = mi->best_score;
 
-      DEBUG_TIMING("# Best aligned match for model %d was %d points out of %d with error %f pixels^2\n", model_id, mi->best_score.matched_blobs,
-                mi->best_score.visible_leds, mi->best_score.reprojection_error);
+      DEBUG_TIMING("# Best %s match for model %d was %d points out of %d with error %f pixels^2\n",
+          (search_flags & CS_FLAG_MATCH_GRAVITY) ? "aligned" : "unaligned",
+          model_id, mi->best_score.matched_blobs, mi->best_score.visible_leds, mi->best_score.reprojection_error);
       DEBUG_TIMING("# Found at LED depth %d blob depth %d after %f ms of %f ms\n",
                 mi->best_pose_led_depth, mi->best_pose_blob_depth, (mi->best_pose_found_time - mi->search_start_time) * 1000.0,
                 (get_cur_time() - mi->search_start_time) * 1000.0);
