@@ -410,7 +410,7 @@ bool rift_score_is_better_pose (rift_pose_metrics *old_score, rift_pose_metrics 
 	if (old_score->matched_blobs < new_score->matched_blobs && (new_error_per_led < best_error_per_led))
 		return true; /* prefer more matched blobs with tighter error/LED */
 
-	if (old_score->matched_blobs+1 < new_score->matched_blobs && (new_error_per_led < best_error_per_led * 1.25))
+	if (old_score->matched_blobs+1 < new_score->matched_blobs && (new_error_per_led < best_error_per_led * 1.1))
 		return true; /* prefer at least 2 more matched blobs with slightly worse error/LED */
 
 	if (old_score->matched_blobs == new_score->matched_blobs &&
@@ -419,8 +419,9 @@ bool rift_score_is_better_pose (rift_pose_metrics *old_score, rift_pose_metrics 
 
 	/* If both scores have pose priors, prefer the one where the orientation better matches the prior */
 	if (POSE_HAS_FLAGS(old_score, RIFT_POSE_HAD_PRIOR) && POSE_HAS_FLAGS(new_score, RIFT_POSE_HAD_PRIOR)) {
-		if (ovec3f_get_length(&new_score->orient_error) < ovec3f_get_length(&old_score->orient_error))
+		if (ovec3f_get_length(&new_score->orient_error) < ovec3f_get_length(&old_score->orient_error)) {
 			return true;
+		}
 	}
 
 	return false;
