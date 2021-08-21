@@ -61,4 +61,7 @@ void rift_mark_matching_blobs (posef *pose,
 	struct blob *blobs, int num_blobs,
 	int device_id, rift_led *leds, int num_leds,
 	dmat3 *camera_matrix, double dist_coeffs[5], bool dist_fisheye);
+
+bool rift_score_is_better_pose (rift_pose_metrics *old_score, rift_pose_metrics *new_score);
+
 #endif

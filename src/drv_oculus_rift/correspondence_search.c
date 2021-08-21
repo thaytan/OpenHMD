@@ -300,26 +300,7 @@ correspondence_search_project_pose (correspondence_search_t *cs, led_search_mode
 
   /* If this pose is any good, test it further */
   if (POSE_HAS_FLAGS(&score, RIFT_POSE_MATCH_GOOD)) {
-    bool is_new_best = false;
-    double error_per_led = score.reprojection_error / score.matched_blobs;
-
-    /* if our previous best pose was "strong", only take better "strong" poses */
-    if (!POSE_HAS_FLAGS(&mi->best_score, RIFT_POSE_MATCH_STRONG) || POSE_HAS_FLAGS(&score, RIFT_POSE_MATCH_STRONG)) {
-      double best_error_per_led = 10.0;
-
-      if (mi->best_score.matched_blobs > 0)
-          best_error_per_led = mi->best_score.reprojection_error / mi->best_score.matched_blobs;
-
-      if (mi->best_score.matched_blobs < score.matched_blobs && (error_per_led < best_error_per_led))
-          is_new_best = true; /* prefer more matched blobs with tighter error/LED  */
-      else if (mi->best_score.matched_blobs+1 < score.matched_blobs && (error_per_led < best_error_per_led * 1.2))
-          is_new_best = true; /* prefer at least 2 more matched blobs with slightly worse error/LED  */
-      else if (mi->best_score.matched_blobs == score.matched_blobs &&
-              mi->best_score.reprojection_error > score.reprojection_error)
-          is_new_best = true; /* else, prefer closer reprojection with at least as many matches*/
-    }
-
-    if (is_new_best) {
+    if (rift_score_is_better_pose (&mi->best_score, &score)) {
         mi->best_score = score;
         mi->best_pose = *pose;
 #if DUMP_TIMING

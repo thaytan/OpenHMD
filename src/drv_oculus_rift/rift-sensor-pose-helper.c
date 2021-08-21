@@ -160,7 +160,7 @@ void rift_evaluate_pose_with_prior (rift_pose_metrics *score, posef *pose,
 #endif
 
 		if (facing_dot < -0.25) {
-			double led_radius = 5.0;
+			double led_radius = 4.0;
 			if (position.z > 0.0) {
 				led_radius = focal_length * led_radius_mm / position.z;
 			}
@@ -388,4 +388,40 @@ void rift_mark_matching_blobs (posef *pose,
 			}
 		}
 	}
+}
+
+/* Return true if new_score is for a more likely pose than old_score */
+bool rift_score_is_better_pose (rift_pose_metrics *old_score, rift_pose_metrics *new_score)
+{
+	/* if our previous best pose was "strong", only take better "strong" poses */
+	if (POSE_HAS_FLAGS(old_score, RIFT_POSE_MATCH_STRONG) && !POSE_HAS_FLAGS(new_score, RIFT_POSE_MATCH_STRONG))
+		return false;
+
+	/* If the old score wasn't any good, but the new one is - take the new one */
+	if (!POSE_HAS_FLAGS(old_score, RIFT_POSE_MATCH_GOOD) && POSE_HAS_FLAGS(new_score, RIFT_POSE_MATCH_GOOD))
+		return true;
+
+	double new_error_per_led = new_score->reprojection_error / new_score->matched_blobs;
+	double best_error_per_led = 10.0;
+
+	if (old_score->matched_blobs > 0)
+		best_error_per_led = old_score->reprojection_error / old_score->matched_blobs;
+
+	if (old_score->matched_blobs < new_score->matched_blobs && (new_error_per_led < best_error_per_led))
+		return true; /* prefer more matched blobs with tighter error/LED */
+
+	if (old_score->matched_blobs+1 < new_score->matched_blobs && (new_error_per_led < best_error_per_led * 1.25))
+		return true; /* prefer at least 2 more matched blobs with slightly worse error/LED */
+
+	if (old_score->matched_blobs == new_score->matched_blobs &&
+			new_score->reprojection_error < old_score->reprojection_error)
+		return true; /* else, prefer closer reprojection with at least as many matches*/
+
+	/* If both scores have pose priors, prefer the one where the orientation better matches the prior */
+	if (POSE_HAS_FLAGS(old_score, RIFT_POSE_HAD_PRIOR) && POSE_HAS_FLAGS(new_score, RIFT_POSE_HAD_PRIOR)) {
+		if (ovec3f_get_length(&new_score->orient_error) < ovec3f_get_length(&old_score->orient_error))
+			return true;
+	}
+
+	return false;
 }
