@@ -895,7 +895,8 @@ rift_tracked_device_on_new_exposure(rift_tracked_device_priv *dev, rift_tracked_
 		/* We might reclaim a busy delay slot if some frame search is being slow and we already got an observation from another camera */
 		slot = reclaim_delay_slot(dev);
 		if (slot) {
-			LOGI ("Reclaimed delay slot %d for dev %d, ts %llu", slot->slot_id, dev->base.id, (unsigned long long) dev->device_time_ns);
+			LOGI ("Reclaimed delay slot %d for dev %d, ts %llu (delay %f)", slot->slot_id, dev->base.id, (unsigned long long) dev->device_time_ns,
+				(double) (dev->device_time_ns - slot->device_time_ns) / 1000000000.0);
 		}
 	}
 
