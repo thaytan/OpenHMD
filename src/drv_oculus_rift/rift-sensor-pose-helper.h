@@ -24,6 +24,7 @@ typedef enum {
 	RIFT_POSE_MATCH_STRONG   = 0x2, /* A strong pose match is a match with very low error */
 	RIFT_POSE_MATCH_POSITION = 0x4, /* The position of the pose matched the prior well */
 	RIFT_POSE_MATCH_ORIENT   = 0x8, /* The orientation of the pose matched the prior well */
+	RIFT_POSE_HAD_PRIOR      = 0x10, /* If a pose prior was supplied when calculating the score, then rot/trans_error are set */
 } rift_pose_match_flags;
 
 #define POSE_SET_FLAG(score,f) ((score)->match_flags |= (f))
@@ -31,13 +32,16 @@ typedef enum {
 #define POSE_HAS_FLAGS(score,f) (((score)->match_flags & (f)) == (f))
 
 typedef struct {
+	rift_pose_match_flags match_flags;
+
 	int matched_blobs;
 	int unmatched_blobs;
 	int visible_leds;
 
 	double reprojection_error;
 
-	rift_pose_match_flags match_flags;
+	vec3f orient_error; /* Rotation error (compared to a prior) */
+	vec3f pos_error;		/* Translation error (compared to a prior) */
 } rift_pose_metrics;
 
 void rift_evaluate_pose (rift_pose_metrics *score, posef *pose,
@@ -47,7 +51,7 @@ void rift_evaluate_pose (rift_pose_metrics *score, posef *pose,
 	rift_rect_t *out_bounds);
 
 void rift_evaluate_pose_with_prior (rift_pose_metrics *score, posef *pose,
-	posef *pose_prior, const vec3f *pos_variance, const vec3f *rot_variance,
+	bool prior_must_match, posef *pose_prior, const vec3f *pos_variance, const vec3f *rot_variance,
 	struct blob *blobs, int num_blobs,
 	int device_id, rift_led *leds, int num_leds,
 	dmat3 *camera_matrix, double dist_coeffs[5], bool dist_fisheye,

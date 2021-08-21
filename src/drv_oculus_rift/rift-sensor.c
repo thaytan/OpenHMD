@@ -202,7 +202,7 @@ static void tracker_process_blobs_fast(rift_sensor_ctx *ctx, rift_sensor_capture
 		dev_state->final_cam_pose = obj_cam_pose;
 
 		rift_evaluate_pose_with_prior(&dev_state->score, &obj_cam_pose,
-			&obj_cam_pose, &exp_dev_info->pos_error, &exp_dev_info->rot_error,
+			true, &obj_cam_pose, &exp_dev_info->pos_error, &exp_dev_info->rot_error,
 			frame->bwobs->blobs, frame->bwobs->num_blobs,
 			dev->id, dev->leds->points, dev->leds->num_points,
 			&ctx->camera_matrix, ctx->dist_coeffs, ctx->dist_fisheye, NULL);
@@ -227,8 +227,9 @@ static void tracker_process_blobs_fast(rift_sensor_ctx *ctx, rift_sensor_capture
 					dev->id, dev->leds->points, dev->leds->num_points, camera_matrix,
 					dist_coeffs, ctx->is_cv1,
 					&obj_cam_pose, NULL, NULL, true);
+
 				rift_evaluate_pose_with_prior(&dev_state->score, &obj_cam_pose,
-					&dev_state->final_cam_pose, &exp_dev_info->pos_error, &exp_dev_info->rot_error,
+					true, &dev_state->final_cam_pose, &exp_dev_info->pos_error, &exp_dev_info->rot_error,
 					bwobs->blobs, bwobs->num_blobs,
 					dev->id, dev->leds->points, dev->leds->num_points,
 					&ctx->camera_matrix, ctx->dist_coeffs, ctx->dist_fisheye, NULL);
@@ -322,9 +323,9 @@ static void tracker_process_blobs_long(rift_sensor_ctx *ctx, rift_sensor_capture
 				/* We have a good pose match for this device, that we found on the first
 				 * pass. If any other device found a strong match though, then that may
 				 * have claimed blobs we were relying on  - so re-check our pose and possibly start again */
-				if (do_aligned_checks) {
+				if (search_flags & CS_FLAG_HAVE_POSE_PRIOR) {
 					rift_evaluate_pose_with_prior(&dev_state->score, &obj_cam_pose,
-						&dev_state->final_cam_pose, &exp_dev_info->pos_error, &exp_dev_info->rot_error,
+						do_aligned_checks, &dev_state->final_cam_pose, &exp_dev_info->pos_error, &exp_dev_info->rot_error,
 						bwobs->blobs, bwobs->num_blobs,
 						dev->id, dev->leds->points, dev->leds->num_points,
 						&ctx->camera_matrix, ctx->dist_coeffs, ctx->dist_fisheye, NULL);

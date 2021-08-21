@@ -59,31 +59,43 @@ static int find_best_matching_led (struct visible_led_info *led_points, int num_
 	return best_led_index;
 }
 
-static bool
-check_pose_prior(posef *pose, posef *pose_prior, const vec3f *pos_variance, const vec3f *rot_variance)
+static void
+check_pose_prior(rift_pose_metrics *score, posef *pose, posef *pose_prior, const vec3f *pos_variance, const vec3f *rot_variance)
 {
-	vec3f pos_diff, orient_err;
 	quatf orient_diff;
 	int i;
 
-	ovec3f_subtract(&pose->pos, &pose_prior->pos, &pos_diff);
+	score->match_flags |= RIFT_POSE_HAD_PRIOR;
+
+	ovec3f_subtract(&pose->pos, &pose_prior->pos, &score->pos_error);
+
 	oquatf_diff(&pose->orient, &pose_prior->orient, &orient_diff);
 	oquatf_normalize_me(&orient_diff);
-	oquatf_to_rotation(&orient_diff, &orient_err);
+	oquatf_to_rotation(&orient_diff, &score->orient_error);
 
-	/* Check each component of position and rotation are within the passed variance */
-	for (i = 0; i < 3; i++) {
-		if (pos_diff.arr[i] * pos_diff.arr[i] > pos_variance->arr[i])
-			return false;
-		if (orient_err.arr[i] * orient_err.arr[i] > rot_variance->arr[i])
-			return false;
+	/* Check each component of position and rotation are within the passed variance and
+	 * clear any return flag that's not set */
+	if (pos_variance) {
+		score->match_flags |= ~RIFT_POSE_MATCH_POSITION;
+
+		for (i = 0; i < 3; i++) {
+			if (score->pos_error.arr[i] * score->pos_error.arr[i] > pos_variance->arr[i])
+				score->match_flags &= ~RIFT_POSE_MATCH_POSITION;
+		}
 	}
 
-	return true;
+	if (rot_variance) {
+		score->match_flags |= RIFT_POSE_MATCH_ORIENT;
+
+		for (i = 0; i < 3; i++) {
+			if (score->orient_error.arr[i] * score->orient_error.arr[i] > rot_variance->arr[i])
+				score->match_flags &= ~RIFT_POSE_MATCH_ORIENT;
+		}
+	}
 }
 
 void rift_evaluate_pose_with_prior (rift_pose_metrics *score, posef *pose,
-	posef *pose_prior, const vec3f *pos_variance, const vec3f *rot_variance,
+	bool prior_must_match, posef *pose_prior, const vec3f *pos_variance, const vec3f *rot_variance,
 	struct blob *blobs, int num_blobs,
 	int device_id, rift_led *leds, int num_leds,
 	dmat3 *camera_matrix, double dist_coeffs[5], bool dist_fisheye,
@@ -98,20 +110,22 @@ void rift_evaluate_pose_with_prior (rift_pose_metrics *score, posef *pose,
 	vec3f led_out_points[MAX_OBJECT_LEDS];
 	struct visible_led_info visible_led_points[MAX_OBJECT_LEDS];
 	
-	int num_matched_blobs = 0;
-	int num_unmatched_blobs = 0;
-	int num_visible_leds = 0;
-	double reprojection_error = 0.0;
 	bool first_visible = true;
 	/* FIXME: Pass LED size in the model */
 	double led_radius_mm = 5.0 / 1000.0;
 	double focal_length;
-  rift_pose_match_flags match_flags = 0;
 	rift_rect_t bounds = { 0, };
 	int i;
 	
 	assert (num_leds > 0);
 	assert (num_blobs > 0);
+	assert (score != NULL);
+
+	score->match_flags = 0;
+	score->reprojection_error = 0.0;
+	score->matched_blobs = 0;
+	score->unmatched_blobs = 0;
+	score->visible_leds = 0;
 	
 	/* Project HMD LEDs into the distorted image space */
 	rift_project_points(leds, num_leds,
@@ -151,9 +165,9 @@ void rift_evaluate_pose_with_prior (rift_pose_metrics *score, posef *pose,
 				led_radius = focal_length * led_radius_mm / position.z;
 			}
 
-			visible_led_points[num_visible_leds].pos = *p;
-			visible_led_points[num_visible_leds].led_radius = led_radius;
-			num_visible_leds++;
+			visible_led_points[score->visible_leds].pos = *p;
+			visible_led_points[score->visible_leds].led_radius = led_radius;
+			score->visible_leds++;
 			
 			/* Expand the bounding box */
 			if (first_visible) {
@@ -168,7 +182,10 @@ void rift_evaluate_pose_with_prior (rift_pose_metrics *score, posef *pose,
 			}
 		}
 	}
-	
+
+	if (score->visible_leds < 5)
+		goto done;
+
 	//printf ("Bounding box for pose is %f,%f -> %f,%f\n", bounds.left, bounds.top, bounds.right, bounds.bottom);
 	
 	/* Iterate the blobs and see which ones are within the bounding box and have a matching LED */
@@ -184,62 +201,67 @@ void rift_evaluate_pose_with_prior (rift_pose_metrics *score, posef *pose,
 			b->x < bounds.right && b->y < bounds.bottom) {
 			double sqerror;
 
-			int match_led_index = find_best_matching_led (visible_led_points, num_visible_leds, b, &sqerror);
+			int match_led_index = find_best_matching_led (visible_led_points, score->visible_leds, b, &sqerror);
 			if (match_led_index >= 0) {
-				reprojection_error += sqerror;
-				num_matched_blobs++;
+				score->reprojection_error += sqerror;
+				score->matched_blobs++;
 			} else {
-				num_unmatched_blobs++;
+				score->unmatched_blobs++;
 			}
 		}
 	}
 
-	if (num_visible_leds > 4 && num_matched_blobs > 4) {
-		double error_per_led = reprojection_error / num_matched_blobs;
+	if (score->matched_blobs < 5)
+		goto done;
 
-		if (pose_prior) {
-			/* We have a pose prior, require it's a close match for the passed pose */
-			if (check_pose_prior(pose, pose_prior, pos_variance, rot_variance)) {
-				match_flags |= (RIFT_POSE_MATCH_ORIENT | RIFT_POSE_MATCH_POSITION);
+	double error_per_led = score->reprojection_error / score->matched_blobs;
 
-			  if (num_visible_leds > 4 && num_matched_blobs > 4 && error_per_led < 2.0 && (num_unmatched_blobs * 4 <= num_matched_blobs ||
-				   (2 * num_visible_leds <= 3 * num_matched_blobs))) {
+	/* At this point, we have at least 5 LEDs and their blobs matching */
+
+	/* If we have a pose prior, calculate the rotation and translation error and match flags as needed */
+	if (pose_prior) {
+		check_pose_prior(score, pose, pose_prior, pos_variance, rot_variance);
+	}
+
+	if (POSE_HAS_FLAGS(score, RIFT_POSE_MATCH_POSITION|RIFT_POSE_MATCH_ORIENT)) {
+		if (error_per_led < 2.0 && (score->unmatched_blobs * 4 <= score->matched_blobs ||
+		    (2 * score->visible_leds <= 3 * score->matched_blobs))) {
 #if 0
 				printf("Got good prior match within pos (%f, %f, %f) rot (%f, %f, %f)\n",
 						pos_variance->x, pos_variance->y, pos_variance->z,
 						rot_variance->x, rot_variance->y, rot_variance->z);
 #endif
-					match_flags |= RIFT_POSE_MATCH_GOOD;
-				}
-			}
-		}
-		else {
-			/* If we matched all the blobs in the pose bounding box (allowing 25% noise / overlapping blobs)
-			 * or if we matched a large proportion (2/3) of the LEDs we expect to be visible, then consider this a good pose match */
-			if (num_visible_leds > 6 && num_matched_blobs > 6 && error_per_led < 3.0 && (num_unmatched_blobs * 4 <= num_matched_blobs ||
-			    (2 * num_visible_leds <= 3 * num_matched_blobs))) {
-				match_flags |= RIFT_POSE_MATCH_GOOD;
-			}
+			score->match_flags |= RIFT_POSE_MATCH_GOOD;
 
+			if (error_per_led < 1.5)
+				score->match_flags |= RIFT_POSE_MATCH_STRONG;
 		}
+	}
+	else if (prior_must_match) {
+		/* If we must match the prior and failed, bail out */
+		goto done;
+	} else {
+		/* If we matched all the blobs in the pose bounding box (allowing 25% noise / overlapping blobs)
+		 * or if we matched a large proportion (2/3) of the LEDs we expect to be visible, then consider this a good pose match */
+		if (score->visible_leds > 6 && score->matched_blobs > 6 &&
+				error_per_led < 3.0 &&
+				(score->unmatched_blobs * 4 <= score->matched_blobs || (2 * score->visible_leds <= 3 * score->matched_blobs))) {
 
-		if ((match_flags & RIFT_POSE_MATCH_GOOD) && error_per_led < 1.5)
-			match_flags |= RIFT_POSE_MATCH_STRONG;
+			score->match_flags |= RIFT_POSE_MATCH_GOOD;
+
+			/* If we had no pose prior, but a close reprojection error, allow a STRONG match */
+			/* If we had a pose prior and got here, the pose is out of tolerance, so only permit a "GOOD" match */
+			if (pose_prior == NULL && error_per_led < 1.5)
+				score->match_flags |= RIFT_POSE_MATCH_STRONG;
+		}
 	}
 
 #if 0
 	printf ("score for pose is %u matched %u unmatched %u visible %f error\n",
-		num_matched_blobs, num_unmatched_blobs, num_visible_leds, reprojection_error);
+		score->matched_blobs, score->unmatched_blobs, score->visible_leds, score->reprojection_error);
 #endif
 
-	if (score) {
-		score->matched_blobs = num_matched_blobs;
-		score->unmatched_blobs = num_unmatched_blobs;
-		score->visible_leds = num_visible_leds;
-		score->reprojection_error = reprojection_error;
-		score->match_flags = match_flags;
-	}
-
+done:
 	if (out_bounds)
 		*out_bounds = bounds;
 }
@@ -250,9 +272,9 @@ void rift_evaluate_pose (rift_pose_metrics *score, posef *pose,
 	dmat3 *camera_matrix, double dist_coeffs[5], bool dist_fisheye,
 	rift_rect_t *out_bounds)
 {
-  rift_evaluate_pose_with_prior (score, pose, NULL, NULL, NULL,
-      blobs, num_blobs, device_id, leds, num_leds,
-      camera_matrix, dist_coeffs, dist_fisheye, out_bounds);
+	rift_evaluate_pose_with_prior (score, pose, false, NULL, NULL, NULL,
+	    blobs, num_blobs, device_id, leds, num_leds,
+	    camera_matrix, dist_coeffs, dist_fisheye, out_bounds);
 }
 
 void rift_mark_matching_blobs (posef *pose,
