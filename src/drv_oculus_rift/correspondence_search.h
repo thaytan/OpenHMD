@@ -87,15 +87,13 @@ struct correspondence_search_s
     unsigned int num_trials;
     unsigned int num_pose_checks;
 
-    dmat3 *camera_matrix;
-    double *dist_coeffs;
-    bool dist_fisheye;
+    rift_sensor_camera_params *calib;
 
     /* List of the nearest blobs for each blob */
     cs_image_point_t *blob_neighbours[MAX_BLOBS_PER_FRAME][MAX_BLOBS_PER_FRAME];
 };
 
-correspondence_search_t *correspondence_search_new(dmat3 *camera_matrix, double *dist_coeffs, bool dist_fisheye);
+correspondence_search_t *correspondence_search_new(rift_sensor_camera_params *camera_calib);
 void correspondence_search_set_blobs (correspondence_search_t *cs, struct blob *blobs, int num_blobs);
 bool correspondence_search_set_model (correspondence_search_t *cs, int model_id, led_search_model_t *model);
 void correspondence_search_free (correspondence_search_t *cs);

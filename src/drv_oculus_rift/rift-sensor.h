@@ -7,13 +7,12 @@
 /* Oculus Rift driver - positional tracking interface */
 
 #include "rift.h"
-#include "correspondence_search.h"
+#include "rift-sensor-pose-helper.h"
+#include "rift-tracker.h"
+#include "rift-sensor-uvc.h"
 
 #ifndef __RIFT_SENSOR_H__
 #define __RIFT_SENSOR_H__
-
-#include "rift-tracker.h"
-#include "rift-sensor-uvc.h"
 
 typedef struct rift_sensor_ctx_s rift_sensor_ctx;
 typedef struct rift_sensor_frame_device_state rift_sensor_frame_device_state;

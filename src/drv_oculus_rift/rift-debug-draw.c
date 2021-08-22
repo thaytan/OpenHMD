@@ -163,10 +163,9 @@ compare_blobs (const void *elem1, const void *elem2)
 }
 
 void rift_debug_draw_frame (uint8_t *pixels, struct blobservation* bwobs,
-  correspondence_search_t *cs, struct rift_sensor_capture_frame *frame,
-	uint8_t n_devs, rift_tracked_device **devs, bool is_cv1,
-  dmat3 camera_matrix, bool dist_fisheye, double dist_coeffs[5],
-  posef *camera_pose)
+	correspondence_search_t *cs, struct rift_sensor_capture_frame *frame,
+	uint8_t n_devs, rift_tracked_device **devs,
+	rift_sensor_camera_params *calib, posef *camera_pose)
 {
 	uint8_t *src = frame->uvc.data;
 	int x, y;
@@ -257,8 +256,7 @@ void rift_debug_draw_frame (uint8_t *pixels, struct blobservation* bwobs,
 			oposef_apply_inverse(&frame->capture_state[d].capture_world_pose, camera_pose, &pose);
 
 			rift_project_points (dev->leds->points,
-				dev->leds->num_points, &camera_matrix,
-				dist_coeffs, is_cv1, &pose, led_out_points);
+				dev->leds->num_points, calib, &pose, led_out_points);
 
 			for (i = 0; i < dev->leds->num_points; i++) {
 				rift_led *leds = dev->leds->points;
@@ -298,8 +296,7 @@ void rift_debug_draw_frame (uint8_t *pixels, struct blobservation* bwobs,
 			/* Project HMD LEDs into the image again doh */
 			pose = dev_state->final_cam_pose;
 			rift_project_points (dev->leds->points,
-					dev->leds->num_points, &camera_matrix,
-					dist_coeffs, is_cv1, &pose, led_out_points);
+					dev->leds->num_points, calib, &pose, led_out_points);
 
 			for (i = 0; i < dev->leds->num_points; i++) {
 				rift_led *leds = dev->leds->points;

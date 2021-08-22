@@ -8,19 +8,18 @@
 #ifndef __RIFT_DEBUG_DRAW_H
 #define __RIFT_DEBUG_DRAW_H
 
-#include "rift-sensor-blobwatch.h"
-#include "rift-tracker.h"
+#include "rift-tracker-common.h"
 #include "rift-sensor.h"
+#include "rift-sensor-blobwatch.h"
 #include "correspondence_search.h"
 
 #if HAVE_PIPEWIRE
 void rift_debug_draw_frame (uint8_t *pixels, struct blobservation* bwobs,
-  correspondence_search_t *cs, struct rift_sensor_capture_frame *frame,
-	uint8_t n_devs, rift_tracked_device **devs, bool is_cv1,
-  dmat3 camera_matrix, bool dist_fisheye, double dist_coeffs[5],
-	posef *camera_pose);
+	correspondence_search_t *cs, struct rift_sensor_capture_frame *frame,
+	uint8_t n_devs, rift_tracked_device **devs,
+	rift_sensor_camera_params *calib, posef *camera_pose);
 #else
-#define rift_debug_draw_frame(pixels,bwobs,cs,frame,n_devs,devs,is_cv1,camera_matrix,dist_fisheye,dist_coeffs,camera_pose)
+#define rift_debug_draw_frame(pixels,bwobs,cs,frame,n_devs,devs,calib,camera_pose)
 #endif
 
 #endif

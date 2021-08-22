@@ -31,6 +31,9 @@
 
 #define MAX_SENSORS 4
 
+/* Number of IMU observations we accumulate before output */
+#define RIFT_MAX_PENDING_IMU_OBSERVATIONS 1000
+
 /* Number of state slots to use for quat/position updates */
 #define NUM_POSE_DELAY_SLOTS 3
 
@@ -45,6 +48,18 @@
 typedef struct rift_tracked_device_priv rift_tracked_device_priv;
 typedef struct rift_tracker_pose_report rift_tracker_pose_report;
 typedef struct rift_tracker_pose_delay_slot rift_tracker_pose_delay_slot;
+
+typedef struct rift_tracked_device_imu_observation rift_tracked_device_imu_observation;
+
+struct rift_tracked_device_imu_observation {
+	uint64_t local_ts;
+	uint64_t device_ts;
+	float dt;
+
+	vec3f ang_vel;
+	vec3f accel;
+	vec3f mag;
+};
 
 struct rift_tracker_pose_report {
 		bool report_used; /* TRUE if this report has been integrated */

@@ -76,12 +76,10 @@
 #define abs(x) ((x) >= 0 ? (x) : -(x))
 
 correspondence_search_t *
-correspondence_search_new(dmat3 *camera_matrix, double *dist_coeffs, bool dist_fisheye)
+correspondence_search_new(rift_sensor_camera_params *camera_calib)
 {
     correspondence_search_t *cs = calloc(1, sizeof (correspondence_search_t));
-    cs->camera_matrix = camera_matrix;
-    cs->dist_coeffs = dist_coeffs;
-    cs->dist_fisheye = dist_fisheye;
+    cs->calib = camera_calib;
     return cs;
 }
 
@@ -132,7 +130,7 @@ correspondence_search_set_blobs (correspondence_search_t *cs, struct blob *blobs
     cs->blobs = blobs;
 
     /* Undistort points so we can project / match properly */
-    undistort_points (blobs, num_blobs, undistorted_points, cs->camera_matrix->m, cs->dist_coeffs, cs->dist_fisheye);
+    undistort_points (blobs, num_blobs, undistorted_points, cs->calib);
 
 #if DUMP_BLOBS
     printf ("Building blobs search array\n");
@@ -145,8 +143,8 @@ correspondence_search_set_blobs (correspondence_search_t *cs, struct blob *blobs
         p->point_homog[1] = undistorted_points[i].y;
         p->point_homog[2] = 1;
 
-        p->size[0] = b->width / cs->camera_matrix->m[0];
-        p->size[1] = b->height / cs->camera_matrix->m[4];
+        p->size[0] = b->width / cs->calib->camera_matrix.m[0];
+        p->size[1] = b->height / cs->calib->camera_matrix.m[4];
         p->max_size = MAX (p->size[0], p->size[1]);
 
         p->blob = b;
@@ -291,11 +289,11 @@ correspondence_search_project_pose (correspondence_search_t *cs, led_search_mode
     rift_evaluate_pose_with_prior (&score, pose,
         false, &mi->pose_prior, NULL, NULL,
         cs->blobs, cs->num_points,
-        mi->id, leds->points, leds->num_points, cs->camera_matrix, cs->dist_coeffs, cs->dist_fisheye, NULL);
+        mi->id, leds->points, leds->num_points, cs->calib, NULL);
   }
   else {
     rift_evaluate_pose (&score, pose, cs->blobs, cs->num_points,
-        mi->id, leds->points, leds->num_points, cs->camera_matrix, cs->dist_coeffs, cs->dist_fisheye, NULL);
+        mi->id, leds->points, leds->num_points, cs->calib, NULL);
   }
 
   /* If this pose is any good, test it further */

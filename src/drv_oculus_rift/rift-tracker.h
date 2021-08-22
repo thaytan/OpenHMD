@@ -8,67 +8,15 @@
 
 #include "rift.h"
 #include "rift-kalman-6dof.h"
-#include "correspondence_search.h"
-#include "ohmd-pipewire.h"
+#include "rift-tracker-common.h"
+#include "rift-sensor-pose-helper.h"
 
 #ifndef __RIFT_TRACKER_H__
 #define __RIFT_TRACKER_H__
 
 typedef struct rift_tracker_ctx_s rift_tracker_ctx;
 
-#define RIFT_MAX_TRACKED_DEVICES 3
-
-#define RIFT_MAX_PENDING_IMU_OBSERVATIONS 1000
-
-typedef struct rift_tracked_device_imu_observation rift_tracked_device_imu_observation;
-typedef struct rift_tracker_exposure_info rift_tracker_exposure_info;
-typedef struct rift_tracked_device_exposure_info rift_tracked_device_exposure_info;
-
-struct rift_tracked_device_exposure_info {
-	uint64_t device_time_ns; /* Device time this sensor exposure was captured */
-	int fusion_slot; /* Fusion slot assigned to the exposure, or -1 */
-
-	/* TRUE if we had a recent pose prior for this device at exposure time */
-	bool had_pose_lock;
-
-	/* World pose and error std dev at exposure time */
-	posef capture_pose;
-	vec3f pos_error;
-	vec3f rot_error;
-};
-
-struct rift_tracker_exposure_info {
-	uint64_t local_ts;
-	uint32_t hmd_ts;
-
-	uint16_t count;
-	uint8_t led_pattern_phase;
-
-	/* Per device info */
-	uint8_t n_devices;
-	rift_tracked_device_exposure_info devices[RIFT_MAX_TRACKED_DEVICES];
-};
-
-struct rift_tracked_device_imu_observation {
-	uint64_t local_ts;
-	uint64_t device_ts;
-	float dt;
-
-	vec3f ang_vel;
-	vec3f accel;
-	vec3f mag;
-};
-
-struct rift_tracked_device_s
-{
-	int id;
-
-	rift_leds *leds;
-	led_search_model_t *led_search;
-};
-
-rift_tracker_ctx *rift_tracker_new (ohmd_context* ohmd_ctx,
-		const uint8_t radio_id[5]);
+rift_tracker_ctx *rift_tracker_new (ohmd_context* ohmd_ctx, const uint8_t radio_id[5]);
 
 rift_tracked_device *rift_tracker_add_device (rift_tracker_ctx *ctx, int device_id, posef *imu_pose, posef *model_pose, rift_leds *leds);
 void rift_tracker_on_new_exposure (rift_tracker_ctx *ctx, uint32_t hmd_ts, uint16_t exposure_count, uint32_t exposure_hmd_ts, uint8_t led_pattern_phase);

@@ -7,23 +7,23 @@
 #define __OPENCV_H__
 
 #include "rift.h"
+#include "rift-sensor.h"
 #include "rift-sensor-maths.h"
 #include "rift-sensor-blobwatch.h"
 
 #if HAVE_OPENCV
 bool estimate_initial_pose(struct blob *blobs, int num_blobs,
 			   int device_id, rift_led *leds, int num_leds,
-			   dmat3 *camera_matrix, double dist_coeffs[5], bool dist_fisheye,
+         rift_sensor_camera_params *calib,
 			   posef *pose, int *num_leds_out,
 			   int *num_inliers, bool use_extrinsic_guess);
 
 void undistort_points (struct blob *blobs, int num_blobs,
 				vec3f *out_points,
-				double camera_matrix[9], double dist_coeffs[4], bool dist_fisheye);
+        rift_sensor_camera_params *calib);
 
 void rift_project_points(rift_led *leds, int num_led_pos,
-  dmat3 *camera_matrix, double dist_coeffs[5], bool dist_fisheye,
-	posef *pose, vec3f *out_points);
+  rift_sensor_camera_params *calib, posef *pose, vec3f *out_points);
 
 void refine_pose(vec3f *image_points,
     rift_led **leds, int num_matches,
@@ -32,7 +32,7 @@ void refine_pose(vec3f *image_points,
 static inline
 bool estimate_initial_pose(struct blob *blobs, int num_blobs,
 			   int device_id, rift_led *leds, int num_leds,
-			   dmat3 *camera_matrix, double dist_coeffs[5], bool dist_fisheye,
+         rift_sensor_camera_params *calib,
 			   posef *pose, int *num_leds_out,
 			   int *num_inliers, bool use_extrinsic_guess)
 {
@@ -41,18 +41,16 @@ bool estimate_initial_pose(struct blob *blobs, int num_blobs,
 	(void)device_id;
 	(void)leds;
 	(void)num_leds;
-	(void)camera_matrix;
-	(void)dist_coeffs;
-	(void)dist_fisheye;
+  (void)calib;
 	(void)pose;
 	(void)num_leds_out;
 	(void)num_inliers;
 	(void)use_extrinsic_guess;
   return false;
 }
-#define rift_project_points(leds,num_led_pos,camera_matrix,dist_coeffs,dist_fisheye,pose,out_points)
+#define rift_project_points(leds,num_led_pos,calib,pose,out_points)
 
-#define undistort_points(blobs,num_blobs,out_points,camera_matrix,dist_coeffs,dist_fisheye)
+#define undistort_points(blobs,num_blobs,out_points,calib)
 
 #define refine_pose(image_points,leds,num_matches,pose,reprojection_error)
 

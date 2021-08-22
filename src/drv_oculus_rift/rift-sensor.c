@@ -30,6 +30,8 @@
 
 #include "rift-debug-draw.h"
 
+#include "ohmd-pipewire.h"
+
 #define ASSERT_MSG(_v, label, ...) if(!(_v)){ fprintf(stderr, __VA_ARGS__); goto label; }
 
 /* We need 4 capture buffers:
@@ -96,7 +98,6 @@ struct rift_sensor_ctx_s
 	int id;
 	char serial_no[32];
 	rift_tracker_ctx *tracker;
-	bool is_cv1;
 
 	libusb_device_handle *usb_devh;
 	int stream_started;
@@ -106,9 +107,7 @@ struct rift_sensor_ctx_s
 
 	blobwatch* bw;
 
-	dmat3 camera_matrix;
-	bool dist_fisheye;
-	double dist_coeffs[5];
+  rift_sensor_camera_params calib;
 
 	correspondence_search_t *cs;
 
@@ -159,8 +158,6 @@ static void tracker_process_blobs_fast(rift_sensor_ctx *ctx, rift_sensor_capture
 {
 	rift_tracker_exposure_info *exposure_info = &frame->exposure_info;
 	blobservation* bwobs = frame->bwobs;
-	dmat3 *camera_matrix = &ctx->camera_matrix;
-	double *dist_coeffs = ctx->dist_coeffs;
 	int d;
 
 	/* Only process the devices that were available when this frame was captured */
@@ -205,7 +202,7 @@ static void tracker_process_blobs_fast(rift_sensor_ctx *ctx, rift_sensor_capture
 			true, &obj_cam_pose, &exp_dev_info->pos_error, &exp_dev_info->rot_error,
 			frame->bwobs->blobs, frame->bwobs->num_blobs,
 			dev->id, dev->leds->points, dev->leds->num_points,
-			&ctx->camera_matrix, ctx->dist_coeffs, ctx->dist_fisheye, NULL);
+			&ctx->calib, NULL);
 
 		if (POSE_HAS_FLAGS(&dev_state->score, RIFT_POSE_MATCH_GOOD)) {
 			LOGD("Sensor %d already had good pose match for device %d matched %u blobs of %u",
@@ -224,15 +221,14 @@ static void tracker_process_blobs_fast(rift_sensor_ctx *ctx, rift_sensor_capture
 
 			if (num_blobs > 4) {
 				estimate_initial_pose (bwobs->blobs, bwobs->num_blobs,
-					dev->id, dev->leds->points, dev->leds->num_points, camera_matrix,
-					dist_coeffs, ctx->is_cv1,
+					dev->id, dev->leds->points, dev->leds->num_points, &ctx->calib,
 					&obj_cam_pose, NULL, NULL, true);
 
 				rift_evaluate_pose_with_prior(&dev_state->score, &obj_cam_pose,
 					true, &dev_state->final_cam_pose, &exp_dev_info->pos_error, &exp_dev_info->rot_error,
 					bwobs->blobs, bwobs->num_blobs,
-					dev->id, dev->leds->points, dev->leds->num_points,
-					&ctx->camera_matrix, ctx->dist_coeffs, ctx->dist_fisheye, NULL);
+					dev->id, dev->leds->points, dev->leds->num_points, &ctx->calib,
+					NULL);
 
 				if (POSE_HAS_FLAGS(&dev_state->score, RIFT_POSE_MATCH_GOOD)) {
 					LOGD("Sensor %d re-acquired match for device %d matched %u blobs of %u",
@@ -328,14 +324,13 @@ static void tracker_process_blobs_long(rift_sensor_ctx *ctx, rift_sensor_capture
 						do_aligned_checks, &dev_state->final_cam_pose, &exp_dev_info->pos_error, &exp_dev_info->rot_error,
 						bwobs->blobs, bwobs->num_blobs,
 						dev->id, dev->leds->points, dev->leds->num_points,
-						&ctx->camera_matrix, ctx->dist_coeffs, ctx->dist_fisheye, NULL);
+						&ctx->calib, NULL);
 				}
 				else {
 					rift_evaluate_pose (&dev_state->score, &obj_cam_pose,
 						frame->bwobs->blobs, frame->bwobs->num_blobs,
 						dev->id, dev->leds->points, dev->leds->num_points,
-						&ctx->camera_matrix, ctx->dist_coeffs,
-						ctx->dist_fisheye, NULL);
+						&ctx->calib, NULL);
 				}
 
 				/* If we don't have a good match any more, do another shallow search */
@@ -406,12 +401,17 @@ static int
 rift_sensor_get_calibration(rift_sensor_ctx *ctx, uint16_t usb_idProduct)
 {
 	uint8_t buf[128];
-	double * const A = ctx->camera_matrix.m;
-	double * const k = ctx->dist_coeffs;
+	rift_sensor_camera_params *calib = &ctx->calib;
+	double * const A = calib->camera_matrix.m;
+	double * const k = calib->dist_coeffs;
 	double fx, fy, cx, cy;
 	double k1, k2, k3, k4;
 	double p1, p2;
 	int ret;
+
+	/* Copy the frame width and height from the UVC setup */
+	calib->width = ctx->stream.width;
+	calib->height = ctx->stream.height;
 
 	switch (usb_idProduct) {
 		case CV1_PID:
@@ -437,7 +437,8 @@ rift_sensor_get_calibration(rift_sensor_ctx *ctx, uint16_t usb_idProduct)
 			 * k = [ k₁ k₂, k₃, k4 ] for CV1 fisheye distortion
 			 */
 			k[0] = k1; k[1] = k2; k[2] = k3; k[3] = k4;
-			ctx->dist_fisheye = true;
+			calib->dist_fisheye = true;
+			calib->is_cv1 = true;
 			break;
 		case DK2_PID: {
 			int i;
@@ -470,7 +471,8 @@ rift_sensor_get_calibration(rift_sensor_ctx *ctx, uint16_t usb_idProduct)
 			k[0] = k1; k[1] = k2;
 			k[2] = p1; k[3] = p2;
 			k[4] = k3;
-			ctx->dist_fisheye = false;
+			calib->dist_fisheye = false;
+			calib->is_cv1 = false;
 			break;
 		}
 		default:
@@ -604,8 +606,6 @@ update_device_and_blobs (rift_sensor_ctx *sensor_ctx, rift_sensor_capture_frame 
 	rift_tracked_device *dev, rift_sensor_frame_device_state *dev_state, posef *obj_cam_pose)
 {
 	blobservation* bwobs = frame->bwobs;
-	dmat3 *camera_matrix = &sensor_ctx->camera_matrix;
-	double *dist_coeffs = sensor_ctx->dist_coeffs;
 
 	/* Clear existing blob IDs for this device, then
 	 * back project LED ids into blobs if we find them and the dot product
@@ -619,19 +619,16 @@ update_device_and_blobs (rift_sensor_ctx *sensor_ctx, rift_sensor_capture_frame 
 	}
 
 	rift_mark_matching_blobs (obj_cam_pose, bwobs->blobs, bwobs->num_blobs, dev->id,
-			dev->leds->points, dev->leds->num_points,
-			camera_matrix, dist_coeffs, sensor_ctx->is_cv1);
+			dev->leds->points, dev->leds->num_points, &sensor_ctx->calib);
 
 	/* Refine the pose with PnP now that we've labelled the blobs */
 	estimate_initial_pose (bwobs->blobs, bwobs->num_blobs,
-		dev->id, dev->leds->points, dev->leds->num_points, camera_matrix,
-		dist_coeffs, sensor_ctx->is_cv1,
+		dev->id, dev->leds->points, dev->leds->num_points, &sensor_ctx->calib,
 		obj_cam_pose, NULL, NULL, true);
 
 	/* And label the blobs again in case we collected any more */
 	rift_mark_matching_blobs (obj_cam_pose, bwobs->blobs, bwobs->num_blobs, dev->id,
-			dev->leds->points, dev->leds->num_points,
-			camera_matrix, dist_coeffs, sensor_ctx->is_cv1);
+			dev->leds->points, dev->leds->num_points, &sensor_ctx->calib);
 
 	dev_state->final_cam_pose.pos = obj_cam_pose->pos;
 	dev_state->final_cam_pose.orient = obj_cam_pose->orient;
@@ -647,8 +644,7 @@ update_device_and_blobs (rift_sensor_ctx *sensor_ctx, rift_sensor_capture_frame 
 	rift_evaluate_pose (score, &pose,
 		frame->bwobs->blobs, frame->bwobs->num_blobs,
 		dev->id, dev->leds->points, dev->leds->num_points,
-		&sensor_ctx->camera_matrix, sensor_ctx->dist_coeffs,
-		sensor_ctx->dist_fisheye, NULL);
+    &sensor_ctx->calib, NULL);
 
 	if (POSE_HAS_FLAGS(score, RIFT_POSE_MATCH_GOOD)) {
 		LOGV("Sensor %d Found good pose match - %u LEDs matched %u visible ones\n",
@@ -843,8 +839,7 @@ static void analyse_frame_fast(rift_sensor_ctx *sensor, rift_sensor_capture_fram
 
 	if (ohmd_pw_video_stream_connected(sensor->debug_vid)) {
 		rift_debug_draw_frame (sensor->debug_frame, frame->bwobs, sensor->cs, frame,
-			frame->n_devices, sensor->devices, sensor->is_cv1, sensor->camera_matrix,
-			sensor->dist_fisheye, sensor->dist_coeffs, &sensor->camera_pose);
+			frame->n_devices, sensor->devices, &sensor->calib, &sensor->camera_pose);
 		ohmd_pw_video_stream_push (sensor->debug_vid, frame->uvc.start_ts, sensor->debug_frame);
 	}
 }
@@ -872,7 +867,6 @@ rift_sensor_new(ohmd_context* ohmd_ctx, int id, const char *serial_no,
 
 	sensor_ctx->ohmd_ctx = ohmd_ctx;
 	sensor_ctx->id = id;
-	sensor_ctx->is_cv1 = (desc.idProduct == CV1_PID);
 	strcpy ((char *) sensor_ctx->serial_no, (char *) serial_no);
 	sensor_ctx->tracker = tracker;
 	sensor_ctx->usb_devh = usb_devh;
@@ -927,8 +921,6 @@ rift_sensor_new(ohmd_context* ohmd_ctx, int id, const char *serial_no,
 		sensor_ctx->debug_frame = ohmd_alloc(ohmd_ctx, 2 * 3 * sensor_ctx->stream.width * sensor_ctx->stream.height);
 	}
 
-	sensor_ctx->bw = blobwatch_new(sensor_ctx->is_cv1 ? BLOB_THRESHOLD_CV1 : BLOB_THRESHOLD_DK2, sensor_ctx->stream.width, sensor_ctx->stream.height);
-
 	LOGV("Sensor %d - reading Calibration\n", id);
 	ret = rift_sensor_get_calibration(sensor_ctx, desc.idProduct);
 	if (ret < 0) {
@@ -936,7 +928,8 @@ rift_sensor_new(ohmd_context* ohmd_ctx, int id, const char *serial_no,
 		goto fail;
 	}
 
-	sensor_ctx->cs = correspondence_search_new (&sensor_ctx->camera_matrix, sensor_ctx->dist_coeffs, sensor_ctx->dist_fisheye);
+	sensor_ctx->bw = blobwatch_new(sensor_ctx->calib.is_cv1 ? BLOB_THRESHOLD_CV1 : BLOB_THRESHOLD_DK2, sensor_ctx->stream.width, sensor_ctx->stream.height);
+	sensor_ctx->cs = correspondence_search_new (&sensor_ctx->calib);
 
 	/* Start analysis threads */
 	sensor_ctx->sensor_lock = ohmd_create_mutex(ohmd_ctx);

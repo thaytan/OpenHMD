@@ -98,7 +98,7 @@ void rift_evaluate_pose_with_prior (rift_pose_metrics *score, posef *pose,
 	bool prior_must_match, posef *pose_prior, const vec3f *pos_variance, const vec3f *rot_variance,
 	struct blob *blobs, int num_blobs,
 	int device_id, rift_led *leds, int num_leds,
-	dmat3 *camera_matrix, double dist_coeffs[5], bool dist_fisheye,
+	rift_sensor_camera_params *calib,
 	rift_rect_t *out_bounds)
 {
 	/*
@@ -129,12 +129,11 @@ void rift_evaluate_pose_with_prior (rift_pose_metrics *score, posef *pose,
 	
 	/* Project HMD LEDs into the distorted image space */
 	rift_project_points(leds, num_leds,
-	    camera_matrix, dist_coeffs, dist_fisheye,
-	    pose, led_out_points);
+	    calib, pose, led_out_points);
 	
 	/* Compute LED pixel size based on model distance below
 	 * using the larger X/Y focal length and LED's Z value */
-	focal_length = OHMD_MAX(camera_matrix->m[0], camera_matrix->m[4]);
+	focal_length = OHMD_MAX(calib->camera_matrix.m[0], calib->camera_matrix.m[4]);
 	
 	/* Calculate the bounding box and visible LEDs */
 	for (i = 0; i < num_leds; i++) {
@@ -269,18 +268,17 @@ done:
 void rift_evaluate_pose (rift_pose_metrics *score, posef *pose,
 	struct blob *blobs, int num_blobs,
 	int device_id, rift_led *leds, int num_leds,
-	dmat3 *camera_matrix, double dist_coeffs[5], bool dist_fisheye,
+	rift_sensor_camera_params *calib,
 	rift_rect_t *out_bounds)
 {
 	rift_evaluate_pose_with_prior (score, pose, false, NULL, NULL, NULL,
-	    blobs, num_blobs, device_id, leds, num_leds,
-	    camera_matrix, dist_coeffs, dist_fisheye, out_bounds);
+	    blobs, num_blobs, device_id, leds, num_leds, calib, out_bounds);
 }
 
 void rift_mark_matching_blobs (posef *pose,
 	struct blob *blobs, int num_blobs,
 	int device_id, rift_led *leds, int num_leds,
-	dmat3 *camera_matrix, double dist_coeffs[5], bool dist_fisheye)
+	rift_sensor_camera_params *calib)
 {
 	/*
 	 * 1. Project the LED points with the provided pose
@@ -304,12 +302,10 @@ void rift_mark_matching_blobs (posef *pose,
 
 	/* Take the larger focal length for calculating pixel sizes. They are usually
 	 * the same anyway */
-	focal_length = OHMD_MAX(camera_matrix->m[0], camera_matrix->m[4]);
+	focal_length = OHMD_MAX(calib->camera_matrix.m[0], calib->camera_matrix.m[4]);
 
 	/* Project HMD LEDs into the distorted image space */
-	rift_project_points(leds, num_leds,
-	    camera_matrix, dist_coeffs, dist_fisheye,
-	    pose, led_out_points);
+	rift_project_points(leds, num_leds, calib, pose, led_out_points);
 
 	/* Calculate the bounding box and visible LEDs */
 	for (i = 0; i < num_leds; i++) {

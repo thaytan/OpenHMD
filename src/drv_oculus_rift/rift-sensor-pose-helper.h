@@ -7,6 +7,7 @@
 #define __POSE_HELPER_H__
 
 #include "rift.h"
+#include "rift-tracker-common.h"
 #include "rift-sensor-maths.h"
 #include "rift-sensor-blobwatch.h"
 
@@ -47,20 +48,20 @@ typedef struct {
 void rift_evaluate_pose (rift_pose_metrics *score, posef *pose,
 	struct blob *blobs, int num_blobs,
 	int device_id, rift_led *leds, int num_leds,
-	dmat3 *camera_matrix, double dist_coeffs[5], bool dist_fisheye,
+	rift_sensor_camera_params *calib,
 	rift_rect_t *out_bounds);
 
 void rift_evaluate_pose_with_prior (rift_pose_metrics *score, posef *pose,
 	bool prior_must_match, posef *pose_prior, const vec3f *pos_variance, const vec3f *rot_variance,
 	struct blob *blobs, int num_blobs,
 	int device_id, rift_led *leds, int num_leds,
-	dmat3 *camera_matrix, double dist_coeffs[5], bool dist_fisheye,
+	rift_sensor_camera_params *calib,
 	rift_rect_t *out_bounds);
 
 void rift_mark_matching_blobs (posef *pose,
 	struct blob *blobs, int num_blobs,
 	int device_id, rift_led *leds, int num_leds,
-	dmat3 *camera_matrix, double dist_coeffs[5], bool dist_fisheye);
+	rift_sensor_camera_params *calib);
 
 bool rift_score_is_better_pose (rift_pose_metrics *old_score, rift_pose_metrics *new_score);
 

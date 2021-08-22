@@ -36,7 +36,7 @@ quatf_to_3x3 (cv::Mat &mat, quatf *me) {
 
 extern "C" bool estimate_initial_pose(struct blob *blobs, int num_blobs,
     int device_id, rift_led *leds, int num_led_pos,
-    dmat3 *camera_matrix, double dist_coeffs[5], bool dist_fisheye,
+    rift_sensor_camera_params *calib,
     posef *pose, int *num_leds_out,
     int *num_inliers, bool use_extrinsic_guess)
 {
@@ -47,7 +47,7 @@ extern "C" bool estimate_initial_pose(struct blob *blobs, int num_blobs,
 	cv::Mat inliers;
 	int iterationsCount = 50;
 	float confidence = 0.95;
-	cv::Mat cameraK = cv::Mat(3, 3, CV_64FC1, camera_matrix->m);
+	cv::Mat cameraK = cv::Mat(3, 3, CV_64FC1, calib->camera_matrix.m);
 	cv::Mat distCoeffs;
 	cv::Mat dummyK = cv::Mat::eye(3, 3, CV_64FC1);
 	cv::Mat dummyD = cv::Mat::zeros(4, 1, CV_64FC1);
@@ -114,8 +114,8 @@ extern "C" bool estimate_initial_pose(struct blob *blobs, int num_blobs,
 	list_points2d_undistorted.resize(num_leds);
 
   /* Need to support 2 different distortion models. Fisheye for CV1, Pinhole for DK2 */
-  if (dist_fisheye) {
-    distCoeffs = cv::Mat(4, 1, CV_64FC1, dist_coeffs);
+  if (calib->dist_fisheye) {
+    distCoeffs = cv::Mat(4, 1, CV_64FC1, calib->dist_coeffs);
 
 		// we have distortion params for the openCV fisheye model
 		// so we undistort the image points manually before passing them to the PnpRansac solver
@@ -123,12 +123,12 @@ extern "C" bool estimate_initial_pose(struct blob *blobs, int num_blobs,
 		cv::fisheye::undistortPoints(list_points2d, list_points2d_undistorted, cameraK, distCoeffs);
   }
   else {
-    distCoeffs = cv::Mat(5, 1, CV_64FC1, dist_coeffs);
+    distCoeffs = cv::Mat(5, 1, CV_64FC1, calib->dist_coeffs);
 		// Pinhole camera undistort
     cv::undistortPoints(list_points2d, list_points2d_undistorted, cameraK, distCoeffs);
   }
 
-	float reprojectionError = 2.0 / camera_matrix->m[0];
+	float reprojectionError = 2.0 / calib->camera_matrix.m[0];
 
 	cv::solvePnPRansac(list_points3d, list_points2d_undistorted, dummyK, dummyD, rvec, tvec,
 			   use_extrinsic_guess, iterationsCount, reprojectionError,
@@ -156,10 +156,10 @@ extern "C" bool estimate_initial_pose(struct blob *blobs, int num_blobs,
 }
 
 void rift_project_points(rift_led *leds, int num_led_pos,
-		dmat3 *camera_matrix, double dist_coeffs[5], bool dist_fisheye,
+    rift_sensor_camera_params *calib,
 		posef *pose, vec3f *out_points)
 {
-	cv::Mat cameraK = cv::Mat(3, 3, CV_64FC1, camera_matrix->m);
+	cv::Mat cameraK = cv::Mat(3, 3, CV_64FC1, calib->camera_matrix.m);
 	cv::Mat distCoeffs;
 
 	cv::Mat tvec = cv::Mat::zeros(3, 1, CV_64FC1);
@@ -182,12 +182,12 @@ void rift_project_points(rift_led *leds, int num_led_pos,
 		led_points3d[i].z = leds[i].pos.z;
 	}
 
-  if (dist_fisheye) {
-	  distCoeffs = cv::Mat(4, 1, CV_64FC1, dist_coeffs);
+  if (calib->dist_fisheye) {
+	  distCoeffs = cv::Mat(4, 1, CV_64FC1, calib->dist_coeffs);
 	  cv::fisheye::projectPoints (led_points3d, projected_points2d, rvec, tvec, cameraK, distCoeffs);
   }
   else {
-    distCoeffs = cv::Mat(5, 1, CV_64FC1, dist_coeffs);
+    distCoeffs = cv::Mat(5, 1, CV_64FC1, calib->dist_coeffs);
 		// Pinhole camera undistort
     cv::projectPoints (led_points3d, rvec, tvec, cameraK, distCoeffs, projected_points2d);
   }
@@ -201,9 +201,9 @@ void rift_project_points(rift_led *leds, int num_led_pos,
 
 void undistort_points (struct blob *blobs, int num_blobs,
 		    vec3f *out_points,
-		    double camera_matrix[9], double dist_coeffs[5], bool dist_fisheye)
+        rift_sensor_camera_params *calib)
 {
-	cv::Mat fishK = cv::Mat(3, 3, CV_64FC1, camera_matrix);
+	cv::Mat fishK = cv::Mat(3, 3, CV_64FC1, calib->camera_matrix.m);
 	cv::Mat fishDistCoeffs;
 	std::vector<cv::Point2f> list_points2d(num_blobs);
 	std::vector<cv::Point2f> list_points2d_undistorted(num_blobs);
@@ -215,8 +215,8 @@ void undistort_points (struct blob *blobs, int num_blobs,
   }
 
   /* Need to support 2 different distortion models. Fisheye for CV1, Pinhole for DK2 */
-  if (dist_fisheye) {
-    fishDistCoeffs = cv::Mat(4, 1, CV_64FC1, dist_coeffs);
+  if (calib->dist_fisheye) {
+    fishDistCoeffs = cv::Mat(4, 1, CV_64FC1, calib->dist_coeffs);
 
 		// we have distortion params for the openCV fisheye model
 		// so we undistort the image points manually before passing them to the PnpRansac solver
@@ -224,7 +224,7 @@ void undistort_points (struct blob *blobs, int num_blobs,
 		cv::fisheye::undistortPoints(list_points2d, list_points2d_undistorted, fishK, fishDistCoeffs);
   }
   else {
-    fishDistCoeffs = cv::Mat(5, 1, CV_64FC1, dist_coeffs);
+    fishDistCoeffs = cv::Mat(5, 1, CV_64FC1, calib->dist_coeffs);
 		// Pinhole camera undistort
     cv::undistortPoints(list_points2d, list_points2d_undistorted, fishK, fishDistCoeffs);
   }
@@ -239,7 +239,7 @@ void undistort_points (struct blob *blobs, int num_blobs,
 /*
  * Refine pose operations on distortion corrected UV image points,
  * with values near the range [-1,1] (a bit bigger depending on the
- * lens distortion). The image_points paramater is double[num_matches][2]
+ * lens distortion). The image_points parameter is double[num_matches][2]
  */
 extern "C" void refine_pose(vec3f *image_points,
 		    rift_led **leds, int num_matches,
