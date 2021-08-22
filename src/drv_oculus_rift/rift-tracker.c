@@ -38,6 +38,10 @@
  * tracking lost */
 #define POSE_LOST_THRESHOLD 500
 
+/* Length of time (milliseconds) we can ignore orientation from cameras before
+ * we force an update */
+#define POSE_LOST_ORIENT_THRESHOLD 2000
+
 typedef struct rift_tracked_device_priv rift_tracked_device_priv;
 typedef struct rift_tracker_pose_report rift_tracker_pose_report;
 typedef struct rift_tracker_pose_delay_slot rift_tracker_pose_delay_slot;
@@ -84,6 +88,7 @@ struct rift_tracked_device_priv {
 	uint32_t last_device_ts;
 	uint64_t device_time_ns;
 
+	uint64_t last_observed_orient_ts;
 	uint64_t last_observed_pose_ts;
 	posef last_observed_pose;
 
@@ -133,8 +138,8 @@ rift_tracker_add_device (rift_tracker_ctx *ctx, int device_id, posef *imu_pose, 
 	int i, s;
 	rift_tracked_device_priv *next_dev;
 	char device_name[64];
-  /* Rotate our initial pose 180 deg to point along the -Z axis */
-  posef init_pose = { .pos = {{ 0.0, 0.0, 0.0 }}, .orient = {{ 0.0, 1.0, 0.0, 0.0 }}};
+	/* Rotate our initial pose 180 deg to point along the -Z axis */
+	posef init_pose = { .pos = {{ 0.0, 0.0, 0.0 }}, .orient = {{ 0.0, 1.0, 0.0, 0.0 }}};
 
 	snprintf(device_name,64,"openhmd-rift-device-%d", device_id);
 	device_name[63] = 0;
@@ -146,7 +151,7 @@ rift_tracker_add_device (rift_tracker_ctx *ctx, int device_id, posef *imu_pose, 
 
 	next_dev->base.id = device_id;
 	rift_kalman_6dof_init(&next_dev->ukf_fusion, &init_pose, NUM_POSE_DELAY_SLOTS);
-	next_dev->last_reported_pose = next_dev->last_observed_pose_ts = next_dev->device_time_ns = 0;
+	next_dev->last_reported_pose = next_dev->last_observed_orient_ts = next_dev->last_observed_pose_ts = next_dev->device_time_ns = 0;
 
 	exp_filter_pose_init(&next_dev->pose_output_filter);
 
@@ -645,11 +650,6 @@ void rift_tracked_device_model_pose_update(rift_tracked_device *dev_base, uint64
 	rift_tracker_pose_delay_slot *slot = NULL;
 	int frame_fusion_slot = -1;
 
-	/* If we have a strong match, update both position and orientation */
-	bool update_orientation = false;
-	if (POSE_HAS_FLAGS(score, RIFT_POSE_MATCH_STRONG))
-		update_orientation = true;
-
 	ohmd_lock_mutex (dev->device_lock);
 
 	/* Apply the model->device pose on top of the passed model->global pose,
@@ -665,18 +665,45 @@ void rift_tracked_device_model_pose_update(rift_tracked_device *dev_base, uint64
 
 		slot = get_matching_delay_slot(dev, dev_info);
 		if (slot != NULL) {
-			LOGD ("Got pose update for delay slot %d for dev %d, ts %llu (delay %f) orient %f %f %f %f pos %f %f %f",
+			quatf orient_diff;
+			vec3f pos_error, rot_error;
+
+			ovec3f_subtract(&pose->pos, &dev_info->capture_pose.pos, &pos_error);
+
+			oquatf_diff(&pose->orient, &dev_info->capture_pose.orient, &orient_diff);
+			oquatf_normalize_me(&orient_diff);
+			oquatf_to_rotation(&orient_diff, &rot_error);
+
+			LOGD ("Got pose update for delay slot %d for dev %d, ts %llu (delay %f) orient %f %f %f %f diff %f %f %f pos %f %f %f diff %f %f %f from %s\n",
 				slot->slot_id, dev->base.id,
 				(unsigned long long) frame_device_time_ns, (double) (dev->device_time_ns - frame_device_time_ns) / 1000000000.0,
 				pose->orient.x, pose->orient.y, pose->orient.z, pose->orient.w,
-				pose->pos.x, pose->pos.y, pose->pos.z);
-			frame_fusion_slot = slot->slot_id;
-			if (update_orientation)
+				rot_error.x, rot_error.y, rot_error.z,
+				pose->pos.x, pose->pos.y, pose->pos.z,
+				pos_error.x, pos_error.y, pos_error.z,
+				source);
+
+			/* If we have a strong match, update both position and orientation */
+			bool update_orientation = false;
+			if (POSE_HAS_FLAGS(score, RIFT_POSE_MATCH_ORIENT)) {
+				update_orientation = true;
+				dev->last_observed_orient_ts = dev->device_time_ns;
+			}
+			else if (dev->device_time_ns - dev->last_observed_pose_ts < (POSE_LOST_ORIENT_THRESHOLD * 1000000UL)) {
+				LOGD("Forcing orientation observation");
+				update_orientation = true;
+			}
+
+			if (update_orientation) {
 				rift_kalman_6dof_pose_update(&dev->ukf_fusion, dev->device_time_ns, pose, slot->slot_id);
-			else
+			} else {
 				rift_kalman_6dof_position_update(&dev->ukf_fusion, dev->device_time_ns, &pose->pos, slot->slot_id);
+			}
+
 			dev->last_observed_pose_ts = dev->device_time_ns;
 			dev->last_observed_pose = *pose;
+
+			frame_fusion_slot = slot->slot_id;
 
 			if (slot->n_pose_reports < MAX_SENSORS) {
 				rift_tracker_pose_report *report = slot->pose_reports + slot->n_pose_reports;
