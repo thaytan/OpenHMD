@@ -112,7 +112,7 @@ void rift_evaluate_pose_with_prior (rift_pose_metrics *score, posef *pose,
 	
 	bool first_visible = true;
 	/* FIXME: Pass LED size in the model */
-	double led_radius_mm = 5.0 / 1000.0;
+	double led_radius_mm = 4.0 / 1000.0;
 	double focal_length;
 	rift_rect_t bounds = { 0, };
 	int i;
@@ -146,6 +146,12 @@ void rift_evaluate_pose_with_prior (rift_pose_metrics *score, posef *pose,
 		double facing_dot;
 		oquatf_get_rotated(&pose->orient, &leds[i].pos, &position);
 		ovec3f_add (&pose->pos, &position, &position);
+
+		/* Calculate the expected size of an LED at this distance */
+		double led_radius_px = 4.0;
+		if (position.z > 0.0) {
+			led_radius_px = focal_length * led_radius_mm / position.z;
+		}
 		
 		/* Convert the position to a unit vector for dot product comparison */
 		ovec3f_normalize_me (&position);
@@ -163,25 +169,20 @@ void rift_evaluate_pose_with_prior (rift_pose_metrics *score, posef *pose,
 		 * to the LED, but the normal points toward the camera, so
 		 * we need to compare against 180 - RIFT_LED_ANGLE here */
 		if (facing_dot < cos(DEG_TO_RAD(180.0 - RIFT_LED_ANGLE))) {
-			double led_radius = 4.0;
-			if (position.z > 0.0) {
-				led_radius = focal_length * led_radius_mm / position.z;
-			}
-
 			visible_led_points[score->visible_leds].pos = *p;
-			visible_led_points[score->visible_leds].led_radius = led_radius;
+			visible_led_points[score->visible_leds].led_radius = led_radius_px;
 			score->visible_leds++;
 			
 			/* Expand the bounding box */
 			if (first_visible) {
-				bounds.left = p->x - led_radius;
-				bounds.top = p->y - led_radius;
-				bounds.right= p->x + 2 * led_radius;
-				bounds.bottom = p->x + 2 * led_radius;
+				bounds.left = p->x - led_radius_px;
+				bounds.top = p->y - led_radius_px;
+				bounds.right= p->x + 2 * led_radius_px;
+				bounds.bottom = p->x + 2 * led_radius_px;
 				first_visible = false;
 			}
 			else {
-				expand_rect(&bounds, p->x - led_radius, p->y - led_radius, 2 * led_radius, 2 * led_radius);
+				expand_rect(&bounds, p->x - led_radius_px, p->y - led_radius_px, 2 * led_radius_px, 2 * led_radius_px);
 			}
 		}
 	}
