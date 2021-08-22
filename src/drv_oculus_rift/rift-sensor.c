@@ -413,6 +413,8 @@ rift_sensor_get_calibration(rift_sensor_ctx *ctx, uint16_t usb_idProduct)
 	calib->width = ctx->stream.width;
 	calib->height = ctx->stream.height;
 
+	LOGI("camera width %d height %d", calib->width, calib->height);
+
 	switch (usb_idProduct) {
 		case CV1_PID:
 			/* Read a 128-byte block at EEPROM address 0x1d000 */
@@ -431,8 +433,9 @@ rift_sensor_get_calibration(rift_sensor_ctx *ctx, uint16_t usb_idProduct)
 			k3 = *(float *)(buf + 0x50);
 			k4 = *(float *)(buf + 0x54);
 
-			printf (" f = [ %7.3f %7.3f ], c = [ %7.3f %7.3f ]\n", fx, fy, cx, cy);
-			printf (" k = [ %9.6f %9.6f %9.6f %9.6f ]\n", k1, k2, k3, k4);
+			LOGI("f = [ %7.3f %7.3f ], c = [ %7.3f %7.3f ]", fx, fy, cx, cy);
+			LOGI("k = [ %9.6f %9.6f %9.6f %9.6f ]", k1, k2, k3, k4);
+
 			/*
 			 * k = [ k₁ k₂, k₃, k4 ] for CV1 fisheye distortion
 			 */
@@ -461,9 +464,9 @@ rift_sensor_get_calibration(rift_sensor_ctx *ctx, uint16_t usb_idProduct)
 			p2 = *(double *)(buf + 102);
 			k3 = *(double *)(buf + 114);
 
-			printf (" f = [ %7.3f %7.3f ], c = [ %7.3f %7.3f ]\n", fx, fy, cx, cy);
-			printf (" p = [ %9.6f %9.6f ]\n", p1, p2);
-			printf (" k = [ %9.6f %9.6f %9.6f ]\n", k1, k2, k3);
+			LOGI("f = [ %7.3f %7.3f ], c = [ %7.3f %7.3f ]", fx, fy, cx, cy);
+			LOGI("p = [ %9.6f %9.6f ]", p1, p2);
+			LOGI("k = [ %9.6f %9.6f %9.6f ]", k1, k2, k3);
 
 			/*
 			 * k = [ k₁ k₂, p1, p2, k₃, k4 ] for DK2 distortion
