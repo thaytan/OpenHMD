@@ -913,6 +913,16 @@ rift_sensor_new(ohmd_context* ohmd_ctx, int id, const char *serial_no,
 	snprintf(stream_id,64,"openhmd-rift-sensor-%s", sensor_ctx->serial_no);
 	stream_id[63] = 0;
 
+	LOGV("Sensor %d - reading Calibration\n", id);
+	ret = rift_sensor_get_calibration(sensor_ctx, desc.idProduct);
+	if (ret < 0) {
+		LOGE("Failed to read Rift sensor calibration data");
+		goto fail;
+	}
+
+	sensor_ctx->bw = blobwatch_new(sensor_ctx->calib.is_cv1 ? BLOB_THRESHOLD_CV1 : BLOB_THRESHOLD_DK2, sensor_ctx->stream.width, sensor_ctx->stream.height);
+	sensor_ctx->cs = correspondence_search_new (&sensor_ctx->calib);
+
 	/* Raw debug video stream */
 	sensor_ctx->debug_vid_raw = ohmd_pw_video_stream_new (stream_id, "Rift Sensor", OHMD_PW_VIDEO_FORMAT_GRAY8, sensor_ctx->stream.width, sensor_ctx->stream.height, 625, 12);
 
@@ -923,16 +933,6 @@ rift_sensor_new(ohmd_context* ohmd_ctx, int id, const char *serial_no,
 		/* Allocate an RGB debug frame, twice the width of the input */
 		sensor_ctx->debug_frame = ohmd_alloc(ohmd_ctx, 2 * 3 * sensor_ctx->stream.width * sensor_ctx->stream.height);
 	}
-
-	LOGV("Sensor %d - reading Calibration\n", id);
-	ret = rift_sensor_get_calibration(sensor_ctx, desc.idProduct);
-	if (ret < 0) {
-		LOGE("Failed to read Rift sensor calibration data");
-		goto fail;
-	}
-
-	sensor_ctx->bw = blobwatch_new(sensor_ctx->calib.is_cv1 ? BLOB_THRESHOLD_CV1 : BLOB_THRESHOLD_DK2, sensor_ctx->stream.width, sensor_ctx->stream.height);
-	sensor_ctx->cs = correspondence_search_new (&sensor_ctx->calib);
 
 	/* Start analysis threads */
 	sensor_ctx->sensor_lock = ohmd_create_mutex(ohmd_ctx);
@@ -977,6 +977,7 @@ rift_sensor_new(ohmd_context* ohmd_ctx, int id, const char *serial_no,
 				break;
 			}
 	}
+
 	LOGV("Sensor %d ready\n", id);
 
 	return sensor_ctx;
