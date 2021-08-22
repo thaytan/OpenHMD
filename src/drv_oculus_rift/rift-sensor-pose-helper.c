@@ -139,8 +139,7 @@ void rift_evaluate_pose_with_prior (rift_pose_metrics *score, posef *pose,
 	for (i = 0; i < num_leds; i++) {
 		vec3f *p = led_out_points + i;
 		
-		/* FIXME: Don't hard code the screen size here */
-		if (p->x < 0 || p->y < 0 || p->x > 1280 || p->y > 960)
+		if (p->x < 0 || p->y < 0 || p->x >= calib->width || p->y >= calib->height)
 		 continue; // Outside the visible screen space
 		
 		vec3f normal, position;
@@ -311,8 +310,7 @@ void rift_mark_matching_blobs (posef *pose,
 	for (i = 0; i < num_leds; i++) {
 		vec3f *p = led_out_points + i;
 
-		/* FIXME: Don't hard code the screen size here */
-		if (p->x < 0 || p->y < 0 || p->x > 1280 || p->y > 960)
+		if (p->x < 0 || p->y < 0 || p->x >= calib->width || p->y >= calib->height)
 		 continue; // Outside the visible screen space
 
 		vec3f normal, position;
