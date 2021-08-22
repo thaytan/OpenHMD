@@ -882,6 +882,9 @@ rift_sensor_new(ohmd_context* ohmd_ctx, int id, const char *serial_no,
 
 	sensor_ctx->long_analysis_busy = false;
 
+	sensor_ctx->sensor_lock = ohmd_create_mutex(ohmd_ctx);
+	sensor_ctx->new_frame_cond = ohmd_create_cond(ohmd_ctx);
+
 	printf ("Found Rift Sensor %d w/ Serial %s. Connecting to Radio address 0x%02x%02x%02x%02x%02x\n",
 		id, serial_no, radio_id[0], radio_id[1], radio_id[2], radio_id[3], radio_id[4]);
 
@@ -935,9 +938,6 @@ rift_sensor_new(ohmd_context* ohmd_ctx, int id, const char *serial_no,
 	}
 
 	/* Start analysis threads */
-	sensor_ctx->sensor_lock = ohmd_create_mutex(ohmd_ctx);
-	sensor_ctx->new_frame_cond = ohmd_create_cond(ohmd_ctx);
-
 	sensor_ctx->shutdown = false;
 	sensor_ctx->fast_analysis_thread = ohmd_create_thread (ohmd_ctx, fast_analysis_thread, sensor_ctx);
 	sensor_ctx->long_analysis_thread = ohmd_create_thread (ohmd_ctx, long_analysis_thread, sensor_ctx);
@@ -1005,11 +1005,17 @@ rift_sensor_free (rift_sensor_ctx *sensor_ctx)
 	ohmd_cond_broadcast(sensor_ctx->new_frame_cond);
 	ohmd_unlock_mutex(sensor_ctx->sensor_lock);
 
-	ohmd_destroy_thread(sensor_ctx->fast_analysis_thread);
-	ohmd_destroy_thread(sensor_ctx->long_analysis_thread);
+	if (sensor_ctx->fast_analysis_thread)
+		ohmd_destroy_thread(sensor_ctx->fast_analysis_thread);
 
-	ohmd_destroy_mutex(sensor_ctx->sensor_lock);
-	ohmd_destroy_cond(sensor_ctx->new_frame_cond);
+	if (sensor_ctx->long_analysis_thread)
+		ohmd_destroy_thread(sensor_ctx->long_analysis_thread);
+
+	if (sensor_ctx->sensor_lock)
+		ohmd_destroy_mutex(sensor_ctx->sensor_lock);
+
+	if (sensor_ctx->new_frame_cond)
+		ohmd_destroy_cond(sensor_ctx->new_frame_cond);
 
 	if (sensor_ctx->bw)
 		blobwatch_free (sensor_ctx->bw);
