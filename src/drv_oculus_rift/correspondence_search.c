@@ -421,7 +421,7 @@ check_led_against_model_subset (correspondence_search_t *cs, cs_model_info_t *mi
 
   if (valid) {
     for (i = 0; i < valid; i++) {
-			posef pose;
+      posef pose;
       vec3f checkpos, checkdir;
       float l;
 
@@ -433,7 +433,7 @@ check_led_against_model_subset (correspondence_search_t *cs, cs_model_info_t *mi
       pose.pos.z = Ts[i][2];
 
       if (pose.pos.z < 0.05 || pose.pos.z > 15) {
-          /* The object is unlikely to be < 5cm (50000µm) or > 15m from the camera */
+          /* The object is unlikely to be < 5cm or > 15m from the camera */
           continue;
       }
 
@@ -455,11 +455,18 @@ check_led_against_model_subset (correspondence_search_t *cs, cs_model_info_t *mi
       ovec3f_normalize_me(&checkpos);
 
       double facing_dot = ovec3f_get_dot (&checkpos, &checkdir);
-      if (facing_dot > 0) {
+
+      /* Require only that the anchor LED not be actively facing away from
+       * the camera (that it's at worst perpendicular). Controller LEDs
+       * can be visible at that angle */
+      if (facing_dot > 0.0) {
         // Anchor LED not facing the camera -> invalid pose
         continue;
       }
 
+      /* Calculate the image plane projection of the anchor
+       * LED position and check it's within 2.5mm of where it
+       * should be, to catch spurious failures in lambdatwist */
       vec3f tmp;
       ovec3f_multiply_scalar (&checkpos, 1.0/checkpos.z, &checkpos);
       ovec3f_subtract (&checkpos, &blob0, &tmp);

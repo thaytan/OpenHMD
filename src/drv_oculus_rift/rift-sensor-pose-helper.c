@@ -147,8 +147,10 @@ void rift_evaluate_pose_with_prior (rift_pose_metrics *score, posef *pose,
 		oquatf_get_rotated(&pose->orient, &leds[i].pos, &position);
 		ovec3f_add (&pose->pos, &position, &position);
 		
+		/* Convert the position to a unit vector for dot product comparison */
 		ovec3f_normalize_me (&position);
 		oquatf_get_rotated(&pose->orient, &leds[i].dir, &normal);
+
 		facing_dot = ovec3f_get_dot (&position, &normal);
 		
 #if 0
@@ -157,7 +159,10 @@ void rift_evaluate_pose_with_prior (rift_pose_metrics *score, posef *pose,
 			p->x, p->y, position.x, position.y, position.z);
 #endif
 
-		if (facing_dot < -0.25) {
+		/* The vector to the LED position points out from the camera
+		 * to the LED, but the normal points toward the camera, so
+		 * we need to compare against 180 - RIFT_LED_ANGLE here */
+		if (facing_dot < cos(DEG_TO_RAD(180.0 - RIFT_LED_ANGLE))) {
 			double led_radius = 4.0;
 			if (position.z > 0.0) {
 				led_radius = focal_length * led_radius_mm / position.z;

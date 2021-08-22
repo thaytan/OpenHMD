@@ -15,6 +15,9 @@
 
 #define RIFT_MAX_TRACKED_DEVICES 3
 
+/* Side-on angle at which LEDs become occluded */
+#define RIFT_LED_ANGLE 75
+
 typedef struct rift_tracker_exposure_info rift_tracker_exposure_info;
 typedef struct rift_tracked_device_exposure_info rift_tracked_device_exposure_info;
 typedef struct rift_sensor_camera_params rift_sensor_camera_params;
@@ -49,6 +52,7 @@ struct rift_tracked_device_s
 	int id;
 
 	rift_leds *leds;
+
 	led_search_model_t *led_search;
 };
 
@@ -63,5 +67,6 @@ struct rift_sensor_camera_params {
 	bool dist_fisheye;
 	double dist_coeffs[5];
 };
+
 
 #endif
