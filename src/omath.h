@@ -41,7 +41,7 @@ void ovec3f_subtract(const vec3f* a, const vec3f* b, vec3f* out);
 void ovec3f_add(const vec3f* a, const vec3f* b, vec3f* out);
 void ovec3f_inverse(vec3f *me);
 void ovec3f_multiply_scalar (const vec3f* a, const float s, vec3f* out);
-
+void ovec3f_multiply_mat3x3(const vec3f *a, const float m[3][3], vec3f *out);
 
 // quaternion
 

@@ -95,6 +95,13 @@ void ovec3f_multiply_scalar (const vec3f* a, const float s, vec3f* out)
 	out->z = a->z * s;
 }
 
+void ovec3f_multiply_mat3x3(const vec3f *a, const float m[3][3], vec3f *out)
+{
+	out->x = m[0][0] * a->x + m[0][1] * a->y + m[0][2] * a->z;
+	out->y = m[1][0] * a->x + m[1][1] * a->y + m[1][2] * a->z;
+	out->z = m[2][0] * a->x + m[2][1] * a->y + m[2][2] * a->z;
+}
+
 // quaternion
 
 void oquatf_init_axis(quatf* me, const vec3f* vec, float angle)
