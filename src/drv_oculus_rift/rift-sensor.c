@@ -179,17 +179,14 @@ static void tracker_process_blobs_fast(rift_sensor_ctx *ctx, rift_sensor_capture
 			ctx->id, dev->id, obj_world_pose.orient.x, obj_world_pose.orient.y, obj_world_pose.orient.z, obj_world_pose.orient.w,
 			obj_world_pose.pos.x, obj_world_pose.pos.y, obj_world_pose.pos.z);
 
-		/* If we have a camera pose, get the object's camera-relative pose by taking
-		 * our camera pose (camera->world) and applying inverted to the
-		 * the fusion pose (object->world) - which goes object->world->camera.
-		 * If there's no camera pose, things won't match and the correspondence search
-		 * will do a full search, so it doesn't matter what we feed as the initial pose */
-		if (ctx->have_camera_pose) {
-			oposef_apply_inverse(&obj_world_pose, &ctx->camera_pose, &obj_cam_pose);
+		/* If we don't have a camera pose yet, skip straight to correspondence
+		 * search */
+		if (!ctx->have_camera_pose) {
+			frame->need_long_analysis = true;
+			continue;
 		}
-		else {
-			obj_cam_pose = obj_world_pose;
-		}
+
+		oposef_apply_inverse(&obj_world_pose, &ctx->camera_pose, &obj_cam_pose);
 
 		LOGD ("Sensor %d Frame %d searching for matching pose for device %d, initial quat %f %f %f %f pos %f %f %f",
 			ctx->id, frame->id, dev->id,

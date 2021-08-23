@@ -174,22 +174,24 @@ void rift_debug_draw_frame (uint8_t *pixels, struct blobservation* bwobs,
 	int in_stride = frame->uvc.stride;
 	int out_stride = frame->uvc.width*3*2;
 
-	uint8_t *dest = pixels;
-	for (y = 0; y < height; y++) {
-		/* Expand to RGB and copy the source to the RHS, paint the
-		 * LHS black, and later draw only the pixels that were
-		 * detected as blobs */
-		uint8_t *d = dest;
-		memset (d, 0, width*3);
+	uint8_t *lhs_dest = pixels;
+	uint8_t *rhs_dest = pixels + width * 3;
 
-		d = dest + width * 3;
+	uint8_t *dest_line = lhs_dest;
+	for (y = 0; y < height; y++) {
+		/* Expand to RGB and copy the source to the LHS, paint the
+		 * RHS black, and later draw only the pixels that were
+		 * detected as blobs */
+
+		uint8_t *d = dest_line;
 		for (x = 0; x < width; x++) {
 			/* Expand GRAY8 to RGB */
 			d[0] = d[1] = d[2] = src[x];
 			d += 3;
 		}
+		memset (dest_line + width * 3, 0, width*3);
 
-		dest += out_stride;
+		dest_line += out_stride;
 		src += in_stride;
 	}
 
@@ -207,11 +209,11 @@ void rift_debug_draw_frame (uint8_t *pixels, struct blobservation* bwobs,
 			h = b->height;
 			clamp_rect (&start_x, &start_y, &w, &h, width, height);
 
-			/* Draw the original pixels in the LHS that are within blobs */
-			uint8_t *dest = pixels + start_y * out_stride;
+			/* Draw the original pixels in the RHS that are within blobs */
+			uint8_t *dest = rhs_dest + start_y * out_stride + start_x*3;
 			uint8_t *src = frame->uvc.data + start_y * in_stride;
 			for (y = 0; y < h; y++) {
-				uint8_t *d = dest + start_x*3;
+				uint8_t *d = dest;
 				for (x = start_x; x < start_x + w; x++) {
 					/* Expand GRAY8 to RGB */
 					d[0] = d[1] = d[2] = src[x];
@@ -227,16 +229,16 @@ void rift_debug_draw_frame (uint8_t *pixels, struct blobservation* bwobs,
 				int d = LED_OBJECT_ID (b->led_id);
 				assert (d < 3);
 
-				colour_rgb_rect (pixels + 3*width, width, out_stride, height, start_x,
+				colour_rgb_rect (rhs_dest, width, out_stride, height, start_x,
 					start_y, b->width, b->height, colours[d]);
 
 				/* Draw a dot at the weighted center */
-				draw_rgb_marker (pixels + 3*width, width, out_stride, height,
+				draw_rgb_marker (rhs_dest, width, out_stride, height,
 						round(b->x), round(b->y), 0, 0, colours[d]);
 			}
 			else {
 				/* Draw a dot at the weighted center in purple */
-				draw_rgb_marker (pixels + 3*width, width, out_stride, height,
+				draw_rgb_marker (rhs_dest, width, out_stride, height,
 						round(b->x), round(b->y), 0, 0, 0xFF00FF);
 			}
 		}
@@ -273,13 +275,14 @@ void rift_debug_draw_frame (uint8_t *pixels, struct blobservation* bwobs,
 				oquatf_get_rotated(&pose.orient, &leds[i].dir, &normal);
 				facing_dot = ovec3f_get_dot (&position, &normal);
 
-				if (facing_dot < -0.25) {
+				if (facing_dot < cos(DEG_TO_RAD(180.0 - RIFT_LED_ANGLE))) {
 					/* Camera facing */
-					draw_rgb_marker (pixels + 3*width, width, out_stride, height, x,
-						y, 6, 6, 0x008080);
+					draw_rgb_marker (lhs_dest, width, out_stride, height, x,
+						y, 3, 3, 0x008080);
 				} else {
-					draw_rgb_marker (pixels + 3*width, width, out_stride, height, x,
-						y, 4, 4, 0x404040);
+					/* Draw non-visible LEDs */
+					draw_rgb_marker (lhs_dest, width, out_stride, height, x,
+						y, 3, 3, 0x404040);
 				}
 			}
 
@@ -291,9 +294,9 @@ void rift_debug_draw_frame (uint8_t *pixels, struct blobservation* bwobs,
 				16 * dev->id, 0, 16, 16, colours[dev->id]);
 
 			/* Loop over the LED points a final time and draw markers
-			 * into the video over the top */
+			 * for the detected pose into the video over the top of the RHS */
 
-			/* Project HMD LEDs into the image again doh */
+			/* Project HMD LEDs using the extracted pose into the RHS */
 			pose = dev_state->final_cam_pose;
 			rift_project_points (dev->leds->points,
 					dev->leds->num_points, calib, &pose, led_out_points);
@@ -313,13 +316,15 @@ void rift_debug_draw_frame (uint8_t *pixels, struct blobservation* bwobs,
 				oquatf_get_rotated(&pose.orient, &leds[i].dir, &normal);
 				facing_dot = ovec3f_get_dot (&position, &normal);
 
-				if (facing_dot < -0.25) {
+				if (facing_dot < cos(DEG_TO_RAD(180.0 - RIFT_LED_ANGLE))) {
 					/* Camera facing */
-					draw_rgb_marker (pixels, width, out_stride, height, x,
-							y, 6, 6, colours[dev->id]);
+					draw_rgb_marker (rhs_dest, width, out_stride, height, x,
+							y, 3, 3, colours[dev->id]);
 				} else {
-					draw_rgb_marker (pixels, width, out_stride, height, x,
-							y, 4, 4, 0x202000);
+#if 0 /* Don't draw occluded LEDs for the extracted pose */
+					draw_rgb_marker (rhs_dest, width, out_stride, height, x,
+							y, 3, 3, 0x202000);
+#endif
 				}
 			}
 		}
