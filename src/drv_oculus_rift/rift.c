@@ -245,8 +245,8 @@ static void handle_tracker_sensor_msg(rift_hmd_t* priv, uint64_t local_ts, unsig
 	local_ts -= TICK_US_TO_NS(total_dt);
 
 	for(int i = 0; i < s->num_samples; i++){
-		vec3f gyro;
-		vec3f accel;
+		vec3f raw_gyro, gyro;
+		vec3f raw_accel, accel;
 
 		/* if the exposure timestamp is earlier than this sample, report it now */
 		if (!sent_exposure_update && TICK_DIFF(device_ts, s->exposure_timestamp) >= 0) { 
@@ -255,38 +255,21 @@ static void handle_tracker_sensor_msg(rift_hmd_t* priv, uint64_t local_ts, unsig
 			sent_exposure_update = true;
 		}
 
-		vec3f_from_rift_vec(s->samples[i].accel, &accel);
-		vec3f_from_rift_vec(s->samples[i].gyro, &gyro);
+		vec3f_from_rift_vec(s->samples[i].accel, &raw_accel);
+		vec3f_from_rift_vec(s->samples[i].gyro, &raw_gyro);
 
 		/* If the rift isn't applying calibration, we should */
 		if (!(priv->sensor_config.flags & RIFT_SCF_USE_CALIBRATION)) {
-				const float (*acc_calibration)[3] = priv->imu_calibration.accel_matrix;
-				const float (*gyro_calibration)[3] = priv->imu_calibration.gyro_matrix;
+				/* Apply the rotation matrix first, and then add the provided factory offsets */
+				ovec3f_multiply_mat3x3(&raw_gyro, priv->imu_calibration.gyro_matrix, &gyro);
+				ovec3f_add(&gyro, &priv->imu_calibration.gyro_offset, &gyro);
 
-				/* Apply correction offsets first */
-				ovec3f_subtract (&gyro, &priv->imu_calibration.gyro_offset, &gyro);
-				ovec3f_subtract (&accel, &priv->imu_calibration.accel_offset, &accel);
-
-				/* Then the 3x3 rotation matrix in row-major order */
-				accel.x = acc_calibration[0][0] * accel.x +
-						  acc_calibration[0][1] * accel.y +
-						  acc_calibration[0][2] * accel.z;
-				accel.y = acc_calibration[1][0] * accel.x +
-						  acc_calibration[1][1] * accel.y +
-						  acc_calibration[1][2] * accel.z;
-				accel.z = acc_calibration[2][0] * accel.x +
-						  acc_calibration[2][1] * accel.y +
-						  acc_calibration[2][2] * accel.z;
-
-				gyro.x = gyro_calibration[0][0] * gyro.x +
-						  gyro_calibration[0][1] * gyro.y +
-						  gyro_calibration[0][2] * gyro.z;
-				gyro.y = gyro_calibration[1][0] * gyro.x +
-						  gyro_calibration[1][1] * gyro.y +
-						  gyro_calibration[1][2] * gyro.z;
-				gyro.z = gyro_calibration[2][0] * gyro.x +
-						  gyro_calibration[2][1] * gyro.y +
-						  gyro_calibration[2][2] * gyro.z;
+				ovec3f_multiply_mat3x3(&raw_accel, priv->imu_calibration.accel_matrix, &accel);
+				ovec3f_add(&accel, &priv->imu_calibration.accel_offset, &accel);
+		}
+		else {
+				gyro = raw_gyro;
+				accel = raw_accel;
 		}
 
 		rift_tracked_device_imu_update(priv->tracked_dev, local_ts, device_ts, TICK_US_TO_SEC(dt), &gyro, &accel, &raw_mag);
