@@ -77,6 +77,8 @@ struct rift_tracker_pose_delay_slot {
 	/* rift_tracked_device_model_pose_update stores the observed poses here */
 	int n_pose_reports;
 	rift_tracker_pose_report pose_reports[MAX_SENSORS];
+	/* Number of reports we used from the supplied ones */
+	int n_used_reports;
 };
 
 /* Internal full tracked device struct */
@@ -698,35 +700,53 @@ void rift_tracked_device_model_pose_update(rift_tracked_device *dev_base, uint64
 				pos_error.x, pos_error.y, pos_error.z,
 				source);
 
-			/* If we have a strong match, update both position and orientation */
+			bool update_position = true;
 			bool update_orientation = false;
-			if (POSE_HAS_FLAGS(score, RIFT_POSE_MATCH_ORIENT)) {
-				update_orientation = true;
-				dev->last_observed_orient_ts = dev->device_time_ns;
-			}
-			else if (dev->device_time_ns - dev->last_observed_pose_ts < (POSE_LOST_ORIENT_THRESHOLD * 1000000UL)) {
-				LOGD("Forcing orientation observation");
-				update_orientation = true;
+
+			/* If this observation was based on a prior, but position didn't match and we already received a newer observation,
+			 * ignore it. */
+			if (dev_info->had_pose_lock && !POSE_HAS_FLAGS(score, RIFT_POSE_MATCH_POSITION) && dev->last_observed_pose_ts > frame_device_time_ns) {
+				update_position = false;
+				LOGI("Ignoring position observation with error %f %f %f (prior stddev was %f %f %f)\n",
+					pos_error.x, pos_error.y, pos_error.z,
+					dev_info->pos_error.x, dev_info->pos_error.y, dev_info->pos_error.z);
 			}
 
-			if (update_orientation) {
-				rift_kalman_6dof_pose_update(&dev->ukf_fusion, dev->device_time_ns, pose, slot->slot_id);
-			} else {
-				rift_kalman_6dof_position_update(&dev->ukf_fusion, dev->device_time_ns, &pose->pos, slot->slot_id);
-			}
+			if (update_position) {
+				/* If we have a strong match, update both position and orientation */
+				if (POSE_HAS_FLAGS(score, RIFT_POSE_MATCH_ORIENT)) {
+					update_orientation = true;
+					if ((dev->device_time_ns - dev->last_observed_pose_ts) > (POSE_LOST_ORIENT_THRESHOLD * 1000000UL)) {
+						LOGI("Matched orientation after %f sec", (dev->device_time_ns - dev->last_observed_pose_ts) / 1000000000.0);
+					}
+					dev->last_observed_orient_ts = dev->device_time_ns;
+				}
+				else if ((dev->device_time_ns - dev->last_observed_pose_ts) > (POSE_LOST_ORIENT_THRESHOLD * 1000000UL)) {
+					LOGI("Forcing orientation observation");
+					update_orientation = true;
+				}
 
-			dev->last_observed_pose_ts = dev->device_time_ns;
-			dev->last_observed_pose = *pose;
+				if (update_orientation) {
+					rift_kalman_6dof_pose_update(&dev->ukf_fusion, dev->device_time_ns, pose, slot->slot_id);
+				} else {
+					rift_kalman_6dof_position_update(&dev->ukf_fusion, dev->device_time_ns, &pose->pos, slot->slot_id);
+				}
+
+				dev->last_observed_pose_ts = dev->device_time_ns;
+				dev->last_observed_pose = *pose;
+			}
 
 			frame_fusion_slot = slot->slot_id;
 
 			if (slot->n_pose_reports < MAX_SENSORS) {
 				rift_tracker_pose_report *report = slot->pose_reports + slot->n_pose_reports;
 
-				report->report_used = true;
+				report->report_used = update_position;
 				report->pose = *pose;
 				report->score = *score;
 
+				if (update_position)
+					slot->n_used_reports++;
 				slot->n_pose_reports++;
 			}
 		}
@@ -874,7 +894,7 @@ reclaim_delay_slot(rift_tracked_device_priv *dev)
 
 		/* If a slot already received a pose observation, use that one */
 		/* FIXME: Check that the poses were integrated, and integrate them as-needed if not */
-		if (slot->valid && slot->n_pose_reports > 0)
+		if (slot->valid && slot->n_used_reports > 0)
 			return slot;
 	}
 
@@ -920,6 +940,7 @@ rift_tracked_device_on_new_exposure(rift_tracked_device_priv *dev, rift_tracked_
 		slot->valid = true;
 		slot->use_count = 0;
 		slot->n_pose_reports = 0;
+		slot->n_used_reports = 0;
 
 		dev_info->fusion_slot = slot->slot_id;
 
@@ -988,8 +1009,9 @@ rift_tracked_device_exposure_release_locked(rift_tracked_device_priv *dev, rift_
 			/* Tell the kalman filter the slot is invalid */
 			rift_kalman_6dof_release_delay_slot(&dev->ukf_fusion, slot->slot_id);
 			slot->valid = false;
-			LOGD ("Invalidating delay slot %d for dev %d, ts %llu with %d poses reported",
-				dev_info->fusion_slot, dev->base.id, (unsigned long long) dev_info->device_time_ns, slot->n_pose_reports);
+			LOGD ("Invalidating delay slot %d for dev %d, ts %llu with %d poses reported %d used",
+				dev_info->fusion_slot, dev->base.id, (unsigned long long) dev_info->device_time_ns,
+				slot->n_pose_reports, slot->n_used_reports);
 		}
 
 		/* Clear the slot from this device info so it doesn't get released a second time */
