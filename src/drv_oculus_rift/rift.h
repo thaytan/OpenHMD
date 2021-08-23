@@ -191,8 +191,12 @@ typedef struct {
 
 typedef struct {
 	vec3f imu_position;
-	float gyro_calibration[12];
-	float acc_calibration[12];
+
+	vec3f accel_offset;
+	vec3f gyro_offset;
+	float accel_matrix[3][3];
+	float gyro_matrix[3][3];
+
 	uint16_t joy_x_range_min;
 	uint16_t joy_x_range_max;
 	uint16_t joy_x_dead_min;

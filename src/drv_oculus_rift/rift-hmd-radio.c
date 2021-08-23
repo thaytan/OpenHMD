@@ -263,19 +263,25 @@ static int rift_touch_parse_calibration(char *json_in,
 	c->trigger_mid_range = nx_json_get (obj, "TriggerMidRange")->int_value;
 	c->trigger_max_range = nx_json_get (obj, "TriggerMaxRange")->int_value;
 
+	/* The calibration matrices are 12 values, a 3x3 rotation
+	 * matrix, then 4 factory calibrated offset values */
 	array = nx_json_get (obj, "GyroCalibration");
-	for (i = 0; i < 12; i++)
-		c->gyro_calibration[i] = nx_json_item (array, i)->dbl_value;
+	for (i = 0; i < 9; i++)
+		c->gyro_matrix[i/3][i%3] = nx_json_item (array, i)->dbl_value;
+	for (i = 0; i < 3; i++)
+		c->gyro_offset.arr[i] = nx_json_item (array, i + 9)->dbl_value;
+
+	array = nx_json_get (obj, "AccCalibration");
+	for (i = 0; i < 9; i++)
+		c->accel_matrix[i/3][i%3] = nx_json_item (array, i)->dbl_value;
+	for (i = 0; i < 3; i++)
+		c->accel_offset.arr[i] = nx_json_item (array, i + 9)->dbl_value;
 
 	c->middle_min_range = nx_json_get (obj, "MiddleMinRange")->int_value;
 	c->middle_mid_range = nx_json_get (obj, "MiddleMidRange")->int_value;
 	c->middle_max_range = nx_json_get (obj, "MiddleMaxRange")->int_value;
 
 	c->middle_flipped = nx_json_get (obj, "MiddleFlipped")->int_value;
-
-	array = nx_json_get (obj, "AccCalibration");
-	for (i = 0; i < 12; i++)
-		c->acc_calibration[i] = nx_json_item (array, i)->dbl_value;
 
 	array = nx_json_get (obj, "CapSenseMin");
 	for (i = 0; i < 8; i++)

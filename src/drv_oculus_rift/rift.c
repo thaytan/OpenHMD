@@ -311,19 +311,19 @@ static void dump_controller_calibration(rift_touch_controller_t *touch)
 
 	LOGI ("%s Controller IMU calibration  gyro_offset [ %f, %f, %f ]  accel_offset [ %f, %f, %f ]",
 		touch->base.id == 1 ? "Right" : "Left",
-		c->gyro_calibration[9], c->gyro_calibration[10], c->gyro_calibration[11],
-		c->acc_calibration[9], c->acc_calibration[10], c->acc_calibration[11]);
+		c->gyro_offset.x, c->gyro_offset.y, c->gyro_offset.z,
+		c->accel_offset.x, c->accel_offset.y, c->accel_offset.z);
 
 	LOGI("  gyro_calib = ");
 	for (i = 0; i < 3; i++) {
-		LOGI("  [ %8.3f, %8.3f, %8.3f ]", c->gyro_calibration[i*3+0],
-			c->gyro_calibration[i*3+1], c->gyro_calibration[i*3+2]);
+		LOGI("  [ %8.3f, %8.3f, %8.3f ]", c->gyro_matrix[i][0],
+			c->gyro_matrix[i][1], c->gyro_matrix[i][2]);
 	}
 
 	LOGI("  accel_calib = ");
 	for (i = 0; i < 3; i++) {
-		LOGI("  [ %8.3f, %8.3f, %8.3f ]", c->acc_calibration[i*3+0],
-			c->acc_calibration[i*3+1], c->acc_calibration[i*3+2]);
+		LOGI("  [ %8.3f, %8.3f, %8.3f ]", c->accel_matrix[i][0],
+			c->accel_matrix[i][1], c->accel_matrix[i][2]);
 	}
 }
 
@@ -376,51 +376,34 @@ static void handle_touch_controller_message(rift_hmd_t *hmd, uint64_t local_ts,
 	local_ts -= TICK_US_TO_NS(dt);
 
 	const double dt_s = 1e-6 * dt;
-	double a[3] = {
+	vec3f raw_accel = {{
 		OHMD_GRAVITY_EARTH / 2048 * msg->touch.accel[0],
 		OHMD_GRAVITY_EARTH / 2048 * msg->touch.accel[1],
 		OHMD_GRAVITY_EARTH / 2048 * msg->touch.accel[2],
-	};
+	}};
+
 	/* Gyro is MPU 6500, configured for 2000°/s,
 	 * The datasheet has 16.4 LSB/°/s, but I'm using
 	 * 32768 / 2000 = 16.384 here because that actually
 	 * yields a 2000°/s full range, then converting to
 	 * radians for the fusion. */
-	double g[3] = {
+	vec3f raw_gyro = {{
 		msg->touch.gyro[0] / (16.384 * 180.0) * M_PI,
 		msg->touch.gyro[1] / (16.384 * 180.0) * M_PI,
 		msg->touch.gyro[2] / (16.384 * 180.0) * M_PI,
-	};
+	}};
 	vec3f mag = {{0.0f, 0.0f, 0.0f}};
 	vec3f gyro;
 	vec3f accel;
 
 	/* Apply correction offsets first - bottom row of the
 	 * calibration 3x4 matrix */
-	int i;
-	for (i = 0; i < 3; i++) {
-		a[i] -= c->acc_calibration[9 + i];
-		g[i] -= c->gyro_calibration[9 + i];
-	}
+	ovec3f_subtract (&raw_gyro, &c->gyro_offset, &raw_gyro);
+	ovec3f_subtract (&raw_accel, &c->accel_offset, &raw_accel);
+
 	/* Then the 3x3 rotation matrix in row-major order */
-	accel.x = c->acc_calibration[0] * a[0] +
-			  c->acc_calibration[1] * a[1] +
-			  c->acc_calibration[2] * a[2];
-	accel.y = c->acc_calibration[3] * a[0] +
-			  c->acc_calibration[4] * a[1] +
-			  c->acc_calibration[5] * a[2];
-	accel.z = c->acc_calibration[6] * a[0] +
-			  c->acc_calibration[7] * a[1] +
-			  c->acc_calibration[8] * a[2];
-	gyro.x = c->gyro_calibration[0] * g[0] +
-			  c->gyro_calibration[1] * g[1] +
-			  c->gyro_calibration[2] * g[2];
-	gyro.y = c->gyro_calibration[3] * g[0] +
-			  c->gyro_calibration[4] * g[1] +
-			  c->gyro_calibration[5] * g[2];
-	gyro.z = c->gyro_calibration[6] * g[0] +
-			  c->gyro_calibration[7] * g[1] +
-			  c->gyro_calibration[8] * g[2];
+	ovec3f_multiply_mat3x3(&raw_gyro, c->gyro_matrix, &gyro);
+	ovec3f_multiply_mat3x3(&raw_accel, c->accel_matrix, &accel);
 
 	rift_tracked_device_imu_update(touch->tracked_dev, local_ts, device_ts, dt_s, &gyro, &accel, &mag);
 	touch->last_timestamp = msg->touch.timestamp;
