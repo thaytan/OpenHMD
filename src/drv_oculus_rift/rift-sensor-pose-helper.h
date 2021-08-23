@@ -52,7 +52,7 @@ void rift_evaluate_pose (rift_pose_metrics *score, posef *pose,
 	rift_rect_t *out_bounds);
 
 void rift_evaluate_pose_with_prior (rift_pose_metrics *score, posef *pose,
-	bool prior_must_match, posef *pose_prior, const vec3f *pos_variance, const vec3f *rot_variance,
+	bool prior_must_match, posef *pose_prior, const vec3f *pos_error_thresh, const vec3f *rot_error_thresh,
 	struct blob *blobs, int num_blobs,
 	int device_id, rift_led *leds, int num_leds,
 	rift_sensor_camera_params *calib,

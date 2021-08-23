@@ -60,7 +60,7 @@ static int find_best_matching_led (struct visible_led_info *led_points, int num_
 }
 
 static void
-check_pose_prior(rift_pose_metrics *score, posef *pose, posef *pose_prior, const vec3f *pos_variance, const vec3f *rot_variance)
+check_pose_prior(rift_pose_metrics *score, posef *pose, posef *pose_prior, const vec3f *pos_error_thresh, const vec3f *rot_error_thresh)
 {
 	quatf orient_diff;
 	int i;
@@ -73,29 +73,29 @@ check_pose_prior(rift_pose_metrics *score, posef *pose, posef *pose_prior, const
 	oquatf_normalize_me(&orient_diff);
 	oquatf_to_rotation(&orient_diff, &score->orient_error);
 
-	/* Check each component of position and rotation are within the passed variance and
+	/* Check each component of position and rotation are within the passed error bound and
 	 * clear any return flag that's not set */
-	if (pos_variance) {
-		score->match_flags |= ~RIFT_POSE_MATCH_POSITION;
+	if (pos_error_thresh) {
+		score->match_flags |= RIFT_POSE_MATCH_POSITION;
 
 		for (i = 0; i < 3; i++) {
-			if (score->pos_error.arr[i] * score->pos_error.arr[i] > pos_variance->arr[i])
+			if (fabs(score->pos_error.arr[i]) > pos_error_thresh->arr[i])
 				score->match_flags &= ~RIFT_POSE_MATCH_POSITION;
 		}
 	}
 
-	if (rot_variance) {
+	if (rot_error_thresh) {
 		score->match_flags |= RIFT_POSE_MATCH_ORIENT;
 
 		for (i = 0; i < 3; i++) {
-			if (score->orient_error.arr[i] * score->orient_error.arr[i] > rot_variance->arr[i])
+			if (fabs(score->orient_error.arr[i]) > rot_error_thresh->arr[i])
 				score->match_flags &= ~RIFT_POSE_MATCH_ORIENT;
 		}
 	}
 }
 
 void rift_evaluate_pose_with_prior (rift_pose_metrics *score, posef *pose,
-	bool prior_must_match, posef *pose_prior, const vec3f *pos_variance, const vec3f *rot_variance,
+	bool prior_must_match, posef *pose_prior, const vec3f *pos_error_thresh, const vec3f *rot_error_thresh,
 	struct blob *blobs, int num_blobs,
 	int device_id, rift_led *leds, int num_leds,
 	rift_sensor_camera_params *calib,
@@ -224,7 +224,11 @@ void rift_evaluate_pose_with_prior (rift_pose_metrics *score, posef *pose,
 
 	/* If we have a pose prior, calculate the rotation and translation error and match flags as needed */
 	if (pose_prior) {
-		check_pose_prior(score, pose, pose_prior, pos_variance, rot_variance);
+		/* We can't validate a prior without error bounds */
+		assert (pos_error_thresh != NULL);
+		assert (rot_error_thresh != NULL);
+
+		check_pose_prior(score, pose, pose_prior, pos_error_thresh, rot_error_thresh);
 	}
 
 	if (POSE_HAS_FLAGS(score, RIFT_POSE_MATCH_POSITION|RIFT_POSE_MATCH_ORIENT)) {
@@ -232,8 +236,8 @@ void rift_evaluate_pose_with_prior (rift_pose_metrics *score, posef *pose,
 		    (2 * score->visible_leds <= 3 * score->matched_blobs))) {
 #if 0
 				printf("Got good prior match within pos (%f, %f, %f) rot (%f, %f, %f)\n",
-						pos_variance->x, pos_variance->y, pos_variance->z,
-						rot_variance->x, rot_variance->y, rot_variance->z);
+						pos_error_thresh->x, pos_error_thresh->y, pos_error_thresh->z,
+						rot_error_thresh->x, rot_error_thresh->y, rot_error_thresh->z);
 #endif
 			score->match_flags |= RIFT_POSE_MATCH_GOOD;
 
