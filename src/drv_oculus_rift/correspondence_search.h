@@ -68,6 +68,8 @@ struct cs_model_info_s {
 
     /* Valid when CS_FLAG_HAVE_POSE_PRIOR is set */
     posef pose_prior;
+    vec3f *pos_error_thresh;
+    vec3f *rot_error_thresh;
 
     /* Used when CS_FLAG_MATCH_GRAVITY is set */
     vec3f gravity_vector;
@@ -99,6 +101,7 @@ bool correspondence_search_set_model (correspondence_search_t *cs, int model_id,
 void correspondence_search_free (correspondence_search_t *cs);
 
 bool correspondence_search_find_one_pose (correspondence_search_t *cs, int model_id, CorrespondenceSearchFlags search_flags, posef *pose,
+				vec3f *pos_error_thresh, vec3f *rot_error_thresh,
 				vec3f *gravity_vector, float gravity_tolerance_rad, rift_pose_metrics *score);
 bool correspondence_search_have_pose (correspondence_search_t *cs, int model_id, posef *pose, rift_pose_metrics *score);
 #endif

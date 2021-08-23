@@ -287,7 +287,7 @@ correspondence_search_project_pose (correspondence_search_t *cs, led_search_mode
    * blob points */
   if (mi->search_flags & CS_FLAG_HAVE_POSE_PRIOR) {
     rift_evaluate_pose_with_prior (&score, pose,
-        false, &mi->pose_prior, NULL, NULL,
+        false, &mi->pose_prior, mi->pos_error_thresh, mi->rot_error_thresh,
         cs->blobs, cs->num_points,
         mi->id, leds->points, leds->num_points, cs->calib, NULL);
   }
@@ -780,7 +780,8 @@ correspondence_search_have_pose (correspondence_search_t *cs, int model_id, pose
 }
 
 bool correspondence_search_find_one_pose (correspondence_search_t *cs, int model_id, CorrespondenceSearchFlags search_flags, posef *pose,
-				vec3f *gravity_vector, float gravity_tolerance_rad, rift_pose_metrics *score)
+	vec3f *pos_error_thresh, vec3f *rot_error_thresh,
+	vec3f *gravity_vector, float gravity_tolerance_rad, rift_pose_metrics *score)
 {
   int i;
 
@@ -799,8 +800,14 @@ bool correspondence_search_find_one_pose (correspondence_search_t *cs, int model
     mi->search_flags = search_flags;
     mi->match_flags = 0;
 
-    if (search_flags & CS_FLAG_HAVE_POSE_PRIOR)
+    if (search_flags & CS_FLAG_HAVE_POSE_PRIOR) {
+      assert(pos_error_thresh != NULL);
+      assert(rot_error_thresh != NULL);
+
       mi->pose_prior = *pose;
+      mi->pos_error_thresh = pos_error_thresh;
+      mi->rot_error_thresh = rot_error_thresh;
+    }
 
     if (search_flags & CS_FLAG_MATCH_GRAVITY) {
 	    quatf pose_gravity_twist;

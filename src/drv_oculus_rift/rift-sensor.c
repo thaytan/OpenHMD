@@ -340,6 +340,7 @@ static void tracker_process_blobs_long(rift_sensor_ctx *ctx, rift_sensor_capture
 			}
 
 			if (correspondence_search_find_one_pose (ctx->cs, dev->id, search_flags, &obj_cam_pose,
+					&exp_dev_info->pos_error, &exp_dev_info->rot_error,
 					&gravity_vector, pose_tolerance, &dev_state->score)) {
 				if (do_aligned_checks) {
 					LOGD("Got aligned pose %f, %f, %f, %f for device %d with tolerance %f!",
