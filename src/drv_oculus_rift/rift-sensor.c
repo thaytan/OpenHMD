@@ -152,7 +152,9 @@ struct rift_sensor_ctx_s
 };
 
 static void update_device_and_blobs (rift_sensor_ctx *ctx, rift_sensor_capture_frame *frame,
-	rift_tracked_device *dev, rift_sensor_frame_device_state *dev_state, posef *obj_cam_pose);
+	rift_tracked_device *dev, rift_sensor_frame_device_state *dev_state,
+	rift_tracked_device_exposure_info *exp_dev_info,
+	posef *obj_cam_pose);
 
 static void tracker_process_blobs_fast(rift_sensor_ctx *ctx, rift_sensor_capture_frame *frame)
 {
@@ -236,7 +238,7 @@ static void tracker_process_blobs_fast(rift_sensor_ctx *ctx, rift_sensor_capture
 
 		/* If we got at least a good match, pass it on for consideration by the fusion */
 		if (POSE_HAS_FLAGS(&dev_state->score, RIFT_POSE_MATCH_GOOD)) {
-			update_device_and_blobs (ctx, frame, dev, dev_state, &obj_cam_pose);
+			update_device_and_blobs (ctx, frame, dev, dev_state, exp_dev_info, &obj_cam_pose);
 		} else {
 			/* Didn't find this device - send the frame for long analysis */
 			LOGD("Sensor %d frame %d needs full search for device %d - sending to long analysis thread",
@@ -363,7 +365,7 @@ static void tracker_process_blobs_long(rift_sensor_ctx *ctx, rift_sensor_capture
 			if (POSE_HAS_FLAGS(&dev_state->score, RIFT_POSE_MATCH_GOOD)) {
 				had_strong_matches |= POSE_HAS_FLAGS(&dev_state->score, RIFT_POSE_MATCH_STRONG);
 
-				update_device_and_blobs (ctx, frame, dev, dev_state, &obj_cam_pose);
+				update_device_and_blobs (ctx, frame, dev, dev_state, exp_dev_info, &obj_cam_pose);
 				frame->long_analysis_found_new_blobs = true;
 
 				/* Transfer these blob labels to the blobwatch object */
@@ -604,7 +606,9 @@ static void new_frame_start_cb(struct rift_sensor_uvc_stream *stream, uint64_t s
 
 static void
 update_device_and_blobs (rift_sensor_ctx *sensor_ctx, rift_sensor_capture_frame *frame,
-	rift_tracked_device *dev, rift_sensor_frame_device_state *dev_state, posef *obj_cam_pose)
+	rift_tracked_device *dev, rift_sensor_frame_device_state *dev_state,
+	rift_tracked_device_exposure_info *exp_dev_info,
+	posef *obj_cam_pose)
 {
 	blobservation* bwobs = frame->bwobs;
 
@@ -631,8 +635,7 @@ update_device_and_blobs (rift_sensor_ctx *sensor_ctx, rift_sensor_capture_frame 
 	rift_mark_matching_blobs (obj_cam_pose, bwobs->blobs, bwobs->num_blobs, dev->id,
 			dev->leds->points, dev->leds->num_points, &sensor_ctx->calib);
 
-	dev_state->final_cam_pose.pos = obj_cam_pose->pos;
-	dev_state->final_cam_pose.orient = obj_cam_pose->orient;
+	dev_state->final_cam_pose = *obj_cam_pose;
 
 	LOGD ("sensor %d PnP for device %d yielded quat %f %f %f %f pos %f %f %f",
 		sensor_ctx->id, dev->id, dev_state->final_cam_pose.orient.x, dev_state->final_cam_pose.orient.y, dev_state->final_cam_pose.orient.z, dev_state->final_cam_pose.orient.w,
@@ -642,14 +645,27 @@ update_device_and_blobs (rift_sensor_ctx *sensor_ctx, rift_sensor_capture_frame 
 	posef *capture_pose = &dev_state->capture_world_pose;
 	rift_pose_metrics *score = &dev_state->score;
 
-	rift_evaluate_pose (score, &pose,
-		frame->bwobs->blobs, frame->bwobs->num_blobs,
-		dev->id, dev->leds->points, dev->leds->num_points,
-    &sensor_ctx->calib, NULL);
+	if (sensor_ctx->have_camera_pose) {
+		posef obj_cam_pose_prior;
+
+		oposef_apply_inverse(&dev_state->capture_world_pose, &sensor_ctx->camera_pose, &obj_cam_pose_prior);
+
+		rift_evaluate_pose_with_prior(&dev_state->score, &pose,
+			false, &obj_cam_pose_prior, &exp_dev_info->pos_error, &exp_dev_info->rot_error,
+			frame->bwobs->blobs, frame->bwobs->num_blobs,
+			dev->id, dev->leds->points, dev->leds->num_points,
+			&sensor_ctx->calib, NULL);
+	} else {
+		rift_evaluate_pose (score, &pose,
+			frame->bwobs->blobs, frame->bwobs->num_blobs,
+			dev->id, dev->leds->points, dev->leds->num_points,
+			&sensor_ctx->calib, NULL);
+	}
 
 	if (POSE_HAS_FLAGS(score, RIFT_POSE_MATCH_GOOD)) {
-		LOGV("Sensor %d Found good pose match - %u LEDs matched %u visible ones\n",
-			sensor_ctx->id, score->matched_blobs, score->visible_leds);
+		LOGV("Sensor %d Found %s pose match - %u LEDs matched %u visible ones flags %x\n",
+			sensor_ctx->id, POSE_HAS_FLAGS(score, RIFT_POSE_MATCH_STRONG) ? "strong" : "good",
+			score->matched_blobs, score->visible_leds, score->match_flags);
 
 		if (sensor_ctx->have_camera_pose) {
 			uint64_t now = ohmd_monotonic_get(sensor_ctx->ohmd_ctx);
