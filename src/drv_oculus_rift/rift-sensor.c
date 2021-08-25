@@ -684,9 +684,9 @@ update_device_and_blobs (rift_sensor_ctx *sensor_ctx, rift_sensor_capture_frame 
 				pose.pos.x, pose.pos.y, pose.pos.z);
 
 
-			rift_tracked_device_model_pose_update(dev, now, frame->uvc.start_ts, &frame->exposure_info, score, &pose, sensor_ctx->serial_no);
+			if (rift_tracked_device_model_pose_update(dev, now, frame->uvc.start_ts, &frame->exposure_info, score, &pose, sensor_ctx->serial_no))
+				dev_state->found_device_pose = true;
 			rift_tracked_device_frame_release(dev, &frame->exposure_info);
-			dev_state->found_device_pose = true;
 
 #if 0
 		  rift_tracked_device_get_model_pose(dev, (double) (frame->uvc.start_ts) / 1000000000.0, &pose, NULL);
