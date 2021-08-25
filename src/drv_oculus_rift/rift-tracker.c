@@ -665,12 +665,14 @@ bool rift_tracked_device_get_latest_exposure_info_pose (rift_tracked_device *dev
 	return res;
 }
 
-void rift_tracked_device_model_pose_update(rift_tracked_device *dev_base, uint64_t local_ts, uint64_t frame_start_local_ts, rift_tracker_exposure_info *exposure_info, rift_pose_metrics *score, posef *pose, const char *source)
+bool rift_tracked_device_model_pose_update(rift_tracked_device *dev_base, uint64_t local_ts, uint64_t frame_start_local_ts, rift_tracker_exposure_info *exposure_info, rift_pose_metrics *score, posef *pose, const char *source)
 {
 	rift_tracked_device_priv *dev = (rift_tracked_device_priv *) (dev_base);
 	uint64_t frame_device_time_ns = 0;
 	rift_tracker_pose_delay_slot *slot = NULL;
 	int frame_fusion_slot = -1;
+	bool update_position = false;
+	bool update_orientation = false;
 
 	ohmd_lock_mutex (dev->device_lock);
 
@@ -705,9 +707,6 @@ void rift_tracked_device_model_pose_update(rift_tracked_device *dev_base, uint64
 				pos_error.x, pos_error.y, pos_error.z,
 				source);
 
-			bool update_position = true;
-			bool update_orientation = false;
-
 			/* If this observation was based on a prior, but position didn't match and we already received a newer observation,
 			 * ignore it. */
 			if (dev_info->had_pose_lock && !POSE_HAS_FLAGS(score, RIFT_POSE_MATCH_POSITION) && dev->last_observed_pose_ts > frame_device_time_ns) {
@@ -715,6 +714,9 @@ void rift_tracked_device_model_pose_update(rift_tracked_device *dev_base, uint64
 				LOGI("Ignoring position observation with error %f %f %f (prior stddev was %f %f %f)\n",
 					pos_error.x, pos_error.y, pos_error.z,
 					dev_info->pos_error.x, dev_info->pos_error.y, dev_info->pos_error.z);
+			}
+			else {
+				update_position = true;
 			}
 
 			if (update_position) {
@@ -773,6 +775,8 @@ void rift_tracked_device_model_pose_update(rift_tracked_device *dev_base, uint64
 			pose->pos.x, pose->pos.y, pose->pos.z,
 			pose->orient.x, pose->orient.y, pose->orient.z, pose->orient.w);
 	ohmd_unlock_mutex (dev->device_lock);
+
+	return update_position;
 }
 
 /* Called with the device lock held */
