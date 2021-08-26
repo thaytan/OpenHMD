@@ -43,7 +43,7 @@
 
 /* Length of time (milliseconds) we can ignore orientation from cameras before
  * we force an update */
-#define POSE_LOST_ORIENT_THRESHOLD 2000
+#define POSE_LOST_ORIENT_THRESHOLD 100
 
 typedef struct rift_tracked_device_priv rift_tracked_device_priv;
 typedef struct rift_tracker_pose_report rift_tracker_pose_report;
@@ -719,20 +719,27 @@ bool rift_tracked_device_model_pose_update(rift_tracked_device *dev_base, uint64
 				update_position = true;
 			}
 
-			if (update_position) {
-				/* If we have a strong match, update both position and orientation */
-				if (POSE_HAS_FLAGS(score, RIFT_POSE_MATCH_ORIENT)) {
-					update_orientation = true;
-					if ((dev->device_time_ns - dev->last_observed_pose_ts) > (POSE_LOST_ORIENT_THRESHOLD * 1000000UL)) {
-						LOGI("Matched orientation after %f sec", (dev->device_time_ns - dev->last_observed_pose_ts) / 1000000000.0);
-					}
+			/* If we have a strong match, update both position and orientation */
+			if (POSE_HAS_FLAGS(score, RIFT_POSE_MATCH_ORIENT)) {
+				update_orientation = true;
+				if ((dev->device_time_ns - dev->last_observed_pose_ts) > (POSE_LOST_ORIENT_THRESHOLD * 1000000UL)) {
+					LOGI("Matched orientation after %f sec", (dev->device_time_ns - dev->last_observed_pose_ts) / 1000000000.0);
+				}
+				/* Only update the time if we're actually going to apply this matched orientation below */
+				if (update_position)
 					dev->last_observed_orient_ts = dev->device_time_ns;
-				}
-				else if ((dev->device_time_ns - dev->last_observed_pose_ts) > (POSE_LOST_ORIENT_THRESHOLD * 1000000UL)) {
-					LOGI("Forcing orientation observation");
-					update_orientation = true;
-				}
+			}
+			else if ((dev->device_time_ns - dev->last_observed_pose_ts) > (POSE_LOST_ORIENT_THRESHOLD * 1000000UL)) {
+				LOGI("Forcing orientation observation");
+				update_orientation = true;
+				/* Don't update the orientation match time here - only do that on an actual match */
+			}
+			else {
+				/* FIXME: If roll and pitch are acceptable (the gravity vector matched), but yaw is out of spec, we could perhaps do a
+				 * yaw-only update for this device and see if that brings it into matching orientation */
+			}
 
+			if (update_position) {
 				if (update_orientation) {
 					rift_kalman_6dof_pose_update(&dev->ukf_fusion, dev->device_time_ns, pose, slot->slot_id);
 				} else {
@@ -776,7 +783,7 @@ bool rift_tracked_device_model_pose_update(rift_tracked_device *dev_base, uint64
 			pose->orient.x, pose->orient.y, pose->orient.z, pose->orient.w);
 	ohmd_unlock_mutex (dev->device_lock);
 
-	return update_position;
+	return update_position || update_orientation;
 }
 
 /* Called with the device lock held */
