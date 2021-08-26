@@ -58,7 +58,7 @@ void exp_filter3d_run(exp_filter3d *f, uint64_t ts, const vec3f *in_y, vec3f *ou
 	}
 
 	dt = (double)(ts - f->prev_ts) / 1000000000.0;
-  f->prev_ts = ts;
+	f->prev_ts = ts;
 
 	ovec3f_subtract(in_y, &f->prev_y, &dy);
 	alpha_d = calc_smoothing_alpha(f->fc_min_d, dt);
@@ -89,6 +89,22 @@ void exp_filter_pose_set_params(exp_filter_pose *f, double fc_min, double beta, 
 	exp_filter3d_set_params(&f->orient_filter, fc_min, beta, fc_min_d);
 }
 
+static void
+adjust_exp_map_proximity(vec3f *prev_map, vec3f *cur_map)
+{
+	vec3f delta;
+
+	ovec3f_subtract(prev_map, cur_map, &delta);
+	float delta_mag = ovec3f_get_length(&delta);
+
+	if (delta_mag < -M_PI || delta_mag > M_PI) {
+		float prev_map_mag = ovec3f_get_length(prev_map);
+		int n_pi_region = ceil(delta_mag / (2*M_PI));
+
+		ovec3f_multiply_scalar(prev_map, 1 - (n_pi_region * 2 * M_PI) / prev_map_mag, prev_map);
+	}
+}
+
 void exp_filter_pose_run(exp_filter_pose *f, uint64_t ts, const posef *in_pose, posef *out_pose)
 {
 	vec3f in_exp_map, out_exp_map;
@@ -97,6 +113,11 @@ void exp_filter_pose_run(exp_filter_pose *f, uint64_t ts, const posef *in_pose, 
 	exp_filter3d_run(&f->pos_filter, ts, &in_pose->pos, &out_pose->pos);
 
 	oquatf_to_rotation(&in_pose->orient, &in_exp_map);
+	/* Avoid singularity wrap-around glitches by adjusting
+	 * the old filter observation to keep it within +/- pi of the new */
+	if (f->orient_filter.have_prev_y) {
+		adjust_exp_map_proximity(&f->orient_filter.prev_y, &in_exp_map);
+	}
 	exp_filter3d_run(&f->orient_filter, ts, &in_exp_map, &out_exp_map);
 	oquatf_from_rotation(&out_pose->orient, &out_exp_map);
 }
