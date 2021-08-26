@@ -63,6 +63,8 @@ void rift_mark_matching_blobs (posef *pose,
 	int device_id, rift_led *leds, int num_leds,
 	rift_sensor_camera_params *calib);
 
+void rift_clear_blob_labels (struct blob *blobs, int num_blobs, int device_id);
+
 bool rift_score_is_better_pose (rift_pose_metrics *old_score, rift_pose_metrics *new_score);
 
 #endif

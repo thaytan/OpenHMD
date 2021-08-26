@@ -615,13 +615,7 @@ update_device_and_blobs (rift_sensor_ctx *sensor_ctx, rift_sensor_capture_frame 
 	/* Clear existing blob IDs for this device, then
 	 * back project LED ids into blobs if we find them and the dot product
 	 * shows them pointing strongly to the camera */
-	for (int index = 0; index < bwobs->num_blobs; index++) {
-		struct blob *b = bwobs->blobs + index;
-		if (LED_OBJECT_ID (b->led_id) == dev->id) {
-			b->prev_led_id = b->led_id;
-			b->led_id = LED_INVALID_ID;
-		}
-	}
+	rift_clear_blob_labels (bwobs->blobs, bwobs->num_blobs, dev->id);
 
 	rift_mark_matching_blobs (obj_cam_pose, bwobs->blobs, bwobs->num_blobs, dev->id,
 			dev->leds->points, dev->leds->num_points, &sensor_ctx->calib);
@@ -686,6 +680,9 @@ update_device_and_blobs (rift_sensor_ctx *sensor_ctx, rift_sensor_capture_frame 
 
 			if (rift_tracked_device_model_pose_update(dev, now, frame->uvc.start_ts, &frame->exposure_info, score, &pose, sensor_ctx->serial_no))
 				dev_state->found_device_pose = true;
+			else /* FIXME: Only do this after a few failures? */
+				rift_clear_blob_labels (bwobs->blobs, bwobs->num_blobs, dev->id);
+
 			rift_tracked_device_frame_release(dev, &frame->exposure_info);
 
 #if 0
@@ -752,6 +749,7 @@ update_device_and_blobs (rift_sensor_ctx *sensor_ctx, rift_sensor_capture_frame 
 	else {
 		LOGV("Sensor %d Failed pose match - only %u LEDs matched %u visible ones",
 			sensor_ctx->id, score->matched_blobs, score->visible_leds);
+		rift_clear_blob_labels (bwobs->blobs, bwobs->num_blobs, dev->id);
 	}
 }
 

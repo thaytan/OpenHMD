@@ -284,6 +284,21 @@ void rift_evaluate_pose (rift_pose_metrics *score, posef *pose,
 	    blobs, num_blobs, device_id, leds, num_leds, calib, out_bounds);
 }
 
+void rift_clear_blob_labels (struct blob *blobs, int num_blobs, int device_id)
+{
+	int i;
+	for (i = 0; i < num_blobs; i++) {
+		struct blob *b = blobs + i;
+		int led_object_id = LED_OBJECT_ID (b->led_id);
+
+		/* Skip blobs which already have an ID not belonging to this device */
+		if (led_object_id == device_id) {
+			b->prev_led_id = b->led_id;
+			b->led_id = LED_INVALID_ID;
+		}
+	}
+}
+
 void rift_mark_matching_blobs (posef *pose,
 	struct blob *blobs, int num_blobs,
 	int device_id, rift_led *leds, int num_leds,
