@@ -368,10 +368,12 @@ static void tracker_process_blobs_long(rift_sensor_ctx *ctx, rift_sensor_capture
 				update_device_and_blobs (ctx, frame, dev, dev_state, exp_dev_info, &obj_cam_pose);
 				frame->long_analysis_found_new_blobs = true;
 
-				/* Transfer these blob labels to the blobwatch object */
-				ohmd_lock_mutex(ctx->sensor_lock);
-				blobwatch_update_labels (ctx->bw, frame->bwobs, dev->id);
-				ohmd_unlock_mutex(ctx->sensor_lock);
+				/* If those pose was accepted by the tracker, transfer these blob labels to the blobwatch object */
+				if (dev_state->found_device_pose) {
+					ohmd_lock_mutex(ctx->sensor_lock);
+					blobwatch_update_labels (ctx->bw, frame->bwobs, dev->id);
+					ohmd_unlock_mutex(ctx->sensor_lock);
+				}
 			}
 		}
 	}
