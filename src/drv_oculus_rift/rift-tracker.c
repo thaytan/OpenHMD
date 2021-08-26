@@ -597,11 +597,6 @@ void rift_tracked_device_get_view_pose(rift_tracked_device *dev_base, posef *pos
 		}
 
 		exp_filter_pose_run(&dev->pose_output_filter, dev->device_time_ns, &device_pose, &dev->reported_pose);
-
-		/* FIXME: The exponential filter doesn't work right for quats. It glitches near the +/- pi boundary.
-		 * Disable orientation filtering for now, since it's already much more stable than position anyway. */
-		dev->reported_pose.orient = device_pose.orient;
-
 		dev->last_reported_pose = dev->device_time_ns;
 	}
 
