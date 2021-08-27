@@ -149,6 +149,7 @@ void ohmd_set_universal_distortion_k(ohmd_device_properties* props, float a, flo
 void ohmd_set_universal_aberration_k(ohmd_device_properties* props, float r, float g, float b);
 
 const char *ohmd_get_config_dir(ohmd_context *ctx);
+int ohmd_set_config(ohmd_context *ctx, const char *key, char *buf, unsigned long buf_len);
 int ohmd_get_config(ohmd_context *ctx, const char *key, char **out_buf, unsigned long *out_len);
 
 // drivers

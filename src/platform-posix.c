@@ -18,11 +18,13 @@
 
 #include <time.h>
 #include <sys/time.h>
+#include <sys/stat.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <pthread.h>
 #include <string.h>
 #include <errno.h>
+#include <assert.h>
 
 #include "platform.h"
 #include "openhmdi.h"
@@ -275,6 +277,69 @@ int ohmd_read_file(const char* filename, char **out_buf, unsigned long *out_len)
 fail:
 	fclose(f);
 	return ret;
+}
+
+int ohmd_ensure_path(const char* pathname)
+{
+	int ret;
+	struct stat sb;
+	char pathbuf[OHMD_STR_SIZE+1];
+	char *separator, *cur;
+
+	/* Path must be at least 2 chars */
+	assert (strlen(pathname) > 1);
+
+	/* Check if the path exists */
+	ret = stat(pathname, &sb);
+	if (ret < 0 && errno != ENOENT)
+		return errno;
+	if (ret == 0) {
+		if (!S_ISDIR(sb.st_mode)) {
+			return errno;
+		}
+		return 0; /* Success. It already exists and is a dir */
+	}
+
+	/* Recursively create all components of a path name */
+	strncpy(pathbuf, pathname, OHMD_STR_SIZE);
+	cur = pathbuf + 1;
+	while ((separator = strstr(cur, "/")) != NULL) {
+		*separator = '\0'; /* Shorten the string to just the path so far */
+
+		/* Check if the path exists */
+		ret = stat(pathbuf, &sb);
+		if (ret != 0) {
+			if (errno != ENOENT)
+				return errno;
+			/* This path doesn't exist, create it */
+			if ((ret = mkdir(pathbuf, 0777)) != 0)
+				return ret;
+		} else if (!S_ISDIR(sb.st_mode)) {
+			return ENOTDIR;
+		}
+
+		/* Replace the separator and advance to the next */
+		*separator = '/';
+		cur = separator + 1;
+	}
+
+	/* Create the final path component */
+	return mkdir(pathname, 0777);
+}
+
+int ohmd_write_file(const char* filename, char *buf, unsigned long buf_len)
+{
+	FILE* f = fopen(filename, "w");
+
+	if (f == NULL)
+		return errno;
+
+	if (fwrite(buf, 1, buf_len, f) != 1) {
+		if (ferror(f))
+			return errno;
+	}
+
+	return fclose(f);
 }
 
 const char *ohmd_get_config_dir(ohmd_context *ctx)

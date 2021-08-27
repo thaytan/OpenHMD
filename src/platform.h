@@ -36,7 +36,9 @@ void ohmd_cond_broadcast(ohmd_cond* cond);
 ohmd_thread* ohmd_create_thread(ohmd_context* ctx, unsigned int (*routine)(void* arg), void* arg);
 void ohmd_destroy_thread(ohmd_thread* thread);
 
+int ohmd_ensure_path(const char* pathname);
 int ohmd_read_file(const char* filename, char **out_buf, unsigned long *out_len);
+int ohmd_write_file(const char* filename, char *buf, unsigned long buf_len);
 
 /* String functions */
 

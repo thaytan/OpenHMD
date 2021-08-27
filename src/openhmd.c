@@ -635,6 +635,32 @@ int ohmd_get_config(ohmd_context *ctx, const char *key, char **out_buf, unsigned
   return ohmd_read_file (filename, out_buf, out_len);
 }
 
+int ohmd_set_config(ohmd_context *ctx, const char *key, char *buf, unsigned long buf_len)
+{
+	char filename[OHMD_STR_SIZE];
+	const char *config_path = ohmd_get_config_dir(ctx);
+	int ret;
+
+	/* Make sure the config path exists first */
+	if ((ret = ohmd_ensure_path(config_path)) < 0) {
+		ohmd_set_error (ctx, "Could not create config directory");
+		return ret;
+	}
+
+	/* TODO: Check that the key is a valid filename */
+	if (snprintf (filename, OHMD_STR_SIZE, "%s/%s", config_path, key) >= OHMD_STR_SIZE) {
+		ohmd_set_error (ctx, "Could not read config file");
+		return -1;
+	}
+
+	if ((ret = ohmd_write_file (filename, buf, buf_len)) < 0) {
+		ohmd_set_error (ctx, "Could not create config directory");
+		return ret;
+	}
+
+	return ret;
+}
+
 uint64_t ohmd_monotonic_per_sec(ohmd_context* ctx)
 {
 	return ctx->monotonic_ticks_per_sec;
