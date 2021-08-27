@@ -330,7 +330,7 @@ static void handle_touch_controller_message(rift_hmd_t *hmd, uint64_t local_ts,
 
 	if (!touch->have_calibration) {
 		/* We need calibration data to do any more */
-		if (rift_touch_get_calibration (&hmd->radio, touch->device_num,
+		if (rift_touch_get_calibration (hmd->ctx, &hmd->radio, touch->device_num,
 				&touch->calibration) < 0)
 			return;
 

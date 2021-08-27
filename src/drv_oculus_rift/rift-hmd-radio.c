@@ -67,7 +67,7 @@ static int rift_radio_read_flash(rift_hmd_radio_state *radio, uint8_t device_typ
 	int cmd_size;
 
 	if (!radio->command_result_pending) {
-		LOGV("Reading FW calibration block for controller %d at offset %u\n", device_type, offset);
+		LOGV("Reading FW calibration block for controller %d at offset %u", device_type, offset);
 		cmd_size = encode_radio_data_read_cmd(buffer, offset, length);
 		if ((ret = send_feature_report(radio->handle, buffer, cmd_size)) < 0)
 			goto done;
@@ -110,7 +110,7 @@ static int rift_radio_write_complete(rift_hmd_radio_state *radio)
 }
 
 static int rift_radio_write(rift_hmd_radio_state *radio, uint8_t cmd_byte1, uint8_t cmd_byte2, uint8_t device_type,
-          unsigned char *buf, int length)
+	unsigned char *buf, int length)
 {
 	int ret;
 
@@ -346,11 +346,24 @@ fail:
 	return -1;
 }
 
-int rift_touch_get_calibration(rift_hmd_radio_state *radio, int device_id,
-		rift_touch_calibration *calibration)
+static void
+make_calibration_hash_key(rift_hmd_radio_state *radio, char *config_block_key)
 {
-	uint8_t hash[16];
-	uint16_t length;
+	char hash_hex[64], *cur;
+	int i;
+
+	for (i = 0, cur = hash_hex; i < 16; i++) {
+		sprintf(cur, "%02x", radio->calibration_hash[i]);
+		cur += 2;
+	}
+	snprintf(config_block_key, 255, "rift-touch-config-%s.bin", hash_hex);
+	config_block_key[255] = '0';
+}
+
+int rift_touch_get_calibration(ohmd_context* ctx, rift_hmd_radio_state *radio,
+	int device_id, rift_touch_calibration *calibration)
+{
+	unsigned long length;
 	char *json = NULL;
 	int ret = -1;
 
@@ -368,7 +381,7 @@ int rift_touch_get_calibration(rift_hmd_radio_state *radio, int device_id,
 	if (radio->cur_read_cmd == RIFT_RADIO_CMD_NONE ||
 	    radio->cur_read_cmd == RIFT_FW_READ_CMD_CALIBRATION_HASH) {
 		/* If the controller isn't on yet, we might fail to read the calibration data */
-		ret = rift_radio_read_calibration_hash(radio, device_id, hash);
+		ret = rift_radio_read_calibration_hash(radio, device_id, radio->calibration_hash);
 		if (ret < 0) {
 			if (ret != -EINPROGRESS) {
 				LOGV ("Failed to read calibration hash from device %d", device_id);
@@ -378,15 +391,42 @@ int rift_touch_get_calibration(rift_hmd_radio_state *radio, int device_id,
 		radio->cur_read_cmd = RIFT_RADIO_CMD_NONE;
 	}
 
-	/* TODO: We need a persistent store for the calibration data to
-	 * save time - we only need to re-read the calibration data from the
-	 * device if the hash changes. */
-	ret = rift_radio_read_calibration(radio, device_id, &json, &length);
-	if (ret < 0)
-		return ret;
+	/* Use the calibration hash to try and read the block from our
+	 * config cache */
+	bool had_config_cache = false;
+	if (radio->cur_read_cmd == RIFT_RADIO_CMD_NONE) {
+		char config_block_key[256];
+		make_calibration_hash_key(radio, config_block_key);
+		if (ohmd_get_config(ctx, config_block_key, &json, &length) == 0) {
+			LOGD("Loaded cached touch controller calibration file %s", config_block_key);
+			had_config_cache = true;
+		}
+	}
+
+	if (radio->cur_read_cmd == RIFT_FW_READ_CMD_CALIBRATION_HASH || !had_config_cache) {
+		uint16_t short_len;
+		ret = rift_radio_read_calibration(radio, device_id, &json, &short_len);
+		if (ret < 0)
+			return ret;
+		length = (unsigned long) short_len;
+	}
 
 	if (rift_touch_parse_calibration(json, calibration) < 0)
 		return ret;
+
+	if (had_config_cache) {
+		free(json);
+	} else {
+		char config_block_key[256];
+		make_calibration_hash_key(radio, config_block_key);
+
+		/* Store the freshly read config block.
+		 * We don't need to free on this branch - our json block is in the radio read store */
+		LOGD("Storing touch controller calibration cache file %s", config_block_key);
+		ret = ohmd_set_config(ctx, config_block_key, json, length);
+		if (ret < 0)
+			return ret;
+	}
 
 	char control_name[20];
 	snprintf (control_name, 20, "Controller %u", device_id);

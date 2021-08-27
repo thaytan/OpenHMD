@@ -31,11 +31,14 @@ struct rift_hmd_radio_state {
 	uint32_t read_data_offset; /* current read offset */
 	uint32_t read_data_size;   /* Amount of data in the read block */
 	unsigned char *read_block;
+
+	uint8_t calibration_hash[16];
 };
 
 void rift_hmd_radio_init(rift_hmd_radio_state *radio, hid_device *handle);
 void rift_hmd_radio_clear(rift_hmd_radio_state *radio);
-int rift_touch_get_calibration(rift_hmd_radio_state *radio,
+int rift_touch_get_calibration(ohmd_context* ctx,
+		rift_hmd_radio_state *radio,
 		int device_id,
 		rift_touch_calibration *calibration);
 void rift_touch_clear_calibration(rift_touch_calibration *calibration);
