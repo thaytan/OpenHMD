@@ -10,12 +10,13 @@
 
 typedef struct ohmd_pw_video_stream_s ohmd_pw_video_stream;
 typedef struct ohmd_pw_debug_stream_s ohmd_pw_debug_stream;
-typedef enum ohmd_pw_video_format ohmd_pw_video_format;
 
 enum ohmd_pw_video_format {
   OHMD_PW_VIDEO_FORMAT_GRAY8,
   OHMD_PW_VIDEO_FORMAT_RGB,
 };
+
+typedef enum ohmd_pw_video_format ohmd_pw_video_format;
 
 #ifdef HAVE_PIPEWIRE
 ohmd_pw_video_stream *ohmd_pw_video_stream_new (const char *stream_id, const char *stream_role, ohmd_pw_video_format format,
