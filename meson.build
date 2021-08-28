@@ -94,6 +94,8 @@ if have_pipewire
 	sources += [ 'src/drv_oculus_rift/ohmd-pipewire.c' ]
 endif
 
+publish_c_args = []
+
 if get_option('default_library') == 'shared'
 	if host_machine.system() == 'windows'
 		c_args += '-DDLL_EXPORT'
