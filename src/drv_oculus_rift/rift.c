@@ -1230,8 +1230,8 @@ static rift_hmd_t *open_hmd(ohmd_driver* driver, ohmd_device_desc* desc)
 			ohmd_set_universal_aberration_k(&(hmd_dev->base.properties), 0.985, 1.000, 1.015);
 			break;
 		case REV_CV1:
-			ohmd_set_universal_distortion_k(&(hmd_dev->base.properties), 0.098, .324, -0.241, 0.819);
-			ohmd_set_universal_aberration_k(&(hmd_dev->base.properties), 0.9952420, 1.0, 1.0008074);
+			ohmd_set_universal_distortion_k(&(hmd_dev->base.properties), 0.269, -0.25, 0.178, 0.803);
+			ohmd_set_universal_aberration_k(&(hmd_dev->base.properties), 0.9992107, 1.0, 1.0120361);
 			/* CV1 reports IPD, but not lens center, at least not anywhere I could find, so use the manually measured value of 0.054 */
 			priv->display_info.lens_separation = 0.054;
 			hmd_dev->base.properties.lens_sep = priv->display_info.lens_separation;
