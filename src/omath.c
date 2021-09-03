@@ -169,6 +169,18 @@ void oquatf_get_rotated(const quatf* me, const vec3f* vec, vec3f* out_vec)
 	out_vec->z = me->w * q.z + me->z * q.w + me->x * q.y - me->y * q.x;
 }
 
+void oquatf_get_rotated_abs(const quatf* me, const vec3f* vec, vec3f* out_vec)
+{
+	quatf q = {{vec->x * me->w + vec->z * me->y - vec->y * me->z,
+	            vec->y * me->w + vec->x * me->z - vec->z * me->x,
+	            vec->z * me->w + vec->y * me->x - vec->x * me->y,
+	            vec->x * me->x + vec->y * me->y + vec->z * me->z}};
+
+	out_vec->x = fabs(me->w * q.x + me->x * q.w + me->y * q.z - me->z * q.y);
+	out_vec->y = fabs(me->w * q.y + me->y * q.w + me->z * q.x - me->x * q.z);
+	out_vec->z = fabs(me->w * q.z + me->z * q.w + me->x * q.y - me->y * q.x);
+}
+
 /* Map a rotation parameterisation to a quaternion */
 void oquatf_from_rotation(quatf *me, const vec3f *rot)
 {
