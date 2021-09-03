@@ -744,7 +744,9 @@ update_device_and_blobs (rift_sensor_ctx *sensor_ctx, rift_sensor_capture_frame 
 			sensor_ctx->have_camera_pose = true;
 		}
 		else if (dev->id == 0) {
-			LOGD("Sensor %d No camera pose yet - gravity error is %f degrees\n", sensor_ctx->id, RAD_TO_DEG(dev_state->gravity_error_rad));
+			LOGD("Sensor %d No camera pose yet - gravity error is %f degrees rot_error (%f, %f, %f)",
+			    sensor_ctx->id, RAD_TO_DEG(dev_state->gravity_error_rad),
+			    exp_dev_info->rot_error.x, exp_dev_info->rot_error.y, exp_dev_info->rot_error.z);
 		}
 
 	}
@@ -792,7 +794,7 @@ static void frame_captured_cb(rift_sensor_uvc_stream *stream, rift_sensor_uvc_fr
 		dev_state->capture_world_pose = exp_dev_info->capture_pose;
 
 		/* Compute gravity error from XZ error range */
-		dev_state->gravity_error_rad = sqrtf(rot_error->x * rot_error->x + rot_error->z * rot_error->z);
+		dev_state->gravity_error_rad = OHMD_MAX(rot_error->x, rot_error->z);
 
 		/* Mark the score as un-evaluated to start */
 		dev_state->score.match_flags = 0;
