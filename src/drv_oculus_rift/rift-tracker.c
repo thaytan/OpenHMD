@@ -101,6 +101,7 @@ struct rift_tracked_device_priv {
 
 	/* The pose of the IMU relative to the LED model space */
 	posef fusion_from_model;
+	posef model_from_fusion;
 
 	uint32_t last_device_ts;
 	uint64_t device_time_ns;
@@ -186,6 +187,9 @@ rift_tracker_add_device (rift_tracker_ctx *ctx, int device_id, posef *imu_pose, 
 
 	/* Compute the IMU->model transform by composing imu->device->model */
 	oposef_apply(imu_pose, model_pose, &next_dev->fusion_from_model);
+	/* And the inverse fusion->model conversion */
+	next_dev->model_from_fusion = next_dev->fusion_from_model;
+	oposef_inverse(&next_dev->model_from_fusion);
 
 	next_dev->debug_metadata = ohmd_pw_debug_stream_new (device_name, "Rift Device");
 	next_dev->base.leds = leds;
@@ -628,7 +632,7 @@ void rift_tracked_device_get_view_pose(rift_tracked_device *dev_base, posef *pos
 
 static rift_tracker_pose_delay_slot *get_matching_delay_slot(rift_tracked_device_priv *dev, rift_tracked_device_exposure_info *dev_info);
 
-/* Retrieve the latest pose estimate from a delay slot into the exposure info.
+/* Retrieve the latest model pose estimate from a delay slot into the exposure info.
  * Because we can receive pose updates and new IMU data between frame capture and
  * when we go to do a visual search, and those can improve the estimate of the
  * pose estimate we had when the exposure happened */
@@ -645,9 +649,16 @@ bool rift_tracked_device_get_latest_exposure_info_pose (rift_tracked_device *dev
 
 	slot = get_matching_delay_slot(dev, dev_info);
 	if (slot != NULL) {
-			rift_kalman_6dof_get_delay_slot_pose_at(&dev->ukf_fusion, dev_info->device_time_ns, slot->slot_id, &dev_info->capture_pose,
-							NULL, NULL, NULL, &dev_info->pos_error, &dev_info->rot_error);
-			res = true;
+		posef imu_global_pose;
+		vec3f global_pos_error, global_rot_error;
+
+		rift_kalman_6dof_get_delay_slot_pose_at(&dev->ukf_fusion, dev_info->device_time_ns, slot->slot_id, &imu_global_pose,
+						NULL, NULL, NULL, &global_pos_error, &global_rot_error);
+
+		oposef_apply(&dev->model_from_fusion, &imu_global_pose, &dev_info->capture_pose);
+		oquatf_get_rotated_abs(&dev->model_from_fusion.orient, &global_pos_error, &dev_info->pos_error);
+		oquatf_get_rotated_abs(&dev->model_from_fusion.orient, &global_rot_error, &dev_info->rot_error);
+		res = true;
 	}
 	else {
 		/* If we failed to get the pose, it means the delay slot was overridden,
@@ -784,21 +795,18 @@ bool rift_tracked_device_model_pose_update(rift_tracked_device *dev_base, uint64
 /* Called with the device lock held */
 void rift_tracked_device_get_model_pose_locked(rift_tracked_device_priv *dev, double ts, posef *pose, vec3f *pos_error, vec3f *rot_error)
 {
-	posef imu_global_pose, model_pose, model_from_fusion;
+	posef imu_global_pose, model_pose;
 	vec3f global_pos_error, global_rot_error;
 
 	rift_kalman_6dof_get_pose_at(&dev->ukf_fusion, dev->device_time_ns, &imu_global_pose, NULL, NULL, NULL, &global_pos_error, &global_rot_error);
 
-	/* Take the world->IMU pose and apply to the inverse model->IMU pose
-	 * to get the world->IMU->model pose */
-	model_from_fusion = dev->fusion_from_model;
-	oposef_inverse(&model_from_fusion);
-	oposef_apply(&model_from_fusion, &imu_global_pose, &model_pose);
+	/* Apply the pose conversion from IMU->model */
+	oposef_apply(&dev->model_from_fusion, &imu_global_pose, &model_pose);
 
 	if (pos_error)
-		oquatf_get_rotated(&imu_global_pose.orient, &global_pos_error, pos_error);
+		oquatf_get_rotated_abs(&dev->model_from_fusion.orient, &global_pos_error, pos_error);
 	if (rot_error)
-		oquatf_get_rotated(&imu_global_pose.orient, &global_rot_error, rot_error);
+		oquatf_get_rotated_abs(&dev->model_from_fusion.orient, &global_rot_error, rot_error);
 
 	dev->model_pose.orient = model_pose.orient;
 	if (dev->device_time_ns - dev->last_observed_pose_ts < (POSE_LOST_THRESHOLD * 1000000UL)) {
