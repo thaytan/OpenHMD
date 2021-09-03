@@ -671,7 +671,8 @@ bool rift_tracked_device_get_latest_exposure_info_pose (rift_tracked_device *dev
 	return res;
 }
 
-bool rift_tracked_device_model_pose_update(rift_tracked_device *dev_base, uint64_t local_ts, uint64_t frame_start_local_ts, rift_tracker_exposure_info *exposure_info, rift_pose_metrics *score, posef *pose, const char *source)
+bool rift_tracked_device_model_pose_update(rift_tracked_device *dev_base, uint64_t local_ts, uint64_t frame_start_local_ts, rift_tracker_exposure_info *exposure_info,
+    rift_pose_metrics *score, posef *model_pose, const char *source)
 {
 	rift_tracked_device_priv *dev = (rift_tracked_device_priv *) (dev_base);
 	uint64_t frame_device_time_ns = 0;
@@ -679,12 +680,13 @@ bool rift_tracked_device_model_pose_update(rift_tracked_device *dev_base, uint64
 	int frame_fusion_slot = -1;
 	bool update_position = false;
 	bool update_orientation = false;
+	posef imu_pose;
 
 	ohmd_lock_mutex (dev->device_lock);
 
-	/* Apply the model->device pose on top of the passed model->global pose,
-	 * to get the global device pose, then apply the imu->device pose */
-	oposef_apply(&dev->fusion_from_model, pose, pose);
+	/* Apply the fusion->model pose on top of the passed model->global pose,
+	 * to get the global IMU pose */
+	oposef_apply(&dev->fusion_from_model, model_pose, &imu_pose);
 
 	rift_tracked_device_send_imu_debug(dev);
 
@@ -698,18 +700,18 @@ bool rift_tracked_device_model_pose_update(rift_tracked_device *dev_base, uint64
 			quatf orient_diff;
 			vec3f pos_error, rot_error;
 
-			ovec3f_subtract(&pose->pos, &dev_info->capture_pose.pos, &pos_error);
+			ovec3f_subtract(&model_pose->pos, &dev_info->capture_pose.pos, &pos_error);
 
-			oquatf_diff(&pose->orient, &dev_info->capture_pose.orient, &orient_diff);
+			oquatf_diff(&model_pose->orient, &dev_info->capture_pose.orient, &orient_diff);
 			oquatf_normalize_me(&orient_diff);
 			oquatf_to_rotation(&orient_diff, &rot_error);
 
 			LOGD ("Got pose update for delay slot %d for dev %d, ts %llu (delay %f) orient %f %f %f %f diff %f %f %f pos %f %f %f diff %f %f %f from %s\n",
 				slot->slot_id, dev->base.id,
 				(unsigned long long) frame_device_time_ns, (double) (dev->device_time_ns - frame_device_time_ns) / 1000000000.0,
-				pose->orient.x, pose->orient.y, pose->orient.z, pose->orient.w,
+				model_pose->orient.x, model_pose->orient.y, model_pose->orient.z, model_pose->orient.w,
 				rot_error.x, rot_error.y, rot_error.z,
-				pose->pos.x, pose->pos.y, pose->pos.z,
+				model_pose->pos.x, model_pose->pos.y, model_pose->pos.z,
 				pos_error.x, pos_error.y, pos_error.z,
 				source);
 
@@ -747,13 +749,13 @@ bool rift_tracked_device_model_pose_update(rift_tracked_device *dev_base, uint64
 
 			if (update_position) {
 				if (update_orientation) {
-					rift_kalman_6dof_pose_update(&dev->ukf_fusion, dev->device_time_ns, pose, slot->slot_id);
+					rift_kalman_6dof_pose_update(&dev->ukf_fusion, dev->device_time_ns, &imu_pose, slot->slot_id);
 				} else {
-					rift_kalman_6dof_position_update(&dev->ukf_fusion, dev->device_time_ns, &pose->pos, slot->slot_id);
+					rift_kalman_6dof_position_update(&dev->ukf_fusion, dev->device_time_ns, &imu_pose.pos, slot->slot_id);
 				}
 
 				dev->last_observed_pose_ts = dev->device_time_ns;
-				dev->last_observed_pose = *pose;
+				dev->last_observed_pose = imu_pose;
 			}
 
 			frame_fusion_slot = slot->slot_id;
@@ -762,7 +764,7 @@ bool rift_tracked_device_model_pose_update(rift_tracked_device *dev_base, uint64
 				rift_tracker_pose_report *report = slot->pose_reports + slot->n_pose_reports;
 
 				report->report_used = update_position;
-				report->pose = *pose;
+				report->pose = imu_pose;
 				report->score = *score;
 
 				if (update_position)
@@ -785,8 +787,8 @@ bool rift_tracked_device_model_pose_update(rift_tracked_device *dev_base, uint64
 			exposure_info->count,
 			(unsigned long long) frame_device_time_ns, frame_fusion_slot,
 			source,
-			pose->pos.x, pose->pos.y, pose->pos.z,
-			pose->orient.x, pose->orient.y, pose->orient.z, pose->orient.w);
+			model_pose->pos.x, model_pose->pos.y, model_pose->pos.z,
+			model_pose->orient.x, model_pose->orient.y, model_pose->orient.z, model_pose->orient.w);
 	ohmd_unlock_mutex (dev->device_lock);
 
 	return update_position || update_orientation;
