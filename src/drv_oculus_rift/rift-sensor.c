@@ -54,7 +54,7 @@ struct rift_sensor_ctx_s
 {
 	ohmd_context* ohmd_ctx;
 	int id;
-	char serial_no[32];
+	char serial_no[RIFT_SENSOR_SERIAL_LEN+1];
 
 	rift_tracker_ctx *tracker;
 

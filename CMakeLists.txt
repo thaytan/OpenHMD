@@ -76,6 +76,7 @@ if(OPENHMD_DRIVER_OCULUS_RIFT)
 	${CMAKE_CURRENT_LIST_DIR}/src/drv_oculus_rift/rift-sensor-blobwatch.c
 	${CMAKE_CURRENT_LIST_DIR}/src/drv_oculus_rift/rift-sensor-opencv.cpp
 	${CMAKE_CURRENT_LIST_DIR}/src/drv_oculus_rift/rift-tracker.c
+	${CMAKE_CURRENT_LIST_DIR}/src/drv_oculus_rift/rift-tracker-config.c
 	${CMAKE_CURRENT_LIST_DIR}/src/drv_oculus_rift/rift-kalman-6dof.c
 	${CMAKE_CURRENT_LIST_DIR}/src/drv_oculus_rift/sensor/esp570.c
 	${CMAKE_CURRENT_LIST_DIR}/src/drv_oculus_rift/sensor/esp770u.c

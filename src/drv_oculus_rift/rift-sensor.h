@@ -15,6 +15,8 @@
 #ifndef __RIFT_SENSOR_H__
 #define __RIFT_SENSOR_H__
 
+#define RIFT_SENSOR_SERIAL_LEN 32
+
 typedef struct rift_sensor_ctx_s rift_sensor_ctx;
 typedef struct rift_sensor_frame_device_state rift_sensor_frame_device_state;
 typedef struct rift_sensor_analysis_frame rift_sensor_analysis_frame;

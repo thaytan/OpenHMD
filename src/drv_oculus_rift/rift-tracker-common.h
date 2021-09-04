@@ -13,6 +13,7 @@
 #ifndef __RIFT_TRACKER_COMMON_H__
 #define __RIFT_TRACKER_COMMON_H__
 
+#define RIFT_MAX_SENSORS 4
 #define RIFT_MAX_TRACKED_DEVICES 3
 
 /* Side-on angle at which LEDs become occluded */

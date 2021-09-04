@@ -20,6 +20,7 @@
 
 #include "../exponential-filter.h"
 #include "rift-tracker.h"
+#include "rift-tracker-config.h"
 #include "rift-sensor.h"
 #include "rift-sensor-usb.h"
 
@@ -32,8 +33,6 @@
 #include "ohmd-pipewire.h"
 
 #define ASSERT_MSG(_v, label, ...) if(!(_v)){ fprintf(stderr, __VA_ARGS__); goto label; }
-
-#define MAX_SENSORS 4
 
 /* Number of IMU observations we accumulate before output */
 #define RIFT_MAX_PENDING_IMU_OBSERVATIONS 1000
@@ -91,7 +90,7 @@ struct rift_tracker_pose_delay_slot {
 
 	/* rift_tracked_device_model_pose_update stores the observed poses here */
 	int n_pose_reports;
-	rift_tracker_pose_report pose_reports[MAX_SENSORS];
+	rift_tracker_pose_report pose_reports[RIFT_MAX_SENSORS];
 	/* Number of reports we used from the supplied ones */
 	int n_used_reports;
 };
@@ -161,7 +160,9 @@ struct rift_tracker_ctx_s
 	int exposure_history_size;
 	rift_tracker_exposure_info exposure_history[NUM_EXPOSURE_HISTORY];
 
-	rift_sensor_ctx *sensors[MAX_SENSORS];
+	rift_tracker_config config;
+
+	rift_sensor_ctx *sensors[RIFT_MAX_SENSORS];
 	uint8_t n_sensors;
 
 	rift_tracked_device_priv devices[RIFT_MAX_TRACKED_DEVICES];
@@ -281,6 +282,9 @@ rift_tracker_new (ohmd_context* ohmd_ctx,
 	tracker_ctx->ohmd_ctx = ohmd_ctx;
 	tracker_ctx->tracker_lock = ohmd_create_mutex(ohmd_ctx);
 
+	rift_tracker_config_init(&tracker_ctx->config);
+	rift_tracker_config_load(ohmd_ctx, &tracker_ctx->config);
+
 	for (i = 0; i < RIFT_MAX_TRACKED_DEVICES; i++) {
 		rift_tracked_device_priv *dev = tracker_ctx->devices + i;
 		dev->index = i;
@@ -300,7 +304,7 @@ rift_tracker_new (ohmd_context* ohmd_ctx,
 	for (i = 0; devs[i]; ++i) {
 		struct libusb_device_descriptor desc;
 		libusb_device_handle *usb_devh;
-		unsigned char serial[33];
+		unsigned char serial[RIFT_SENSOR_SERIAL_LEN+1];
 
 		ret = libusb_get_device_descriptor(devs[i], &desc);
 		if (ret < 0)
@@ -315,7 +319,7 @@ rift_tracker_new (ohmd_context* ohmd_ctx,
 		}
 
 		sprintf ((char *) serial, "UNKNOWN");
-		serial[32] = '\0';
+		serial[RIFT_SENSOR_SERIAL_LEN] = '\0';
 
 		if (desc.iSerialNumber) {
 			ret = libusb_get_string_descriptor_ascii(usb_devh, desc.iSerialNumber, serial, 32);
@@ -338,8 +342,8 @@ rift_tracker_new (ohmd_context* ohmd_ctx,
 
 		tracker_ctx->sensors[tracker_ctx->n_sensors] = sensor_ctx;
 		tracker_ctx->n_sensors++;
-		if (tracker_ctx->n_sensors == MAX_SENSORS) {
-			LOGI("Found the maximum number of supported sensors: %d.\n", MAX_SENSORS);
+		if (tracker_ctx->n_sensors == RIFT_MAX_SENSORS) {
+			LOGI("Found the maximum number of supported sensors: %d.\n", RIFT_MAX_SENSORS);
 			break;
 		}
 	}
@@ -812,7 +816,7 @@ bool rift_tracked_device_model_pose_update(rift_tracked_device *dev_base, uint64
 
 		frame_fusion_slot = slot->slot_id;
 
-		if (slot->n_pose_reports < MAX_SENSORS) {
+		if (slot->n_pose_reports < RIFT_MAX_SENSORS) {
 			rift_tracker_pose_report *report = slot->pose_reports + slot->n_pose_reports;
 
 			report->report_used = update_position;
