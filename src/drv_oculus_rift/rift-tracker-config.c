@@ -58,7 +58,7 @@ static bool json_read_quat(const nx_json *nxj, const char *key, quatf *out)
 
 void rift_tracker_config_load(ohmd_context *ctx, rift_tracker_config *config)
 {
-	const nx_json* nxj, *obj, *array;
+	const nx_json* nxj, *item, *array;
 	unsigned long length;
 	char *json = NULL;
 	int i;
@@ -75,6 +75,10 @@ void rift_tracker_config_load(ohmd_context *ctx, rift_tracker_config *config)
 	if (!json_read_vec3(nxj, "room-center-offset", &config->room_center_offset))
 		goto fail_parse;
 
+	item = nx_json_get(nxj, "room-yaw-offset");
+	if (item->type == NX_JSON_DOUBLE || item->type == NX_JSON_INTEGER)
+		config->room_yaw_offset = item->dbl_value;
+
 	array = nx_json_get(nxj, "sensors");
 	if (array->type != NX_JSON_ARRAY)
 		goto fail_parse;
@@ -84,21 +88,21 @@ void rift_tracker_config_load(ohmd_context *ctx, rift_tracker_config *config)
 		rift_tracker_sensor_config *sensor = config->sensors + i;
 		const nx_json *serial;
 
-		obj = nx_json_item(array, i);
-		if (obj->type != NX_JSON_OBJECT)
+		item = nx_json_item(array, i);
+		if (item->type != NX_JSON_OBJECT)
 			break;
 
 		/* Serial number */
-		serial = nx_json_get(obj, "serial");
+		serial = nx_json_get(item, "serial");
 		if (serial->type != NX_JSON_STRING)
 			goto fail_parse;
 		strncpy(sensor->serial_no, serial->text_value, RIFT_SENSOR_SERIAL_LEN);
 		sensor->serial_no[RIFT_SENSOR_SERIAL_LEN] = '\0';
 
 		/* Pose */
-		if (!json_read_vec3(obj, "pos", &sensor->pose.pos))
+		if (!json_read_vec3(item, "pos", &sensor->pose.pos))
 			goto fail_parse;
-		if (!json_read_quat(obj, "orient", &sensor->pose.orient))
+		if (!json_read_quat(item, "orient", &sensor->pose.orient))
 			goto fail_parse;
 	}
 	config->n_sensors = i;
@@ -147,6 +151,9 @@ void rift_tracker_config_save(ohmd_context *ctx, rift_tracker_config *config)
 	    config->room_center_offset.x, config->room_center_offset.y, config->room_center_offset.z))
 		goto fail_serialise;
 
+	if (!rift_tracker_config_printf(&cur, end, "  \"room-yaw-offset\": %f,\n", config->room_yaw_offset))
+		goto fail_serialise;
+
 	if (!rift_tracker_config_printf(&cur, end, "  \"sensors\": [\n"))
 		goto fail_serialise;
 
@@ -188,9 +195,12 @@ fail_serialise:
 }
 
 void
-rift_tracker_config_get_center_offset(rift_tracker_config *config, vec3f *room_center_offset)
+rift_tracker_config_get_room_pose_offset(rift_tracker_config *config, posef *room_pose_offset)
 {
-	*room_center_offset = config->room_center_offset;
+	vec3f up = {{ 0.0, 1.0, 0.0 }};
+
+	room_pose_offset->pos = config->room_center_offset;
+	oquatf_init_axis(&room_pose_offset->orient, &up, config->room_yaw_offset);
 }
 
 void
