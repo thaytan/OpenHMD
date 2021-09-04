@@ -26,6 +26,7 @@ struct rift_pose_finder {
 
 	/* Updated from fast_analysis_thread */
 	bool have_camera_pose;
+	bool camera_pose_changed;
 	posef camera_pose;
 	vec3f cam_gravity_vector;
 

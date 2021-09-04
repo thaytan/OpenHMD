@@ -34,5 +34,6 @@ void rift_tracker_config_init(rift_tracker_config *config);
 void rift_tracker_config_load(ohmd_context *ctx, rift_tracker_config *config);
 void rift_tracker_config_save(ohmd_context *ctx, rift_tracker_config *config);
 
+void rift_tracker_config_set_sensor_pose(rift_tracker_config *config, const char *serial_no, posef *pose);
 #endif
 

@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: BSL-1.0
  */
 
+#include <assert.h>
 #include <string.h>
 #include <stdlib.h>
 #include <stdarg.h>
@@ -184,4 +185,32 @@ void rift_tracker_config_save(ohmd_context *ctx, rift_tracker_config *config)
 
 fail_serialise:
 	LOGE("Failed to serialise room config data for output");
+}
+
+void
+rift_tracker_config_set_sensor_pose(rift_tracker_config *config, const char *serial_no, posef *pose)
+{
+	int i;
+	rift_tracker_sensor_config *sensor_cfg = NULL;
+
+	assert(config->n_sensors <= RIFT_MAX_SENSORS);
+	for (i = 0; i < config->n_sensors; i++) {
+		rift_tracker_sensor_config *cur = config->sensors + i;
+		if (strcmp(cur->serial_no, serial_no) == 0) {
+			sensor_cfg = cur;
+			break;
+		}
+	}
+
+	if (sensor_cfg == NULL) {
+		assert(config->n_sensors < RIFT_MAX_SENSORS);
+
+		sensor_cfg = config->sensors + config->n_sensors;
+		config->n_sensors++;
+
+		strcpy(sensor_cfg->serial_no, serial_no);
+	}
+
+	sensor_cfg->pose = *pose;
+	config->modified = true;
 }

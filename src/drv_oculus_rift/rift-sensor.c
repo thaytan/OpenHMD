@@ -17,6 +17,8 @@
 #include "rift-sensor.h"
 #include "rift-sensor-pose-search.h"
 
+#include "rift-tracker.h"
+
 #include "rift-sensor-blobwatch.h"
 
 #include "sensor/ar0134.h"
@@ -181,6 +183,11 @@ release_capture_frame(rift_sensor_ctx *sensor, rift_sensor_analysis_frame *frame
 	rift_tracker_frame_release (sensor->tracker, now,
 			frame->vframe->start_ts, frame->exposure_info_valid ? &frame->exposure_info : NULL,
 			sensor->serial_no);
+
+	if (sensor->pf.camera_pose_changed) {
+		rift_tracker_update_sensor_pose(sensor->tracker, sensor, &sensor->pf.camera_pose);
+		sensor->pf.camera_pose_changed = false;
+	}
 
 	if (frame->bwobs) {
 		blobwatch_release_observation(sensor->bw, frame->bwobs);

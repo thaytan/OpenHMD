@@ -450,6 +450,7 @@ update_device_and_blobs (rift_pose_finder *pf, rift_sensor_analysis_frame *frame
 		oquatf_get_rotated(&cam_orient, &gravity_vector, &pf->cam_gravity_vector);
 
 		pf->have_camera_pose = true;
+		pf->camera_pose_changed = true;
 	}
 
 	if (!pf->have_camera_pose) {

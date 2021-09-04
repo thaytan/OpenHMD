@@ -9,12 +9,11 @@
 #include "rift.h"
 #include "rift-kalman-6dof.h"
 #include "rift-tracker-common.h"
+#include "rift-sensor.h"
 #include "rift-sensor-pose-helper.h"
 
 #ifndef __RIFT_TRACKER_H__
 #define __RIFT_TRACKER_H__
-
-typedef struct rift_tracker_ctx_s rift_tracker_ctx;
 
 rift_tracker_ctx *rift_tracker_new (ohmd_context* ohmd_ctx, const uint8_t radio_id[5]);
 
@@ -34,5 +33,7 @@ bool rift_tracked_device_get_latest_exposure_info_pose (rift_tracked_device *dev
 
 bool rift_tracked_device_model_pose_update(rift_tracked_device *dev_base, uint64_t local_ts, uint64_t frame_start_local_ts, rift_tracker_exposure_info *exposure_info, rift_pose_metrics *score, posef *pose, const char *source);
 void rift_tracked_device_frame_release (rift_tracked_device *dev_base, rift_tracker_exposure_info *info);
+
+void rift_tracker_update_sensor_pose(rift_tracker_ctx *tracker_ctx, rift_sensor_ctx *sensor, posef *new_pose);
 
 #endif

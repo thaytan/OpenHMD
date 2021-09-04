@@ -10,7 +10,7 @@
 #include "rift.h"
 #include "rift-sensor-device.h"
 #include "rift-sensor-pose-helper.h"
-#include "rift-tracker.h"
+#include "rift-tracker-common.h"
 
 #ifndef __RIFT_SENSOR_H__
 #define __RIFT_SENSOR_H__

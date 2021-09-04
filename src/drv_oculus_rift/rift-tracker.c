@@ -24,6 +24,7 @@
 #include "rift-sensor.h"
 #include "rift-sensor-usb.h"
 
+#include "rift-sensor.h"
 #include "rift-sensor-maths.h"
 #include "rift-sensor-opencv.h"
 #include "rift-sensor-pose-helper.h"
@@ -1134,4 +1135,14 @@ void rift_tracked_device_frame_release(rift_tracked_device *dev_base, rift_track
 		rift_tracked_device_exposure_release_locked(dev, dev_info);
 	}
 	ohmd_unlock_mutex (dev->device_lock);
+}
+
+void rift_tracker_update_sensor_pose(rift_tracker_ctx *tracker_ctx, rift_sensor_ctx *sensor, posef *new_pose)
+{
+	const char *serial_no = rift_sensor_serial_no(sensor);
+
+	ohmd_lock_mutex (tracker_ctx->tracker_lock);
+	rift_tracker_config_set_sensor_pose(&tracker_ctx->config, serial_no, new_pose);
+	rift_tracker_config_save(tracker_ctx->ohmd_ctx, &tracker_ctx->config);
+	ohmd_unlock_mutex (tracker_ctx->tracker_lock);
 }
