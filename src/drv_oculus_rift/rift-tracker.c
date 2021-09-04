@@ -278,6 +278,7 @@ rift_tracker_new (ohmd_context* ohmd_ctx,
 	rift_tracker_ctx *tracker_ctx = NULL;
 	int ret, i;
 	libusb_device **devs;
+	vec3f room_center_offset;
 
 	tracker_ctx = ohmd_alloc(ohmd_ctx, sizeof (rift_tracker_ctx));
 	tracker_ctx->ohmd_ctx = ohmd_ctx;
@@ -285,6 +286,7 @@ rift_tracker_new (ohmd_context* ohmd_ctx,
 
 	rift_tracker_config_init(&tracker_ctx->config);
 	rift_tracker_config_load(ohmd_ctx, &tracker_ctx->config);
+	rift_tracker_config_get_center_offset(&tracker_ctx->config, &room_center_offset);
 
 	for (i = 0; i < RIFT_MAX_TRACKED_DEVICES; i++) {
 		rift_tracked_device_priv *dev = tracker_ctx->devices + i;
@@ -339,6 +341,13 @@ rift_tracker_new (ohmd_context* ohmd_ctx,
 		if (sensor_ctx == NULL) {
 			LOGW("Failed to open Rift Sensor analyser for %s\n", serial);
 			continue;
+		}
+
+		posef camera_pose;
+		if (rift_tracker_config_get_sensor_pose(&tracker_ctx->config, (char *) serial, &camera_pose)) {
+			/* Add the room offset to the camera pose we give the sensor */
+			ovec3f_add(&camera_pose.pos, &room_center_offset, &camera_pose.pos);
+			rift_sensor_set_pose(sensor_ctx, &camera_pose);
 		}
 
 		tracker_ctx->sensors[tracker_ctx->n_sensors] = sensor_ctx;

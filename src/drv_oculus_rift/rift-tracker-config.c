@@ -188,6 +188,12 @@ fail_serialise:
 }
 
 void
+rift_tracker_config_get_center_offset(rift_tracker_config *config, vec3f *room_center_offset)
+{
+	*room_center_offset = config->room_center_offset;
+}
+
+void
 rift_tracker_config_set_sensor_pose(rift_tracker_config *config, const char *serial_no, posef *pose)
 {
 	int i;
@@ -213,4 +219,22 @@ rift_tracker_config_set_sensor_pose(rift_tracker_config *config, const char *ser
 
 	sensor_cfg->pose = *pose;
 	config->modified = true;
+}
+
+bool
+rift_tracker_config_get_sensor_pose(rift_tracker_config *config, const char *serial_no, posef *pose)
+{
+	int i;
+
+	assert(config->n_sensors <= RIFT_MAX_SENSORS);
+
+	for (i = 0; i < config->n_sensors; i++) {
+		rift_tracker_sensor_config *sensor_cfg = config->sensors + i;
+		if (strcmp(sensor_cfg->serial_no, serial_no) == 0) {
+			*pose = sensor_cfg->pose;
+			return true;
+		}
+	}
+
+	return false;
 }
