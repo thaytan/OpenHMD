@@ -4,27 +4,12 @@
 #include <libusb.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include "rift-sensor-common.h"
 
 #define DK2_PID		0x0201
 #define CV1_PID		0x0211
 
-typedef struct rift_sensor_uvc_frame rift_sensor_uvc_frame;
 typedef struct rift_sensor_uvc_stream rift_sensor_uvc_stream;
-
-struct rift_sensor_uvc_frame {
-
-	/* Pixel data pointer and size to be set by the allocator */
-	unsigned char *data;
-	int data_size;
-
-	int stride;
-	int width;
-	int height;
-	/* PTS from the camera data */
-	uint32_t pts;
-	/* Posix monotonic time of frame start */
-	uint64_t start_ts;
-};
 
 struct rift_sensor_uvc_stream {
 	int stride;

@@ -7,7 +7,7 @@
 #define __OPENCV_H__
 
 #include "rift.h"
-#include "rift-sensor.h"
+#include "rift-tracker-common.h"
 #include "rift-sensor-maths.h"
 #include "rift-sensor-blobwatch.h"
 

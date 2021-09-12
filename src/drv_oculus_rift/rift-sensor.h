@@ -5,11 +5,12 @@
  */
 
 /* Oculus Rift driver - positional tracking interface */
+#include <libusb.h>
 
 #include "rift.h"
 #include "rift-sensor-pose-helper.h"
 #include "rift-tracker.h"
-#include "rift-sensor-uvc.h"
+#include "rift-sensor-common.h"
 
 #ifndef __RIFT_SENSOR_H__
 #define __RIFT_SENSOR_H__
