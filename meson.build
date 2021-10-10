@@ -126,6 +126,7 @@ if _drivers.contains('rift')
 		'src/drv_oculus_rift/rift-sensor-esp770u.c',
 		'src/drv_oculus_rift/rift-sensor-flicker.c',
 		'src/drv_oculus_rift/rift-sensor-pose-helper.c',
+		'src/drv_oculus_rift/rift-sensor-pose-search.c',
 		'src/drv_oculus_rift/rift-sensor-uvc.c',
 		'src/drv_oculus_rift/rift-tracker.c',
 		'src/drv_oculus_rift/rift-kalman-6dof.c',
