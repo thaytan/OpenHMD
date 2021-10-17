@@ -15,6 +15,7 @@
 #include <inttypes.h>
 
 #include "rift-sensor.h"
+#include "rift-sensor-device.h"
 #include "rift-sensor-pose-search.h"
 
 #include "rift-sensor-blobwatch.h"
@@ -22,7 +23,7 @@
 #include "rift-sensor-maths.h"
 #include "rift-sensor-opencv.h"
 
-static void update_device_and_blobs (rift_pose_finder *pf, rift_sensor_capture_frame *frame,
+static void update_device_and_blobs (rift_pose_finder *pf, rift_sensor_analysis_frame *frame,
 	rift_tracked_device *dev, rift_sensor_frame_device_state *dev_state,
 	rift_tracked_device_exposure_info *exp_dev_info,
 	posef *obj_cam_pose);
@@ -44,7 +45,7 @@ void rift_pose_finder_clear(rift_pose_finder *pf)
 }
 
 void rift_pose_finder_process_blobs_fast(rift_pose_finder *pf,
-        rift_sensor_capture_frame *frame,
+        rift_sensor_analysis_frame *frame,
         rift_tracked_device **devs)
 {
 	rift_tracker_exposure_info *exposure_info = &frame->exposure_info;
@@ -139,7 +140,7 @@ void rift_pose_finder_process_blobs_fast(rift_pose_finder *pf,
 	}
 }
 
-void rift_pose_finder_process_blobs_long(rift_pose_finder *pf, rift_sensor_capture_frame *frame,
+void rift_pose_finder_process_blobs_long(rift_pose_finder *pf, rift_sensor_analysis_frame *frame,
         rift_tracked_device **devs)
 {
 	rift_tracker_exposure_info *exposure_info = &frame->exposure_info;
@@ -256,7 +257,7 @@ void rift_pose_finder_process_blobs_long(rift_pose_finder *pf, rift_sensor_captu
 }
 
 static void
-update_device_and_blobs (rift_pose_finder *pf, rift_sensor_capture_frame *frame,
+update_device_and_blobs (rift_pose_finder *pf, rift_sensor_analysis_frame *frame,
 	rift_tracked_device *dev, rift_sensor_frame_device_state *dev_state,
 	rift_tracked_device_exposure_info *exp_dev_info,
 	posef *obj_cam_pose)

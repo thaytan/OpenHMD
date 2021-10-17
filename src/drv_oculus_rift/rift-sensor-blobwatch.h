@@ -71,7 +71,7 @@ struct blobservation {
 typedef struct blobwatch blobwatch;
 typedef struct blobservation blobservation;
 
-blobwatch *blobwatch_new(uint8_t threshold, int width, int height);
+blobwatch *blobwatch_new(uint8_t threshold);
 void blobwatch_free (blobwatch *bw);
 void blobwatch_process(blobwatch *bw, uint8_t *frame,
 		       int width, int height, uint8_t led_pattern_phase,

@@ -20,7 +20,6 @@
 
 typedef struct rift_tracker_exposure_info rift_tracker_exposure_info;
 typedef struct rift_tracked_device_exposure_info rift_tracked_device_exposure_info;
-typedef struct rift_sensor_camera_params rift_sensor_camera_params;
 typedef struct rift_tracked_device_imu_calibration rift_tracked_device_imu_calibration;
 
 struct rift_tracked_device_exposure_info {
@@ -63,18 +62,6 @@ struct rift_tracked_device_imu_calibration {
 
 	vec3f gyro_offset;
 	float gyro_matrix[9];
-};
-
-struct rift_sensor_camera_params {
-	bool is_cv1; /* CV1 has fisheye distortion, DK2 does not */
-
-  /* Frame width and height */
-  int width;
-  int height;
-
-	dmat3 camera_matrix;
-	bool dist_fisheye;
-	double dist_coeffs[5];
 };
 
 

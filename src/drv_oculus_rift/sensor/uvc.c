@@ -1,3 +1,4 @@
+#include <assert.h>
 #include <errno.h>
 #include <libusb.h>
 #include <stdbool.h>
@@ -71,6 +72,9 @@ PACKED_STRUCT(uvc_payload_header) {
 	__le16 wSofCounter;
 	__le32 scrSourceClock;
 };
+
+static void
+rift_sensor_uvc_stream_release_frame(ohmd_video_frame *frame, rift_sensor_uvc_stream *stream);
 
 int rift_sensor_uvc_set_cur(libusb_device_handle *dev, uint8_t interface, uint8_t entity,
 		uint8_t selector, void *data, uint16_t wLength)
@@ -179,6 +183,17 @@ void process_payload(struct rift_sensor_uvc_stream *stream, unsigned char *paylo
 		clock_gettime(CLOCK_MONOTONIC, &ts);
 		time = ts.tv_sec * 1000000000 + ts.tv_nsec;
 
+		/* Get a frame to capture into */
+		if (stream->cur_frame == NULL) {
+			ohmd_lock_mutex(stream->frames_lock);
+			if (stream->n_free_frames > 0) {
+				stream->n_free_frames--;
+				stream->cur_frame = stream->free_frames[stream->n_free_frames];
+			} else
+				stream->cur_frame = NULL;
+			ohmd_unlock_mutex(stream->frames_lock);
+		}
+
 #if VERBOSE_DEBUG
 		int64_t dt;
 		if (stream->cur_frame)
@@ -190,25 +205,21 @@ void process_payload(struct rift_sensor_uvc_stream *stream, unsigned char *paylo
 		stream->frame_collected = 0;
 		stream->skip_frame = false;
 
-		if (stream->sof_cb)
-			stream->sof_cb(stream, time);
-
 		if (stream->cur_frame == NULL) {
 			LOGW("No frame provided for pixel data. Skipping frame");
 			stream->skip_frame = true;
 		}
-		if (stream->cur_frame->data_size != stream->frame_size) {
-			LOGW("Incorrect frame size provided for pixel data. Skipping frame");
-			stream->skip_frame = true;
+
+		ohmd_video_frame *frame = stream->cur_frame;
+
+		if (frame) {
+			assert (frame->data_size == stream->frame_size);
+			frame->start_ts = time;
+			frame->pts = pts;
+			frame->stride = stream->stride;
+			frame->width = stream->width;
+			frame->height = stream->height;
 		}
-
-		rift_sensor_uvc_frame *frame = stream->cur_frame;
-
-		frame->start_ts = time;
-		frame->pts = pts;
-		frame->stride = stream->stride;
-		frame->width = stream->width;
-		frame->height = stream->height;
 
 #if VERBOSE_DEBUG
 		printf ("UVC dt %f PTS %f SCR %f delta %d\n",
@@ -233,8 +244,10 @@ void process_payload(struct rift_sensor_uvc_stream *stream, unsigned char *paylo
 	stream->frame_collected += payload_len;
 
 	if (stream->frame_collected == stream->frame_size) {
-		if (stream->frame_cb)
-			stream->frame_cb(stream, stream->cur_frame);
+		if (stream->frame_cb) {
+			stream->frame_cb(stream, stream->cur_frame, stream->frame_cb_data);
+			stream->cur_frame = NULL;
+		}
 		stream->frame_collected = 0;
 	}
 
@@ -260,7 +273,7 @@ static void iso_transfer_cb(struct libusb_transfer *transfer)
 		return;
 	}
 
-	if (stream->completed) {
+	if (!stream->video_running) {
 		/* Not resubmitting. Reduce transfer count */
 		stream->active_transfers--;
 		return;
@@ -290,15 +303,15 @@ static void iso_transfer_cb(struct libusb_transfer *transfer)
 		/* FIXME: Close and re-open this sensor */
 		printf("failed to resubmit after %d attempts\n", i);
 		stream->active_transfers--;
-		stream->completed = true;
 	}
 	else if (i > 0) {
 		printf("resubmitted xfer after %d attempts\n", i+1);
 	}
 }
 
-int rift_sensor_uvc_stream_setup (libusb_context *ctx, libusb_device_handle *devh,
-         struct rift_sensor_uvc_stream *stream)
+int rift_sensor_uvc_stream_setup (ohmd_context* ohmd_ctx,
+		libusb_context *usb_ctx, libusb_device_handle *devh,
+		struct rift_sensor_uvc_stream *stream)
 {
 	libusb_device *dev = libusb_get_device(devh);
 	struct libusb_device_descriptor desc;
@@ -310,6 +323,12 @@ int rift_sensor_uvc_stream_setup (libusb_context *ctx, libusb_device_handle *dev
 	int ret;
 	int num_packets;
 	int packet_size;
+
+	stream->frames_lock = ohmd_create_mutex(ohmd_ctx);
+	stream->ohmd_ctx = ohmd_ctx;
+	stream->usb_ctx = usb_ctx;
+	stream->devh = devh;
+	stream->video_running = false;
 
 	ret = libusb_set_auto_detach_kernel_driver(devh, 1);
 	if (ret < 0) {
@@ -407,13 +426,12 @@ int rift_sensor_uvc_stream_setup (libusb_context *ctx, libusb_device_handle *dev
 	stream->num_transfers = (num_packets + 31) / 32;
 	num_packets = num_packets / stream->num_transfers;
 
-	stream->transfer = calloc(stream->num_transfers,
-			sizeof(*stream->transfer));
+	stream->transfer = ohmd_alloc(ohmd_ctx, stream->num_transfers * sizeof(*stream->transfer));
 	if (!stream->transfer)
 		return -ENOMEM;
 
 	for (int i = 0; i < stream->num_transfers; i++) {
-		stream->transfer[i] = libusb_alloc_transfer(32);
+		stream->transfer[i] = libusb_alloc_transfer(num_packets);
 		if (!stream->transfer[i]) {
 			fprintf(stderr, "failed to allocate isochronous transfer\n");
 			return -ENOMEM;
@@ -422,6 +440,8 @@ int rift_sensor_uvc_stream_setup (libusb_context *ctx, libusb_device_handle *dev
 		uint8_t bEndpointAddress = 0x81;
 		int transfer_size = num_packets * packet_size;
 		void *buf = malloc(transfer_size);
+		stream->transfer[i]->flags |= LIBUSB_TRANSFER_FREE_BUFFER;
+
 		libusb_fill_iso_transfer(stream->transfer[i], devh,
 					 bEndpointAddress, buf, transfer_size,
 					 num_packets, iso_transfer_cb, stream,
@@ -429,49 +449,79 @@ int rift_sensor_uvc_stream_setup (libusb_context *ctx, libusb_device_handle *dev
 		libusb_set_iso_packet_lengths(stream->transfer[i], packet_size);
 	}
 
-	stream->ctx = ctx;
-	stream->devh = devh;
-	stream->completed = false;
-
 	return 0;
 }
 
-int rift_sensor_uvc_stream_start(struct rift_sensor_uvc_stream *stream)
+int rift_sensor_uvc_stream_start(rift_sensor_uvc_stream *stream, uint8_t min_frames,
+	rift_sensor_uvc_stream_frame_cb frame_cb, void *frame_cb_data)
 {
-	int ret;
+	int ret, i;
 
-	stream->active_transfers = stream->num_transfers;
+	assert (!stream->video_running);
+	stream->video_running = true;
+
+	stream->cur_frame = NULL;
+
+	stream->frame_cb = frame_cb;
+	stream->frame_cb_data = frame_cb_data;
+
+	/* Allocate frames and put on the free list */
+	stream->alloced_frames = ohmd_alloc(stream->ohmd_ctx, min_frames * sizeof (ohmd_video_frame *));
+	stream->free_frames = ohmd_alloc(stream->ohmd_ctx, min_frames * sizeof (ohmd_video_frame *));
+
+	for (i = 0; i < min_frames; i++) {
+		ohmd_video_frame *frame = ohmd_alloc(stream->ohmd_ctx, sizeof (ohmd_video_frame));
+		frame->data = ohmd_alloc(stream->ohmd_ctx, stream->frame_size);
+		frame->data_size = stream->frame_size;
+
+		frame->releasefn = (ohmd_video_frame_release_func) rift_sensor_uvc_stream_release_frame;
+		frame->owner = stream;
+		stream->alloced_frames[i] = stream->free_frames[i] = frame;
+	}
+	stream->n_free_frames = stream->n_alloced_frames = min_frames;
+
+	/* Submit transfers */
 	for (int i = 0; i < stream->num_transfers; i++) {
 		ret = libusb_submit_transfer(stream->transfer[i]);
 		if (ret < 0) {
 			fprintf(stderr, "failed to submit iso transfer %d. Error %d\n", i, ret);
-			stream->active_transfers--;
+			stream->active_transfers = i;
 			return ret;
 		}
 	}
 
+	stream->active_transfers = stream->num_transfers;
 	return 0;
 }
 
 int rift_sensor_uvc_stream_stop(struct rift_sensor_uvc_stream *stream)
 {
 	int ret;
+	int i;
 
 	ret = libusb_set_interface_alt_setting(stream->devh, 1, 0);
 	if (ret)
 		return ret;
 
-	stream->completed = true;
+	libusb_lock_event_waiters(stream->usb_ctx);
+	stream->video_running = false;
 
-	for (int i = 0; i < stream->num_transfers; i++) {
-		if (ret < 0)
-			fprintf(stderr, "failed to cancel iso transfer %d. Error %d\n", i, ret);
-	}
-
+	/* Wait for active transfers to finish */
 	while (stream->active_transfers > 0) {
-		if (!libusb_try_lock_events (stream->ctx))
-			libusb_unlock_events (stream->ctx);
+		ret = libusb_wait_for_event(stream->usb_ctx, NULL);
+		if (ret)
+			break;
 	}
+	libusb_unlock_event_waiters(stream->usb_ctx);
+
+	/* Free frames */
+	for (i = 0; i < stream->n_alloced_frames; i++) {
+		ohmd_video_frame *frame = stream->alloced_frames[i];
+		free(frame->data);
+		free(frame);
+	}
+	free(stream->alloced_frames);
+	free(stream->free_frames);
 
 	return 0;
 }
@@ -479,24 +529,35 @@ int rift_sensor_uvc_stream_stop(struct rift_sensor_uvc_stream *stream)
 int rift_sensor_uvc_stream_clear (struct rift_sensor_uvc_stream *stream)
 {
 	int i;
+	assert(!stream->video_running);
 
-	for (i = 0; i < stream->num_transfers; i++) {
-		libusb_free_transfer(stream->transfer[i]);
-		stream->transfer[i] = NULL;
+	if (stream->transfer != NULL) {
+		for (i = 0; i < stream->num_transfers; i++) {
+			if (stream->transfer[i] != NULL) {
+				libusb_free_transfer(stream->transfer[i]);
+				stream->transfer[i] = NULL;
+			}
+		}
+		free(stream->transfer);
+		stream->transfer = NULL;
 	}
 
-	free(stream->transfer);
-	stream->transfer = NULL;
+	if (stream->frames_lock != NULL) {
+		ohmd_destroy_mutex(stream->frames_lock);
+		stream->frames_lock = NULL;
+	}
 
 	return 0;
 }
 
-bool
-rift_sensor_uvc_stream_set_frame(rift_sensor_uvc_stream *stream, rift_sensor_uvc_frame *frame)
+static void
+rift_sensor_uvc_stream_release_frame(ohmd_video_frame *frame, rift_sensor_uvc_stream *stream)
 {
-		if (frame != NULL && frame->data_size != stream->frame_size)
-				return false;
+	assert(frame->owner == stream);
+	assert(stream->n_free_frames < stream->n_alloced_frames);
 
-		stream->cur_frame = frame;
-		return true;
+	/* Put the frame back on the free queue */
+	ohmd_lock_mutex(stream->frames_lock);
+	stream->free_frames[stream->n_free_frames++] = frame;
+	ohmd_unlock_mutex(stream->frames_lock);
 }

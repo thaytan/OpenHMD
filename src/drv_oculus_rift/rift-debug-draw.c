@@ -163,16 +163,17 @@ compare_blobs (const void *elem1, const void *elem2)
 }
 
 void rift_debug_draw_frame (uint8_t *pixels, struct blobservation* bwobs,
-	correspondence_search_t *cs, struct rift_sensor_capture_frame *frame,
+	correspondence_search_t *cs, struct rift_sensor_analysis_frame *frame,
 	uint8_t n_devs, rift_tracked_device **devs,
 	rift_sensor_camera_params *calib, posef *camera_pose)
 {
-	uint8_t *src = frame->uvc.data;
+	ohmd_video_frame *vframe = frame->vframe;
+	uint8_t *src = vframe->data;
 	int x, y;
-	int width = frame->uvc.width;
-	int height = frame->uvc.height;
-	int in_stride = frame->uvc.stride;
-	int out_stride = frame->uvc.width*3*2;
+	int width = vframe->width;
+	int height = vframe->height;
+	int in_stride = vframe->stride;
+	int out_stride = vframe->width*3*2;
 
 	uint8_t *lhs_dest = pixels;
 	uint8_t *rhs_dest = pixels + width * 3;
@@ -211,7 +212,7 @@ void rift_debug_draw_frame (uint8_t *pixels, struct blobservation* bwobs,
 
 			/* Draw the original pixels in the RHS that are within blobs */
 			uint8_t *dest = rhs_dest + start_y * out_stride + start_x*3;
-			uint8_t *src = frame->uvc.data + start_y * in_stride;
+			uint8_t *src = vframe->data + start_y * in_stride;
 			for (y = 0; y < h; y++) {
 				uint8_t *d = dest;
 				for (x = start_x; x < start_x + w; x++) {

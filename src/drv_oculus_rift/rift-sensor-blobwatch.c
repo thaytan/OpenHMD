@@ -114,7 +114,7 @@ void blobwatch_set_flicker(blobwatch *bw, bool enable)
  *
  * Returns the newly allocated blobwatch structure.
  */
-blobwatch *blobwatch_new(uint8_t threshold, int width, int height)
+blobwatch *blobwatch_new(uint8_t threshold)
 {
 	blobwatch *bw = malloc(sizeof(*bw));
 	int i;
@@ -125,8 +125,6 @@ blobwatch *blobwatch_new(uint8_t threshold, int width, int height)
 	memset(bw, 0, sizeof(*bw));
 	bw->next_blob_id = 1;
 	bw->threshold = threshold;
-	bw->width = width;
-	bw->height = height;
 	bw->last_observation = NULL;
 	bw->debug = true;
 	bw->flicker_enable = false;

@@ -7,17 +7,19 @@
 /* Oculus Rift driver - positional tracking interface */
 #include <libusb.h>
 
+#include "ohmd-video.h"
+
 #include "rift.h"
+#include "rift-sensor-device.h"
 #include "rift-sensor-pose-helper.h"
 #include "rift-tracker.h"
-#include "rift-sensor-common.h"
 
 #ifndef __RIFT_SENSOR_H__
 #define __RIFT_SENSOR_H__
 
 typedef struct rift_sensor_ctx_s rift_sensor_ctx;
 typedef struct rift_sensor_frame_device_state rift_sensor_frame_device_state;
-typedef struct rift_sensor_capture_frame rift_sensor_capture_frame;
+typedef struct rift_sensor_analysis_frame rift_sensor_analysis_frame;
 
 struct rift_sensor_frame_device_state {
 	posef capture_world_pose;
@@ -27,11 +29,12 @@ struct rift_sensor_frame_device_state {
 	rift_pose_metrics score;
 };
 
-struct rift_sensor_capture_frame {
-	rift_sensor_uvc_frame uvc;
-
+struct rift_sensor_analysis_frame {
 	/* Index of the frame in the frames array */
 	uint8_t id;
+
+	/* Video frame data we are analysing */
+	ohmd_video_frame *vframe;
 
 	/* Exposure info from the HMD - HMD time,
 	 * count and led pattern */
@@ -66,10 +69,9 @@ struct rift_sensor_capture_frame {
 	uint64_t long_analysis_finish_ts;
 };
 
-rift_sensor_ctx *rift_sensor_new (ohmd_context* ohmd_ctx, int id, const char *serial_no,
-	libusb_context *usb_ctx, libusb_device_handle *usb_devh, rift_tracker_ctx *tracker, const uint8_t radio_id[5]);
+rift_sensor_ctx * rift_sensor_new(ohmd_context* ohmd_ctx, int id, const char *serial_no,
+	rift_sensor_device *dev, rift_tracker_ctx *tracker);
 void rift_sensor_free (rift_sensor_ctx *sensor_ctx);
 bool rift_sensor_add_device (rift_sensor_ctx *ctx, rift_tracked_device *device);
-void rift_sensor_update_exposure (rift_sensor_ctx *sensor, const rift_tracker_exposure_info *exposure_info);
 
 #endif

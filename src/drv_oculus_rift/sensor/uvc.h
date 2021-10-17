@@ -4,20 +4,26 @@
 #include <libusb.h>
 #include <stdbool.h>
 #include <stdint.h>
-#include "../rift-sensor-common.h"
-
-#define DK2_PID		0x0201
-#define CV1_PID		0x0211
+#include "../ohmd-video.h"
+#include "../rift-sensor-usb.h"
 
 typedef struct rift_sensor_uvc_stream rift_sensor_uvc_stream;
+typedef void (*rift_sensor_uvc_stream_frame_cb)(struct rift_sensor_uvc_stream *stream, ohmd_video_frame *frame, void *cb_data);
 
 struct rift_sensor_uvc_stream {
+	ohmd_context* ohmd_ctx;
+
 	int stride;
 	int width;
 	int height;
 
+	ohmd_mutex *frames_lock;
+	int n_free_frames;
+	ohmd_video_frame **free_frames;
+
 	/* Frame data destination */
-	rift_sensor_uvc_frame *cur_frame;
+	ohmd_video_frame *cur_frame;
+
 	/* Total size of a full frame in bytes */
 	int frame_size;
 	/* Current frame ID */
@@ -31,13 +37,17 @@ struct rift_sensor_uvc_stream {
 
 	int num_transfers;
 	struct libusb_transfer **transfer;
-	int completed;
 	int active_transfers;
-	void (*sof_cb)(struct rift_sensor_uvc_stream *stream, uint64_t start_ts);
-	void (*frame_cb)(struct rift_sensor_uvc_stream *stream, rift_sensor_uvc_frame *frame);
-	libusb_context *ctx;
+
+	rift_sensor_uvc_stream_frame_cb frame_cb;
+	void *frame_cb_data;
+
+	libusb_context *usb_ctx;
 	libusb_device_handle *devh;
-	void *user_data;
+
+	bool video_running;
+	ohmd_video_frame **alloced_frames;
+	int n_alloced_frames;
 };
 
 int rift_sensor_uvc_set_cur(libusb_device_handle *devh, uint8_t interface, uint8_t entity,
@@ -45,15 +55,17 @@ int rift_sensor_uvc_set_cur(libusb_device_handle *devh, uint8_t interface, uint8
 int rift_sensor_uvc_get_cur(libusb_device_handle *devh, uint8_t interface, uint8_t entity,
 		uint8_t selector, void *data, uint16_t wLength);
 
-int rift_sensor_uvc_stream_setup (libusb_context *ctx, libusb_device_handle *devh,
+int rift_sensor_uvc_stream_setup (ohmd_context* ohmd_ctx, libusb_context *usb_ctx, libusb_device_handle *devh,
 		rift_sensor_uvc_stream *stream);
 int rift_sensor_uvc_stream_clear (rift_sensor_uvc_stream *stream);
 
-int rift_sensor_uvc_stream_start(rift_sensor_uvc_stream *stream);
+int rift_sensor_uvc_stream_start(rift_sensor_uvc_stream *stream, uint8_t min_frames,
+	rift_sensor_uvc_stream_frame_cb frame_cb, void *frame_cb_data);
+
 int rift_sensor_uvc_stream_stop(rift_sensor_uvc_stream *stream);
 
 /* This can only be called safely either before the stream is started
  * or from one of the callbacks */
-bool rift_sensor_uvc_stream_set_frame(rift_sensor_uvc_stream *stream, rift_sensor_uvc_frame *frame);
+bool rift_sensor_uvc_stream_set_frame(rift_sensor_uvc_stream *stream, ohmd_video_frame *frame);
 
 #endif /* __UVC_H__ */
