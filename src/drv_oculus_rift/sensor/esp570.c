@@ -4,7 +4,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "rift-sensor-uvc.h"
+#include "uvc.h"
 
 #define ESP570_EXTENSION_UNIT		4
 

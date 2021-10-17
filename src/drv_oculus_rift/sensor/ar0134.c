@@ -3,7 +3,7 @@
 #include <stdint.h>
 #include <stdio.h>
 
-#include "rift-sensor-uvc.h"
+#include "uvc.h"
 
 #define XU_ENTITY	4
 #define SENSOR_REG_SEL	2

@@ -6,10 +6,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "../openhmdi.h"
+#include "../../openhmdi.h"
 
-#include "rift-sensor-esp570.h"
-#include "rift-sensor-uvc.h"
+#include "esp570.h"
+#include "uvc.h"
 
 #ifdef __linux__
 #include <asm/byteorder.h>

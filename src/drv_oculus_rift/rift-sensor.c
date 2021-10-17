@@ -19,11 +19,12 @@
 #include "rift-sensor-pose-search.h"
 
 #include "rift-sensor-blobwatch.h"
-#include "rift-sensor-ar0134.h"
-#include "rift-sensor-mt9v034.h"
-#include "rift-sensor-esp770u.h"
-#include "rift-sensor-esp570.h"
-#include "rift-sensor-uvc.h"
+
+#include "sensor/ar0134.h"
+#include "sensor/mt9v034.h"
+#include "sensor/esp770u.h"
+#include "sensor/esp570.h"
+#include "sensor/uvc.h"
 
 #include "rift-debug-draw.h"
 

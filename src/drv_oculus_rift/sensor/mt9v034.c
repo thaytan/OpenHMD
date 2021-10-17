@@ -5,7 +5,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "rift-sensor-esp570.h"
+#include "esp570.h"
 
 #define MT9V034_CHIP_VERSION			0x00
 #define MT9V034_WINDOW_HEIGHT			0x03

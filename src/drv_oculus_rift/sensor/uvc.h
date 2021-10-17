@@ -4,7 +4,7 @@
 #include <libusb.h>
 #include <stdbool.h>
 #include <stdint.h>
-#include "rift-sensor-common.h"
+#include "../rift-sensor-common.h"
 
 #define DK2_PID		0x0201
 #define CV1_PID		0x0211

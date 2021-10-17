@@ -18,7 +18,8 @@
 #include "../exponential-filter.h"
 #include "rift-tracker.h"
 #include "rift-sensor.h"
-#include "rift-sensor-uvc.h"
+
+#include "sensor/uvc.h"
 
 #include "rift-sensor-maths.h"
 #include "rift-sensor-opencv.h"

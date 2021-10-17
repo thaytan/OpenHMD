@@ -69,18 +69,18 @@ if(OPENHMD_DRIVER_OCULUS_RIFT)
 	${CMAKE_CURRENT_LIST_DIR}/src/drv_oculus_rift/rift-sensor-pose-search.c
 	${CMAKE_CURRENT_LIST_DIR}/src/ext_deps/nxjson.c
 	${CMAKE_CURRENT_LIST_DIR}/src/drv_oculus_rift/led_search.c
-	${CMAKE_CURRENT_LIST_DIR}/src/drv_oculus_rift/rift-sensor-esp570.c
-	${CMAKE_CURRENT_LIST_DIR}/src/drv_oculus_rift/rift-sensor-esp770u.c
 	${CMAKE_CURRENT_LIST_DIR}/src/drv_oculus_rift/rift-sensor-flicker.c
 	${CMAKE_CURRENT_LIST_DIR}/src/drv_oculus_rift/rift-sensor-maths.c
-	${CMAKE_CURRENT_LIST_DIR}/src/drv_oculus_rift/rift-sensor-mt9v034.c
 	${CMAKE_CURRENT_LIST_DIR}/src/drv_oculus_rift/rift-sensor-pose-helper.c
-	${CMAKE_CURRENT_LIST_DIR}/src/drv_oculus_rift/rift-sensor-ar0134.c
-	${CMAKE_CURRENT_LIST_DIR}/src/drv_oculus_rift/rift-sensor-uvc.c
 	${CMAKE_CURRENT_LIST_DIR}/src/drv_oculus_rift/rift-sensor-blobwatch.c
 	${CMAKE_CURRENT_LIST_DIR}/src/drv_oculus_rift/rift-sensor-opencv.cpp
 	${CMAKE_CURRENT_LIST_DIR}/src/drv_oculus_rift/rift-tracker.c
 	${CMAKE_CURRENT_LIST_DIR}/src/drv_oculus_rift/rift-kalman-6dof.c
+	${CMAKE_CURRENT_LIST_DIR}/src/drv_oculus_rift/sensor/esp570.c
+	${CMAKE_CURRENT_LIST_DIR}/src/drv_oculus_rift/sensor/esp770u.c
+	${CMAKE_CURRENT_LIST_DIR}/src/drv_oculus_rift/sensor/mt9v034.c
+	${CMAKE_CURRENT_LIST_DIR}/src/drv_oculus_rift/sensor/ar0134.c
+	${CMAKE_CURRENT_LIST_DIR}/src/drv_oculus_rift/sensor/uvc.c
 	)
 	add_definitions(-DDRIVER_OCULUS_RIFT)
   add_definitions(-DHAVE_OPENCV=1)

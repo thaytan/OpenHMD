@@ -5,9 +5,9 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "../platform.h"
-#include "rift-sensor-esp770u.h"
-#include "rift-sensor-uvc.h"
+#include "../../platform.h"
+#include "esp770u.h"
+#include "uvc.h"
 
 #define ESP770U_EXTENSION_UNIT		4
 
