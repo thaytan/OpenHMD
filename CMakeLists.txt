@@ -81,6 +81,7 @@ if(OPENHMD_DRIVER_OCULUS_RIFT)
 	${CMAKE_CURRENT_LIST_DIR}/src/drv_oculus_rift/sensor/mt9v034.c
 	${CMAKE_CURRENT_LIST_DIR}/src/drv_oculus_rift/sensor/ar0134.c
 	${CMAKE_CURRENT_LIST_DIR}/src/drv_oculus_rift/sensor/uvc.c
+	${CMAKE_CURRENT_LIST_DIR}/src/drv_oculus_rift/ohmd-video.c
 	)
 	add_definitions(-DDRIVER_OCULUS_RIFT)
   add_definitions(-DHAVE_OPENCV=1)
