@@ -185,9 +185,6 @@ correspondence_search_set_model (correspondence_search_t *cs, int id, led_search
 void
 correspondence_search_free (correspondence_search_t *cs)
 {
-    int m;
-    for (m = 0; m < cs->num_models; m++)
-        led_search_model_free (cs->models[m].model);
     if (cs->points)
       free (cs->points);
     free (cs);
