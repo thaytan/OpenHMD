@@ -749,14 +749,14 @@ bool rift_tracked_device_model_pose_update(rift_tracked_device *dev_base, uint64
 			/* If we have a strong match, update both position and orientation */
 			if (POSE_HAS_FLAGS(score, RIFT_POSE_MATCH_ORIENT)) {
 				update_orientation = true;
-				if ((dev->device_time_ns - dev->last_observed_pose_ts) > (POSE_LOST_ORIENT_THRESHOLD * 1000000UL)) {
+				if ((dev->device_time_ns - dev->last_observed_orient_ts) > (POSE_LOST_ORIENT_THRESHOLD * 1000000UL)) {
 					LOGI("Matched orientation after %f sec", (dev->device_time_ns - dev->last_observed_pose_ts) / 1000000000.0);
 				}
 				/* Only update the time if we're actually going to apply this matched orientation below */
 				if (update_position)
 					dev->last_observed_orient_ts = dev->device_time_ns;
 			}
-			else if ((dev->device_time_ns - dev->last_observed_pose_ts) > (POSE_LOST_ORIENT_THRESHOLD * 1000000UL)) {
+			else if ((dev->device_time_ns - dev->last_observed_orient_ts) > (POSE_LOST_ORIENT_THRESHOLD * 1000000UL)) {
 				LOGI("Forcing orientation observation");
 				update_orientation = true;
 				/* Don't update the orientation match time here - only do that on an actual match */
