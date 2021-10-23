@@ -355,6 +355,12 @@ update_device_and_blobs (rift_pose_finder *pf, rift_sensor_analysis_frame *frame
 				pf->camera_pose.orient.x, pf->camera_pose.orient.y, pf->camera_pose.orient.z, pf->camera_pose.orient.w,
 				pf->camera_pose.pos.x, pf->camera_pose.pos.y, pf->camera_pose.pos.z);
 
+			const vec3f gravity_vector = {{ 0.0, 1.0, 0.0 }};
+
+			quatf cam_orient = pf->camera_pose.orient;
+			oquatf_inverse(&cam_orient);
+			oquatf_get_rotated(&cam_orient, &gravity_vector, &pf->cam_gravity_vector);
+
 			pf->have_camera_pose = true;
 		}
 		else if (dev->id == 0) {
