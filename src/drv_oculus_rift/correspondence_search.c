@@ -270,8 +270,14 @@ correspondence_search_project_pose (correspondence_search_t *cs, led_search_mode
 
 		float pose_angle = acosf(oquatf_get_dot(&pose_gravity_swing, &mi->gravity_swing));
 		if (pose_angle > mi->gravity_tolerance_rad) {
-			DEBUG("Failed pose match - orientation was not within tolerance (error %f deg > %f deg)\n",
-			    RAD_TO_DEG(pose_angle), RAD_TO_DEG(mi->gravity_tolerance_rad));
+			DEBUG("model %d failed pose match - orientation was not within tolerance (error %f deg > %f deg)\n"
+			    "gravity vec %f %f %f pose %f %f %f %f swing %f %f %f %f prior swing %f %f %f %f\n",
+			    mi->id, RAD_TO_DEG(pose_angle), RAD_TO_DEG(mi->gravity_tolerance_rad),
+			    mi->gravity_vector.x, mi->gravity_vector.y, mi->gravity_vector.z,
+			    pose->orient.x, pose->orient.y, pose->orient.z, pose->orient.w,
+			    pose_gravity_swing.x, pose_gravity_swing.y, pose_gravity_swing.z, pose_gravity_swing.w,
+			    mi->gravity_swing.x, mi->gravity_swing.y, mi->gravity_swing.z, mi->gravity_swing.w
+			    );
 			return false;
 		}
 	}
@@ -316,21 +322,28 @@ correspondence_search_project_pose (correspondence_search_t *cs, led_search_mode
                     mi->best_pose.pos.x, mi->best_pose.pos.y, mi->best_pose.pos.z);
         }
 
+#if DUMP_FULL_DEBUG
+        float error_per_led = score.visible_leds > 0 ? score.reprojection_error / score.visible_leds : -1;
         DEBUG("model %d new best pose candidate orient %f %f %f %f pos %f %f %f has %u visible LEDs, error %f (%f / LED) after %u trials and %u pose checks\n",
                mi->id, pose->orient.x, pose->orient.y, pose->orient.z, pose->orient.w,
                     pose->pos.x, pose->pos.y, pose->pos.z, score.visible_leds, score.reprojection_error, error_per_led,
                     cs->num_trials, cs->num_pose_checks);
+
         DEBUG("model %d matched %u blobs of %u\n", mi->id, score.matched_blobs, score.visible_leds);
+#endif
 #if DUMP_SCENE
         dump_pose (cs, model, pose, mi);
 #endif
         return true;
     } else {
+#if DUMP_FULL_DEBUG
+      float error_per_led = score.visible_leds > 0 ? score.reprojection_error / score.visible_leds : -1;
       DEBUG("pose candidate orient %f %f %f %f pos %f %f %f has %u visible LEDs, error %f (%f / LED)\n",
               pose->orient.x, pose->orient.y, pose->orient.z, pose->orient.w,
               pose->pos.x, pose->pos.y, pose->pos.z, score.visible_leds, score.reprojection_error,
               error_per_led);
       DEBUG("matched %u blobs of %u\n", score.matched_blobs, score.visible_leds);
+#endif
     }
     LOG("Found good pose match for device %u - %u LEDs matched %u visible ones\n",
         mi->id, score.matched_blobs, score.visible_leds);
@@ -840,6 +853,7 @@ bool correspondence_search_find_one_pose (correspondence_search_t *cs, int model
     return false;
   }
 
+  DEBUG("No model found for id %d!\n", model_id);
   score->match_flags = 0;
   return false;
 }

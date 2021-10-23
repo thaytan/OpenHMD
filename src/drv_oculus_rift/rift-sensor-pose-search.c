@@ -67,10 +67,13 @@ void rift_pose_finder_process_blobs_fast(rift_pose_finder *pf,
 
 		obj_world_pose = dev_state->capture_world_pose;
 
-		LOGV ("Sensor %d Fusion provided pose for device %d, %f %f %f %f pos %f %f %f",
+		LOGV ("Sensor %d Fusion provided pose for device %d, %f %f %f %f pos %f %f %f "
+			"pos_err %f %f %f rot_err %f %f %f",
 			pf->sensor_id, dev->id,
-      obj_world_pose.orient.x, obj_world_pose.orient.y, obj_world_pose.orient.z, obj_world_pose.orient.w,
-			obj_world_pose.pos.x, obj_world_pose.pos.y, obj_world_pose.pos.z);
+			obj_world_pose.orient.x, obj_world_pose.orient.y, obj_world_pose.orient.z, obj_world_pose.orient.w,
+			obj_world_pose.pos.x, obj_world_pose.pos.y, obj_world_pose.pos.z,
+			exp_dev_info->pos_error.x, exp_dev_info->pos_error.y, exp_dev_info->pos_error.z,
+			exp_dev_info->rot_error.x, exp_dev_info->rot_error.y, exp_dev_info->rot_error.z);
 
 		/* If we don't have a camera pose yet, skip straight to correspondence
 		 * search */
@@ -222,7 +225,7 @@ void rift_pose_finder_process_blobs_long(rift_pose_finder *pf, rift_sensor_analy
 			}
 
 			if (search_flags & CS_FLAG_DEEP_SEARCH) {
-				LOGD("Sensor %d long search for device %d\n", pf->sensor_id, dev->id);
+				LOGD("Sensor %d deep search for device %d\n", pf->sensor_id, dev->id);
 			}
 
 			if (correspondence_search_find_one_pose (pf->cs, dev->id, search_flags, &obj_cam_pose,
@@ -238,8 +241,9 @@ void rift_pose_finder_process_blobs_long(rift_pose_finder *pf, rift_sensor_analy
 				LOGD("No aligned pose for device %d with tolerance %f!", d, RAD_TO_DEG(pose_tolerance));
 			}
 
-			LOGV("Sensor %d Frame %d - doing long search for device %d matched %u blobs of %u (%s match)",
-				pf->sensor_id, frame->id, dev->id, dev_state->score.matched_blobs, dev_state->score.visible_leds,
+			LOGV("Sensor %d Frame %d - doing long search with flags 0x%x for device %d matched %u blobs of %u from %d (%s match)",
+				pf->sensor_id, frame->id, search_flags, dev->id,
+				dev_state->score.matched_blobs, dev_state->score.visible_leds, bwobs->num_blobs,
 				POSE_HAS_FLAGS(&dev_state->score, RIFT_POSE_MATCH_GOOD) ? "good" : "bad");
 
 			/* Require a strong pose match on the quick loop */
