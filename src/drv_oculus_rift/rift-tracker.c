@@ -1044,18 +1044,6 @@ rift_tracked_device_exposure_release_locked(rift_tracked_device_priv *dev, rift_
 				dev_info->fusion_slot, dev->base.id, (unsigned long long) dev_info->device_time_ns,
 				slot->use_count);
 		}
-
-		if (slot->use_count == 0) {
-			/* Tell the kalman filter the slot is invalid */
-			rift_kalman_6dof_release_delay_slot(&dev->ukf_fusion, slot->slot_id);
-			slot->valid = false;
-			LOGD ("Invalidating delay slot %d for dev %d, ts %llu with %d poses reported %d used",
-				dev_info->fusion_slot, dev->base.id, (unsigned long long) dev_info->device_time_ns,
-				slot->n_pose_reports, slot->n_used_reports);
-		}
-
-		/* Clear the slot from this device info so it doesn't get released a second time */
-		dev_info->fusion_slot = -1;
 	}
 }
 
