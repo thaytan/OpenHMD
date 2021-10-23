@@ -644,10 +644,18 @@ const char *rift_sensor_serial_no (rift_sensor_ctx *sensor)
 
 void rift_sensor_set_pose(rift_sensor_ctx *sensor, posef *camera_pose)
 {
+	const vec3f gravity_vector = {{ 0.0, 1.0, 0.0 }};
+
 	ohmd_lock_mutex (sensor->sensor_lock);
 	sensor->pf.camera_pose = *camera_pose;
 	sensor->pf.have_camera_pose = true;
 	sensor->pf.camera_pose_changed = false;
+
+	quatf cam_orient = camera_pose->orient;
+
+	oquatf_inverse(&cam_orient);
+	oquatf_get_rotated(&cam_orient, &gravity_vector, &sensor->pf.cam_gravity_vector);
+
 	ohmd_unlock_mutex (sensor->sensor_lock);
 
 	LOGI("Set sensor %d pose to orient %f %f %f %f  pos %f %f %f",
