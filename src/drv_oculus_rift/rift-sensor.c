@@ -243,6 +243,7 @@ static void frame_captured_cb(rift_sensor_device *dev, ohmd_video_frame *vframe,
 	return;
 
 no_frame:
+	ohmd_video_frame_release(vframe);
 	ohmd_unlock_mutex(sensor->sensor_lock);
 }
 
