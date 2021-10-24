@@ -365,19 +365,16 @@ rift_sensor_new(ohmd_context* ohmd_ctx, int id, const char *serial_no,
 	sensor_ctx->fast_analysis_thread = ohmd_create_thread (ohmd_ctx, fast_analysis_thread, sensor_ctx);
 	sensor_ctx->long_analysis_thread = ohmd_create_thread (ohmd_ctx, long_analysis_thread, sensor_ctx);
 
-	if (!rift_sensor_device_start_video (sensor_ctx->dev, NUM_CAPTURE_BUFFERS, frame_captured_cb, sensor_ctx)) {
-		LOGW("Failed to start video stream for sensor %s\n", sensor_ctx->serial_no);
-		goto fail;
-	}
 
 	LOGV("Sensor %d ready\n", id);
 
 	return sensor_ctx;
+}
 
-fail:
-	if (sensor_ctx)
-		rift_sensor_free (sensor_ctx);
-	return NULL;
+bool
+rift_sensor_start(rift_sensor_ctx *sensor)
+{
+	return rift_sensor_device_start_video (sensor->dev, NUM_CAPTURE_BUFFERS, frame_captured_cb, sensor);
 }
 
 void

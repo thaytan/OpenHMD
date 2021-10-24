@@ -331,6 +331,15 @@ rift_tracker_new (ohmd_context* ohmd_ctx,
 
 	printf ("Opened %u Rift Sensor cameras\n", tracker_ctx->n_sensors);
 
+	/* Loop over the sensors we found and start the video flowing */
+	for (i = 0; i < tracker_ctx->n_sensors; i++) {
+		rift_sensor_ctx *sensor = tracker_ctx->sensors[i];
+
+		if (!rift_sensor_start (sensor)) {
+			LOGW("Failed to start video stream for sensor %s\n", rift_sensor_serial_no (sensor));
+		}
+	}
+
 	return tracker_ctx;
 
 fail:

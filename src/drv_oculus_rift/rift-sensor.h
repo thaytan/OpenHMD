@@ -74,5 +74,6 @@ rift_sensor_ctx * rift_sensor_new(ohmd_context* ohmd_ctx, int id, const char *se
 void rift_sensor_free (rift_sensor_ctx *sensor_ctx);
 const char *rift_sensor_serial_no (rift_sensor_ctx *sensor);
 bool rift_sensor_add_device (rift_sensor_ctx *ctx, rift_tracked_device *device);
+bool rift_sensor_start(rift_sensor_ctx *sensor);
 
 #endif
