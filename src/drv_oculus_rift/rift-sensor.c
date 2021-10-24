@@ -374,7 +374,7 @@ rift_sensor_new(ohmd_context* ohmd_ctx, int id, const char *serial_no,
 bool
 rift_sensor_start(rift_sensor_ctx *sensor)
 {
-	return rift_sensor_device_start_video (sensor->dev, NUM_CAPTURE_BUFFERS, frame_captured_cb, sensor);
+	return rift_sensor_device_start_video (sensor->dev, NUM_CAPTURE_BUFFERS + 1, frame_captured_cb, sensor);
 }
 
 void
