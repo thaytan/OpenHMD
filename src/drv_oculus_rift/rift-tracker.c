@@ -959,6 +959,13 @@ rift_tracked_device_on_new_exposure(rift_tracked_device_priv *dev, rift_tracked_
 		}
 	}
 
+	if (dev->device_time_ns - dev->last_observed_pose_ts < (POSE_LOST_THRESHOLD * 1000000UL))
+		dev_info->had_pose_lock = true;
+	else
+		dev_info->had_pose_lock = false;
+
+	rift_tracked_device_get_model_pose_locked(dev, dev->device_time_ns, &dev_info->capture_pose, &dev_info->pos_error, &dev_info->rot_error);
+
 	if (slot) {
 		slot->device_time_ns = dev_info->device_time_ns;
 		slot->valid = true;
@@ -966,16 +973,8 @@ rift_tracked_device_on_new_exposure(rift_tracked_device_priv *dev, rift_tracked_
 		slot->n_pose_reports = 0;
 		slot->n_used_reports = 0;
 
-		dev_info->fusion_slot = slot->slot_id;
-
-		if (dev->device_time_ns - dev->last_observed_pose_ts < (POSE_LOST_THRESHOLD * 1000000UL))
-			dev_info->had_pose_lock = true;
-		else
-			dev_info->had_pose_lock = false;
-
 		LOGD ("Assigning free delay slot %d for dev %d, ts %llu", slot->slot_id, dev->base.id, (unsigned long long) dev->device_time_ns);
-
-		rift_tracked_device_get_model_pose_locked(dev, dev->device_time_ns, &dev_info->capture_pose, &dev_info->pos_error, &dev_info->rot_error);
+		dev_info->fusion_slot = slot->slot_id;
 
 		/* Tell the kalman filter to prepare the delay slot */
 		rift_kalman_6dof_prepare_delay_slot(&dev->ukf_fusion, dev_info->device_time_ns, slot->slot_id);
