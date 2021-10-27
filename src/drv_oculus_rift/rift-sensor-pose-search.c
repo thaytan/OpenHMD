@@ -68,12 +68,13 @@ void rift_pose_finder_process_blobs_fast(rift_pose_finder *pf,
 		obj_world_pose = dev_state->capture_world_pose;
 
 		LOGV ("Sensor %d Fusion provided pose for device %d, %f %f %f %f pos %f %f %f "
-			"pos_err %f %f %f rot_err %f %f %f",
+			"pos_err %f %f %f rot_err %f %f %f had_pose_lock %d",
 			pf->sensor_id, dev->id,
 			obj_world_pose.orient.x, obj_world_pose.orient.y, obj_world_pose.orient.z, obj_world_pose.orient.w,
 			obj_world_pose.pos.x, obj_world_pose.pos.y, obj_world_pose.pos.z,
 			exp_dev_info->pos_error.x, exp_dev_info->pos_error.y, exp_dev_info->pos_error.z,
-			exp_dev_info->rot_error.x, exp_dev_info->rot_error.y, exp_dev_info->rot_error.z);
+			exp_dev_info->rot_error.x, exp_dev_info->rot_error.y, exp_dev_info->rot_error.z,
+			exp_dev_info->had_pose_lock);
 
 		/* If we don't have a camera pose yet, skip straight to correspondence
 		 * search */
@@ -127,6 +128,26 @@ void rift_pose_finder_process_blobs_fast(rift_pose_finder *pf,
 					LOGD("Sensor %d re-acquired match for device %d matched %u blobs of %u",
 						pf->sensor_id, dev->id, dev_state->score.matched_blobs, dev_state->score.visible_leds);
 				}
+#if LOGLEVEL == 0
+				else {
+					quatf orient_diff;
+					vec3f pos_error, orient_error;
+
+					ovec3f_subtract(&obj_cam_pose.pos, &dev_state->final_cam_pose.pos, &pos_error);
+
+					oquatf_diff(&obj_cam_pose.orient, &dev_state->final_cam_pose.orient, &orient_diff);
+					oquatf_normalize_me(&orient_diff);
+					oquatf_to_rotation(&orient_diff, &orient_error);
+
+					LOGD("Sensor %d device %d had %d prior blobs, but failed match. Yielded pose %f %f %f %f pos %f %f %f (match %d of %d) rot_error %f %f %f pos_error %f %f %f",
+						pf->sensor_id, dev->id, num_blobs,
+						obj_cam_pose.orient.x, obj_cam_pose.orient.y, obj_cam_pose.orient.z, obj_cam_pose.orient.w,
+						obj_cam_pose.pos.x, obj_cam_pose.pos.y, obj_cam_pose.pos.z,
+						dev_state->score.matched_blobs, dev_state->score.visible_leds,
+						orient_error.x, orient_error.y, orient_error.z,
+						pos_error.x, pos_error.y, pos_error.z);
+				}
+#endif
 			}
 		}
 
