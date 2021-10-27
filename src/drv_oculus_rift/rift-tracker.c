@@ -51,6 +51,9 @@
  * we force an update */
 #define POSE_LOST_ORIENT_THRESHOLD 100
 
+#define MIN_ROT_ERROR DEG_TO_RAD(25)
+#define MIN_POS_ERROR 0.1
+
 typedef struct rift_tracked_device_priv rift_tracked_device_priv;
 typedef struct rift_tracker_pose_report rift_tracker_pose_report;
 typedef struct rift_tracker_pose_delay_slot rift_tracker_pose_delay_slot;
@@ -659,6 +662,15 @@ bool rift_tracked_device_get_latest_exposure_info_pose (rift_tracked_device *dev
 						NULL, NULL, NULL, &global_pos_error, &global_rot_error);
 
 		oposef_apply(&dev->model_from_fusion, &imu_global_pose, &dev_info->capture_pose);
+
+		int i;
+		for (i = 0; i < 3; i++) {
+			if (global_rot_error.arr[i] < MIN_ROT_ERROR)
+				global_rot_error.arr[i] = MIN_ROT_ERROR;
+			if (global_pos_error.arr[i] < MIN_POS_ERROR)
+				global_pos_error.arr[i] = MIN_POS_ERROR;
+		}
+
 		oquatf_get_rotated_abs(&dev->model_from_fusion.orient, &global_pos_error, &dev_info->pos_error);
 		oquatf_get_rotated_abs(&dev->model_from_fusion.orient, &global_rot_error, &dev_info->rot_error);
 		res = true;
@@ -808,10 +820,26 @@ void rift_tracked_device_get_model_pose_locked(rift_tracked_device_priv *dev, do
 	/* Apply the pose conversion from IMU->model */
 	oposef_apply(&dev->model_from_fusion, &imu_global_pose, &model_pose);
 
-	if (pos_error)
+	if (pos_error) {
+		int i;
+
+		for (i = 0; i < 3; i++) {
+			if (global_pos_error.arr[i] < MIN_POS_ERROR)
+				global_pos_error.arr[i] = MIN_POS_ERROR;
+		}
+
 		oquatf_get_rotated_abs(&dev->model_from_fusion.orient, &global_pos_error, pos_error);
-	if (rot_error)
+	}
+	if (rot_error) {
+		int i;
+
+		for (i = 0; i < 3; i++) {
+			if (global_rot_error.arr[i] < MIN_ROT_ERROR)
+				global_rot_error.arr[i] = MIN_ROT_ERROR;
+		}
+
 		oquatf_get_rotated_abs(&dev->model_from_fusion.orient, &global_rot_error, rot_error);
+	}
 
 	dev->model_pose.orient = model_pose.orient;
 	if (dev->device_time_ns - dev->last_observed_pose_ts < (POSE_LOST_THRESHOLD * 1000000UL)) {
