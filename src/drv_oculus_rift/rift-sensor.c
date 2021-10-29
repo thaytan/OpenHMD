@@ -27,6 +27,8 @@
 
 #include "rift-debug-draw.h"
 
+#include "ohmd-jpeg.h"
+
 #include "ohmd-pipewire.h"
 
 #define ASSERT_MSG(_v, label, ...) if(!(_v)){ fprintf(stderr, __VA_ARGS__); goto label; }
@@ -59,6 +61,7 @@ struct rift_sensor_ctx_s
 	rift_sensor_device *dev;
 
 	rift_sensor_analysis_frame *frames;
+	ohmd_jpeg_decoder *jpeg_decoder;
 
 	blobwatch* bw;
 	rift_pose_finder pf;
@@ -248,10 +251,6 @@ static void analyse_frame_fast(rift_sensor_ctx *sensor, rift_sensor_analysis_fra
 
 	LOGD("Sensor %d Frame %d - starting fast analysis", sensor->id, frame->id);
 
-	frame->need_long_analysis = false;
-	frame->long_analysis_found_new_blobs = false;
-	frame->long_analysis_start_ts = frame->long_analysis_finish_ts = 0;
-
 	frame->image_analysis_start_ts = now;
 
 	blobwatch_process(sensor->bw, vframe->data, width, height,
@@ -403,6 +402,11 @@ rift_sensor_free (rift_sensor_ctx *sensor_ctx)
 	if (sensor_ctx->new_frame_cond)
 		ohmd_destroy_cond(sensor_ctx->new_frame_cond);
 
+#if HAVE_LIBJPEG
+	if (sensor_ctx->jpeg_decoder)
+		ohmd_jpeg_decoder_free(sensor_ctx->jpeg_decoder);
+#endif
+
 	if (sensor_ctx->bw)
 		blobwatch_free (sensor_ctx->bw);
 	if (sensor_ctx->debug_vid_raw != NULL)
@@ -451,14 +455,46 @@ static unsigned int long_analysis_thread(void *arg)
 	return 0;
 }
 
-static void init_frame_analyse(rift_sensor_ctx *sensor, rift_sensor_analysis_frame *frame)
+#if HAVE_LIBJPEG
+bool decode_frame(rift_sensor_ctx *sensor, rift_sensor_analysis_frame *frame)
 {
+	ohmd_video_frame *vframe = frame->vframe;
+	ohmd_video_frame *out_vframe = NULL;
+
+	if (vframe->format != OHMD_VIDEO_FRAME_FORMAT_JPEG)
+		return true;
+
+	if (sensor->jpeg_decoder == NULL) {
+		sensor->jpeg_decoder = ohmd_jpeg_decoder_new(sensor->ohmd_ctx);
+		if (sensor->jpeg_decoder == NULL) {
+			LOGE("Failed to create JPEG decoder");
+			return false;
+		}
+	}
+
+	if (!ohmd_jpeg_decoder_decode(sensor->jpeg_decoder, vframe, &out_vframe))
+		return false;
+
+	ohmd_video_frame_release(frame->vframe);
+	frame->vframe = out_vframe;
+
+	return true;
+}
+#endif
+
+static bool init_frame_analyse(rift_sensor_ctx *sensor, rift_sensor_analysis_frame *frame)
+{
+
 	/* Do initial prep of the frame before we start analysis */
 	LOGD ("Sensor %d captured frame %d exposure counter %u phase %d", sensor->id,
 		frame->id, frame->exposure_info.count, frame->exposure_info.led_pattern_phase);
 
 	int d;
 	const rift_tracker_exposure_info *exposure_info = &frame->exposure_info;
+
+	frame->need_long_analysis = false;
+	frame->long_analysis_found_new_blobs = false;
+	frame->long_analysis_start_ts = frame->long_analysis_finish_ts = 0;
 
 	for (d = 0; d < exposure_info->n_devices; d++) {
 		rift_sensor_frame_device_state *dev_state = frame->capture_state + d;
@@ -475,6 +511,13 @@ static void init_frame_analyse(rift_sensor_ctx *sensor, rift_sensor_analysis_fra
 		dev_state->found_device_pose = false;
 	}
 	frame->n_devices = exposure_info->n_devices;
+
+#if HAVE_LIBJPEG
+	if (!decode_frame(sensor, frame))
+		return false;
+#endif
+
+	return true;
 }
 
 static unsigned int fast_analysis_thread(void *arg)
@@ -486,8 +529,8 @@ static unsigned int fast_analysis_thread(void *arg)
 			rift_sensor_analysis_frame *frame = POP_QUEUE(&sensor->fast_analysis_q);
 			if (frame != NULL) {
 				ohmd_unlock_mutex (sensor->sensor_lock);
-				init_frame_analyse(sensor, frame);
-				analyse_frame_fast(sensor, frame);
+				if (init_frame_analyse(sensor, frame))
+					analyse_frame_fast(sensor, frame);
 				ohmd_lock_mutex (sensor->sensor_lock);
 
 				/* Done with this frame - either send it back to the capture thread,

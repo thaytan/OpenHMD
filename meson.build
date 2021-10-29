@@ -47,6 +47,8 @@ if not dep_opencv.found()
 	dep_opencv = dependency('opencv')
 endif
 
+dep_jpeg = dependency('libjpeg', required: false)
+
 deps = [
 	dep_libm,
 	dep_threads,
@@ -109,6 +111,11 @@ else
 	endif
 endif
 
+if dep_jpeg.found()
+	c_args += '-DHAVE_LIBJPEG'
+	sources += [ 'src/drv_oculus_rift/ohmd-jpeg.c' ]
+endif
+
 _drivers = get_option('drivers')
 
 if _drivers.contains('rift')
@@ -141,6 +148,9 @@ if _drivers.contains('rift')
 	deps += dep_hidapi
 	deps += dep_libusb
 	deps += dep_opencv
+	if dep_jpeg.found()
+		deps += dep_jpeg
+	endif
   if have_pipewire
 		sources += ['src/drv_oculus_rift/rift-debug-draw.c']
   endif
