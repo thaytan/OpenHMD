@@ -43,10 +43,10 @@ extern "C" bool estimate_initial_pose(struct blob *blobs, int num_blobs,
 	int i, j;
 	int num_leds = 0;
 	uint64_t taken = 0;
-	int flags = CV_ITERATIVE;
+	int flags = cv::SOLVEPNP_ITERATIVE;
 	cv::Mat inliers;
-	int iterationsCount = 50;
-	float confidence = 0.95;
+	int iterationsCount = 100;
+	float confidence = 0.99;
 	cv::Mat cameraK = cv::Mat(3, 3, CV_64FC1, calib->camera_matrix.m);
 	cv::Mat distCoeffs;
 	cv::Mat dummyK = cv::Mat::eye(3, 3, CV_64FC1);
@@ -128,7 +128,7 @@ extern "C" bool estimate_initial_pose(struct blob *blobs, int num_blobs,
     cv::undistortPoints(list_points2d, list_points2d_undistorted, cameraK, distCoeffs);
   }
 
-	float reprojectionError = 2.0 / calib->camera_matrix.m[0];
+	float reprojectionError = 3.0 / calib->camera_matrix.m[0];
 
 	cv::solvePnPRansac(list_points3d, list_points2d_undistorted, dummyK, dummyD, rvec, tvec,
 			   use_extrinsic_guess, iterationsCount, reprojectionError,
@@ -237,15 +237,18 @@ void undistort_points (struct blob *blobs, int num_blobs,
 }
 
 /*
- * Refine pose operations on distortion corrected UV image points,
- * with values near the range [-1,1] (a bit bigger depending on the
- * lens distortion). The image_points parameter is double[num_matches][2]
+ * Refine an already estabilished pose from correspondences
  */
-extern "C" void refine_pose(vec3f *image_points,
-		    rift_led **leds, int num_matches,
-		    posef *pose, double *reprojection_error)
+extern "C" bool refine_pose(struct blob *blobs, int num_blobs,
+    int device_id, rift_led *leds, int num_led_pos,
+    rift_sensor_camera_params *calib, posef *pose)
 {
-  int i;
+	int i, j;
+	int num_leds = 0;
+	uint64_t taken = 0;
+	int flags = cv::SOLVEPNP_ITERATIVE;
+	cv::Mat cameraK = cv::Mat(3, 3, CV_64FC1, calib->camera_matrix.m);
+	cv::Mat distCoeffs;
 	cv::Mat dummyK = cv::Mat::eye(3, 3, CV_64FC1);
 	cv::Mat dummyD = cv::Mat::zeros(4, 1, CV_64FC1);
 	cv::Mat rvec = cv::Mat::zeros(3, 1, CV_64FC1);
@@ -258,23 +261,79 @@ extern "C" void refine_pose(vec3f *image_points,
 	quatf_to_3x3 (R, &pose->orient);
 	cv::Rodrigues(R, rvec);
 
-	std::vector<cv::Point3f> list_points3d(num_matches);
-	std::vector<cv::Point2f> list_points2d(num_matches);
+	//cout << "R = " << R << ", rvec = " << rvec << endl;
 
-	for (i = 0; i < num_matches; i++) {
-		list_points3d[i].x = leds[i]->pos.x;
-		list_points3d[i].y = leds[i]->pos.y;
-		list_points3d[i].z = leds[i]->pos.z;
-		list_points2d[i].x = image_points[i].x;
-		list_points2d[i].y = image_points[i].y;
+	/* count identified leds */
+	for (i = 0; i < num_blobs; i++) {
+		int led_id = blobs[i].led_id;
+		if (LED_OBJECT_ID(led_id) != device_id)
+			continue; /* invalid or LED id for another object */
+		led_id = LED_LOCAL_ID(led_id);
+
+		if (taken & (1ULL << led_id))
+			continue;
+		taken |= (1ULL << led_id);
+		num_leds++;
 	}
 
-  // OpenCV 3.4.7 introduced a method to go straight to refining the pose with LM:
+	if (num_leds < 4)
+		return false;
+
+	std::vector<cv::Point3f> list_points3d(num_leds);
+	std::vector<cv::Point2f> list_points2d(num_leds);
+	std::vector<cv::Point2f> list_points2d_undistorted(num_leds);
+
+	taken = 0;
+	for (i = 0, j = 0; i < num_blobs && j < num_leds; i++) {
+		int led_id = blobs[i].led_id;
+		if (LED_OBJECT_ID(led_id) != device_id)
+			continue; /* invalid or LED id for another object */
+		led_id = LED_LOCAL_ID(led_id);
+		if (taken & (1ULL << led_id))
+			continue;
+		taken |= (1ULL << led_id);
+		list_points3d[j].x = leds[led_id].pos.x;
+		list_points3d[j].y = leds[led_id].pos.y;
+		list_points3d[j].z = leds[led_id].pos.z;
+		list_points2d[j].x = blobs[i].x;
+		list_points2d[j].y = blobs[i].y;
+		j++;
+
+		LOGD ("LED %d at %f,%f (3D %f %f %f)",
+		    blobs[i].led_id, blobs[i].x, blobs[i].y,
+		    leds[led_id].pos.x, leds[led_id].pos.y, leds[led_id].pos.z);
+	}
+
+	num_leds = j;
+	if (num_leds < 4)
+		return false;
+	list_points3d.resize(num_leds);
+	list_points2d.resize(num_leds);
+	list_points2d_undistorted.resize(num_leds);
+
+	/* Need to support 2 different distortion models. Fisheye for CV1, Pinhole for DK2 */
+	if (calib->dist_fisheye) {
+		distCoeffs = cv::Mat(4, 1, CV_64FC1, calib->dist_coeffs);
+
+		// we have distortion params for the openCV fisheye model
+		// so we undistort the image points manually before passing them to the PnpRansac solver
+		// and we give the solver identity camera + null distortion matrices
+		cv::fisheye::undistortPoints(list_points2d, list_points2d_undistorted, cameraK, distCoeffs);
+	}
+	else {
+		distCoeffs = cv::Mat(5, 1, CV_64FC1, calib->dist_coeffs);
+		// Pinhole camera undistort
+		cv::undistortPoints(list_points2d, list_points2d_undistorted, cameraK, distCoeffs);
+	}
+
+// OpenCV 3.4.7 introduced a method to go straight to refining the pose with LM:
 #if CV_VERSION_MAJOR > 4 || (CV_VERSION_MAJOR == 3 && CV_VERSION_MINOR > 4) || (CV_VERSION_MAJOR == 3 && CV_VERSION_MINOR == 4 && CV_VERSION_REVISION >= 7) 
-  cv::solvePnPRefineLM (list_points3d, list_points2d, dummyK, dummyD, rvec, tvec);
+	if (!cv::solvePnPRefineLM (list_points3d, list_points2d_undistorted, dummyK, dummyD, rvec, tvec))
+		return false;
 #else
-	cv::solvePnPRansac(list_points3d, list_points2d, dummyK, dummyD, rvec, tvec,
-			   true, 10, 1.0 / 300.0, 0.95);
+	if (!cv::solvePnP(list_points3d, list_points2d_undistorted, dummyK, dummyD, rvec, tvec,
+			   true, flags))
+		return false;
 #endif
 
 	vec3f v;
@@ -289,25 +348,10 @@ extern "C" void refine_pose(vec3f *image_points,
 	for (i = 0; i < 3; i++)
 		pose->pos.arr[i] = tvec.at<double>(i);
 
-  /* Calculate reprojection error */
-  if (reprojection_error) {
-    double sq_error = 0.0;
+	LOGV ("Got refined PnP pose quat %f %f %f %f  pos %f %f %f",
+	     pose->orient.x, pose->orient.y, pose->orient.z, pose->orient.w,
+	     pose->pos.x, pose->pos.y, pose->pos.z);
 
-    for (i = 0; i < num_matches; i++) {
-      vec3f pos;
-      double dx, dy;
-
-      oquatf_get_rotated (&pose->orient, &leds[i]->pos, &pos);
-      ovec3f_add (&pos, &pose->pos, &pos);
-      ovec3f_multiply_scalar (&pos, 1.0/pos.z, &pos);
-
-      dx = pos.x - image_points[i].x;
-      dy = pos.y - image_points[i].y;
-
-      sq_error += (dx*dx) + (dy*dy);
-    }
-
-    *reprojection_error = sq_error;
-  }
+	return true;
 }
 
