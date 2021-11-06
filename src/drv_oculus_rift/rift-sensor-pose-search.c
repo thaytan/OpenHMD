@@ -349,8 +349,7 @@ update_device_and_blobs (rift_pose_finder *pf, rift_sensor_analysis_frame *frame
 
 			assert (pf->pose_cb != NULL);
 
-			pf->pose_cb (pf->pose_cb_data, dev, frame, &pose, score);
-			dev_state->found_device_pose = true;
+			dev_state->found_device_pose = pf->pose_cb (pf->pose_cb_data, dev, frame, &pose, score);
 		}
 		/* Arbitrary 25 degree threshold for gravity vector matches the minimum error */
 		else if (dev->id == 0 && oquatf_get_length (&capture_pose->orient) > 0.9 && dev_state->gravity_error_rad <= DEG_TO_RAD(25.0)) {
