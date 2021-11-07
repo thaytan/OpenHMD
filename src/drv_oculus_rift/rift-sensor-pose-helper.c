@@ -13,8 +13,9 @@
 
 struct visible_led_info {
 	rift_led *led;
-	vec3f pos;
-	double led_radius;
+	double led_radius_px; /* Expected max size of the LED in pixels at that distance */
+	vec3f pos_px; /* Projected position of the LED (pixels) */
+	vec3f pos_m; /* Projected physical position of the LED (metres) */
 };
 
 static void expand_rect(rift_rect_t *bounds, double x, double y, double w, double h)
@@ -34,25 +35,53 @@ static int find_best_matching_led (struct visible_led_info *led_points, int num_
 	double best_z;
 	int best_led_index = -1;
 	double best_sqerror = 1e20;
+	int leds_within_range = 0;
 
 	for (int i = 0; i < num_leds; i++) {
 		struct visible_led_info *led_info = led_points + i;
-		vec3f *pos = &led_info->pos;
-		double led_radius = led_info->led_radius;
-		double dx = abs(pos->x - blob->x);
-		double dy = abs(pos->y - blob->y);
+		vec3f *pos_px = &led_info->pos_px;
+		double led_radius_px = led_info->led_radius_px;
+		double dx = fabs(pos_px->x - blob->x);
+		double dy = fabs(pos_px->y - blob->y);
 		double sqerror = dx*dx + dy*dy;
 
 		/* Check if the LED falls within the bounding box
-		 * has smaller error distance, or is closer to the camera (smaller Z) */
-		if (sqerror < (led_radius*led_radius)) {
-			if (best_led_index < 0 || sqerror < best_sqerror || best_z > pos->z) {
-				best_z = pos->z;
+		 * is closer to the camera (smaller Z), or is at least
+		 * led_radius closer to the blob center */
+		if (sqerror < (led_radius_px*led_radius_px)) {
+			leds_within_range++;
+
+			if (best_led_index < 0 || best_z > led_info->pos_m.z || (sqerror + led_radius_px) < best_sqerror) {
+				best_z = led_info->pos_m.z;
 				best_led_index = i;
 				best_sqerror = sqerror;
 			}
 		}
 	}
+
+#if LOGLEVEL <= 1
+	if (leds_within_range > 1) {
+		LOGV("Multiple LEDs match blob @ %f, %f. best_sqerror %f LED %d z %f",
+				blob->x, blob->y, best_sqerror, best_led_index, led_points[best_led_index].pos_m.z);
+		for (int i = 0; i < num_leds; i++) {
+			struct visible_led_info *led_info = led_points + i;
+			vec3f *pos_px = &led_info->pos_px;
+			vec3f *pos_m = &led_info->pos_m;
+			double led_radius_px = led_info->led_radius_px;
+			double dx = fabs(pos_px->x - blob->x);
+			double dy = fabs(pos_px->y - blob->y);
+			double sqerror = dx*dx + dy*dy;
+
+			/* Check if the LED falls within the bounding box
+			 * has smaller error distance, or is closer to the camera (smaller Z) */
+			if (sqerror < (led_radius_px*led_radius_px)) {
+				LOGV("LED %d sqerror %f pos px %f %f radius %f metres %f %f %f", i, sqerror,
+					pos_px->x, pos_px->y, led_radius_px,
+					pos_m->x, pos_m->y, pos_m->z);
+			}
+		}
+	}
+#endif
 
 	if (out_sqerror)
 		*out_sqerror = best_sqerror;
@@ -137,52 +166,54 @@ void rift_evaluate_pose_with_prior (rift_pose_metrics *score, posef *pose,
 	
 	/* Calculate the bounding box and visible LEDs */
 	for (i = 0; i < num_leds; i++) {
-		vec3f *p = led_out_points + i;
+		vec3f *led_pos_px = led_out_points + i;
 		
-		if (p->x < 0 || p->y < 0 || p->x >= calib->width || p->y >= calib->height)
+		if (led_pos_px->x < 0 || led_pos_px->y < 0 || led_pos_px->x >= calib->width || led_pos_px->y >= calib->height)
 		 continue; // Outside the visible screen space
 		
-		vec3f normal, position;
+		vec3f normal, led_pos_m;
 		double facing_dot;
-		oquatf_get_rotated(&pose->orient, &leds[i].pos, &position);
-		ovec3f_add (&pose->pos, &position, &position);
+		oquatf_get_rotated(&pose->orient, &leds[i].pos, &led_pos_m);
+		ovec3f_add (&pose->pos, &led_pos_m, &led_pos_m);
 
 		/* Calculate the expected size of an LED at this distance */
 		double led_radius_px = 4.0;
-		if (position.z > 0.0) {
-			led_radius_px = focal_length * led_radius_mm / position.z;
+		if (led_pos_m.z > 0.0) {
+			led_radius_px = focal_length * led_radius_mm / led_pos_m.z;
 		}
 		
 		/* Convert the position to a unit vector for dot product comparison */
-		ovec3f_normalize_me (&position);
+		vec3f tmp = led_pos_m;
+		ovec3f_normalize_me (&tmp);
 		oquatf_get_rotated(&pose->orient, &leds[i].dir, &normal);
 
-		facing_dot = ovec3f_get_dot (&position, &normal);
+		facing_dot = ovec3f_get_dot (&tmp, &normal);
 		
 #if 0
-		printf (" LED %u pos %f,%f,%f -> %f,%f (lin %f,%f,%f)\n",
-			i, leds[i].pos.x, leds[i].pos.y, leds[i].pos.z, 
-			p->x, p->y, position.x, position.y, position.z);
+		printf ("device %d LED %u pos %f,%f,%f -> %f,%f (lin %f,%f,%f)\n",
+			device_id, i, leds[i].pos.x, leds[i].pos.y, leds[i].pos.z,
+			led_pos_px->x, led_pos_px->y, led_pos_m.x, led_pos_m.y, led_pos_m.z);
 #endif
 
 		/* The vector to the LED position points out from the camera
 		 * to the LED, but the normal points toward the camera, so
 		 * we need to compare against 180 - RIFT_LED_ANGLE here */
 		if (facing_dot < cos(DEG_TO_RAD(180.0 - RIFT_LED_ANGLE))) {
-			visible_led_points[score->visible_leds].pos = *p;
-			visible_led_points[score->visible_leds].led_radius = led_radius_px;
+			visible_led_points[score->visible_leds].pos_px = *led_pos_px;
+			visible_led_points[score->visible_leds].pos_m = led_pos_m;
+			visible_led_points[score->visible_leds].led_radius_px = led_radius_px;
 			score->visible_leds++;
 			
 			/* Expand the bounding box */
 			if (first_visible) {
-				bounds.left = p->x - led_radius_px;
-				bounds.top = p->y - led_radius_px;
-				bounds.right= p->x + 2 * led_radius_px;
-				bounds.bottom = p->x + 2 * led_radius_px;
+				bounds.left = led_pos_px->x - led_radius_px;
+				bounds.top = led_pos_px->y - led_radius_px;
+				bounds.right= led_pos_px->x + 2 * led_radius_px;
+				bounds.bottom = led_pos_px->x + 2 * led_radius_px;
 				first_visible = false;
 			}
 			else {
-				expand_rect(&bounds, p->x - led_radius_px, p->y - led_radius_px, 2 * led_radius_px, 2 * led_radius_px);
+				expand_rect(&bounds, led_pos_px->x - led_radius_px, led_pos_px->y - led_radius_px, 2 * led_radius_px, 2 * led_radius_px);
 			}
 		}
 	}
@@ -316,7 +347,7 @@ void rift_mark_matching_blobs (posef *pose,
 	int num_visible_leds = 0;
 	bool first_visible = true;
 	/* FIXME: Pass LED size in the model */
-	double led_radius_mm = 5.0 / 1000.0;
+	double led_radius_mm = 4.0 / 1000.0;
 	double focal_length;
 	rift_rect_t bounds = { 0, };
 	int i;
@@ -333,45 +364,49 @@ void rift_mark_matching_blobs (posef *pose,
 
 	/* Calculate the bounding box and visible LEDs */
 	for (i = 0; i < num_leds; i++) {
-		vec3f *p = led_out_points + i;
+		vec3f *led_pos_px = led_out_points + i;
 
-		if (p->x < 0 || p->y < 0 || p->x >= calib->width || p->y >= calib->height)
+		if (led_pos_px->x < 0 || led_pos_px->y < 0 || led_pos_px->x >= calib->width || led_pos_px->y >= calib->height)
 		 continue; // Outside the visible screen space
 
-		vec3f normal, position;
+		vec3f normal, led_pos_m;
 		double facing_dot;
-		oquatf_get_rotated(&pose->orient, &leds[i].pos, &position);
-		ovec3f_add (&pose->pos, &position, &position);
 
-		ovec3f_normalize_me (&position);
+		oquatf_get_rotated(&pose->orient, &leds[i].pos, &led_pos_m);
+		ovec3f_add (&pose->pos, &led_pos_m, &led_pos_m);
+
+		vec3f tmp = led_pos_m;
+
+		ovec3f_normalize_me (&tmp);
 		oquatf_get_rotated(&pose->orient, &leds[i].dir, &normal);
-		facing_dot = ovec3f_get_dot (&position, &normal);
+		facing_dot = ovec3f_get_dot (&tmp, &normal);
 
-		LOGV("LED %d @ %f,%f dot %f\n", i, p->x, p->y, facing_dot);
+		LOGV("LED %d @ %f,%f dot %f\n", i, led_pos_px->x, led_pos_px->y, facing_dot);
 
 		if (facing_dot < 0.65) {
 			struct visible_led_info *led_info = visible_led_points + num_visible_leds;
-			double led_radius = 5.0;
-			if (position.z > 0.0) {
-				led_radius = focal_length * led_radius_mm / position.z;
+			double led_radius_px = 4.0;
+			if (led_pos_m.z > 0.0) {
+				led_radius_px = focal_length * led_radius_mm / led_pos_m.z;
 			}
 
-			led_info->pos = *p;
-			led_info->led_radius = led_radius;
+			led_info->pos_px = *led_pos_px;
+			led_info->pos_m = led_pos_m;
+			led_info->led_radius_px = led_radius_px;
 			led_info->led = leds + i;
 
 			num_visible_leds++;
 
 			/* Expand the bounding box */
 			if (first_visible) {
-				bounds.left = p->x - led_radius;
-				bounds.top = p->y - led_radius;
-				bounds.right= p->x + 2 * led_radius;
-				bounds.bottom = p->x + 2 * led_radius;
+				bounds.left = led_pos_px->x - led_radius_px;
+				bounds.top = led_pos_px->y - led_radius_px;
+				bounds.right= led_pos_px->x + 2 * led_radius_px;
+				bounds.bottom = led_pos_px->x + 2 * led_radius_px;
 				first_visible = false;
 			}
 			else {
-				expand_rect(&bounds, p->x - led_radius, p->y - led_radius, 2 * led_radius, 2 * led_radius);
+				expand_rect(&bounds, led_pos_px->x - led_radius_px, led_pos_px->y - led_radius_px, 2 * led_radius_px, 2 * led_radius_px);
 			}
 		}
 	}
