@@ -486,6 +486,8 @@ int rift_sensor_uvc_stream_start(rift_sensor_uvc_stream *stream, uint8_t min_fra
 		if (ret < 0) {
 			fprintf(stderr, "failed to submit iso transfer %d. Error %d\n", i, ret);
 			stream->active_transfers = i;
+
+			rift_sensor_uvc_stream_stop(stream);
 			return ret;
 		}
 	}
