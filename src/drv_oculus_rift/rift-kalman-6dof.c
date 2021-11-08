@@ -702,7 +702,7 @@ void rift_kalman_6dof_init(rift_kalman_6dof_filter *state, posef *init_pose, int
 	 * the orientation. */
 	ukf_measurement_init(&state->m2, 7, 6, &state->ukf, pose_measurement_func, pose_mean_func, pose_residual_func, pose_sum_func);
 	for (int i = 0; i < 3; i++)
-		MATRIX2D_XY(state->m2.R, i, i) = 0.05 * 0.05; /* 5cm error std dev */
+		MATRIX2D_XY(state->m2.R, i, i) = 0.01 * 0.01; /* 1cm error std dev */
 
 	MATRIX2D_XY(state->m2.R, 3, 3) = (DEG_TO_RAD(90) * DEG_TO_RAD(90)); /* 90 degrees std dev (don't trust observations much for X/Z, 20 degrees for yaw) */
 	MATRIX2D_XY(state->m2.R, 4, 4) = (DEG_TO_RAD(20) * DEG_TO_RAD(20)); /* Y */
@@ -711,7 +711,7 @@ void rift_kalman_6dof_init(rift_kalman_6dof_filter *state, posef *init_pose, int
 	/* m_position is for position-only measurements - no orientation. */
 	ukf_measurement_init(&state->m_position, 3, 3, &state->ukf, position_measurement_func, NULL, NULL, NULL);
 	for (int i = 0; i < 3; i++)
-		MATRIX2D_XY(state->m_position.R, i, i) = 0.02 * 0.02; /* 2cm error std dev */
+		MATRIX2D_XY(state->m_position.R, i, i) = 0.01 * 0.01; /* 1cm error std dev */
 
 	state->reset_slot = -1;
 	state->pose_slot = -1;
