@@ -35,6 +35,9 @@ struct rift_sensor_uvc_stream {
 	/* true if we're skipping the current frame */
 	bool skip_frame;
 
+	/* USB streaming alt_setting */
+	int alt_setting;
+
 	int num_transfers;
 	struct libusb_transfer **transfer;
 	int active_transfers;

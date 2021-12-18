@@ -268,7 +268,7 @@ static void iso_transfer_cb(struct libusb_transfer *transfer)
 	/* Handle error conditions */
 	if (transfer->status != LIBUSB_TRANSFER_COMPLETED) {
 		if (transfer->status != LIBUSB_TRANSFER_CANCELLED)
-			printf("transfer error: %u\n", transfer->status);
+			LOGE("USB transfer error: %u", transfer->status);
 		stream->active_transfers--;
 		return;
 	}
@@ -301,11 +301,11 @@ static void iso_transfer_cb(struct libusb_transfer *transfer)
 
 	if (ret < 0) {
 		/* FIXME: Close and re-open this sensor */
-		printf("failed to resubmit after %d attempts\n", i);
+		LOGE("Failed to resubmit USB after %d attempts", i);
 		stream->active_transfers--;
 	}
 	else if (i > 0) {
-		printf("resubmitted xfer after %d attempts\n", i+1);
+		LOGW("Resubmitted USB xfer after %d attempts", i+1);
 	}
 }
 
@@ -414,12 +414,7 @@ int rift_sensor_uvc_stream_setup (ohmd_context* ohmd_ctx,
 
 	control.dwMaxPayloadTransferSize = __le32_to_cpu(control.dwMaxPayloadTransferSize);
 
-	ret = libusb_set_interface_alt_setting(devh, 1, alt_setting);
-	if (ret) {
-		printf("failed to set interface alt setting\n");
-		return ret;
-	}
-
+	stream->alt_setting = alt_setting;
 	stream->frame_size = stream->stride * stream->height;
 
 	num_packets = (stream->frame_size + packet_size - 1) / packet_size;
@@ -458,8 +453,14 @@ int rift_sensor_uvc_stream_start(rift_sensor_uvc_stream *stream, uint8_t min_fra
 	int ret, i;
 
 	assert (!stream->video_running);
-	stream->video_running = true;
 
+	ret = libusb_set_interface_alt_setting(stream->devh, 1, stream->alt_setting);
+	if (ret) {
+		printf("Failed to set interface alt setting %d\n", stream->alt_setting);
+		return ret;
+	}
+
+	stream->video_running = true;
 	stream->cur_frame = NULL;
 
 	stream->frame_cb = frame_cb;
@@ -484,7 +485,7 @@ int rift_sensor_uvc_stream_start(rift_sensor_uvc_stream *stream, uint8_t min_fra
 	for (int i = 0; i < stream->num_transfers; i++) {
 		ret = libusb_submit_transfer(stream->transfer[i]);
 		if (ret < 0) {
-			fprintf(stderr, "failed to submit iso transfer %d. Error %d\n", i, ret);
+			LOGE("failed to submit iso transfer %d. Error %d errno %d", i, ret, errno);
 			stream->active_transfers = i;
 
 			rift_sensor_uvc_stream_stop(stream);
@@ -502,8 +503,11 @@ int rift_sensor_uvc_stream_stop(struct rift_sensor_uvc_stream *stream)
 	int i;
 
 	ret = libusb_set_interface_alt_setting(stream->devh, 1, 0);
-	if (ret)
+	if (ret) {
+		LOGW("Failed to clear USB alt setting to 0 for sensor");
+		stream->video_running = false;
 		return ret;
+	}
 
 	libusb_lock_event_waiters(stream->usb_ctx);
 	stream->video_running = false;
