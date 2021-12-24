@@ -30,7 +30,10 @@ struct ohmd_video_frame {
 
 	/* Pixel data pointer and size to be set by the allocator */
 	unsigned char *data;
-	int data_size;
+	size_t data_block_size;
+	/* bytes of the data block that are filled / valid (must be less than or
+	 * equal to data_block_size) */
+	size_t data_size;
 
 	int stride;
 	int width;
