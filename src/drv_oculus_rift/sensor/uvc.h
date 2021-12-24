@@ -13,6 +13,7 @@ typedef void (*rift_sensor_uvc_stream_frame_cb)(struct rift_sensor_uvc_stream *s
 struct rift_sensor_uvc_stream {
 	ohmd_context* ohmd_ctx;
 
+	ohmd_video_frame_format format;
 	int stride;
 	int width;
 	int height;
@@ -59,6 +60,7 @@ int rift_sensor_uvc_get_cur(libusb_device_handle *devh, uint8_t interface, uint8
 		uint8_t selector, void *data, uint16_t wLength);
 
 int rift_sensor_uvc_stream_setup (ohmd_context* ohmd_ctx, libusb_context *usb_ctx, libusb_device_handle *devh,
+		struct libusb_device_descriptor *desc,
 		rift_sensor_uvc_stream *stream);
 int rift_sensor_uvc_stream_clear (rift_sensor_uvc_stream *stream);
 

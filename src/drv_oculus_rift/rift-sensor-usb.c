@@ -46,6 +46,7 @@ struct rift_sensor_usb_device
 
 	libusb_device_handle *usb_devh;
 	uint16_t usb_pid;
+	bool usb2_mode;
 
 	int stream_started;
 	struct rift_sensor_uvc_stream uvc_stream;
@@ -178,11 +179,12 @@ rift_sensor_device *rift_sensor_usb_new (ohmd_context* ohmd_ctx, int id, const c
 	strcpy ((char *) dev->serial_no, (char *) serial_no);
 	dev->usb_devh = usb_devh;
 	dev->usb_pid = desc.idProduct;
+	dev->usb2_mode = (desc.bcdUSB < 0x300);
 
 	printf ("Opened Rift Sensor %d w/ Serial %s. Connecting to Radio address 0x%02x%02x%02x%02x%02x\n",
 		id, serial_no, hmd_radio_id[0], hmd_radio_id[1], hmd_radio_id[2], hmd_radio_id[3], hmd_radio_id[4]);
 
-	ret = rift_sensor_uvc_stream_setup (ohmd_ctx, usb_ctx, dev->usb_devh, &dev->uvc_stream);
+	ret = rift_sensor_uvc_stream_setup (ohmd_ctx, usb_ctx, dev->usb_devh, &desc, &dev->uvc_stream);
 	ASSERT_MSG(ret >= 0, fail, "could not prepare for streaming\n");
 
 	LOGV("Sensor %d - reading Calibration\n", id);
@@ -227,7 +229,7 @@ static bool rift_sensor_usb_start(rift_sensor_device *base_dev, uint8_t min_fram
 			case CV1_PID:
 			{
 				LOGV("Sensor %d - enabling exposure sync\n", dev->id);
-				ret = rift_sensor_ar0134_init(dev->usb_devh);
+				ret = rift_sensor_ar0134_init(dev->usb_devh, dev->usb2_mode);
 				if (ret < 0)
 					goto fail;
 

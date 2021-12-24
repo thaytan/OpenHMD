@@ -10,6 +10,7 @@
 #include "../../openhmdi.h"
 
 #include "esp570.h"
+#include "esp770u.h"
 #include "uvc.h"
 
 #ifdef __linux__
@@ -135,7 +136,8 @@ void process_payload(struct rift_sensor_uvc_stream *stream, unsigned char *paylo
 		return;
 
 	if (h->bHeaderLength != 12) {
-		printf("invalid header: len %u/%u\n", h->bHeaderLength, (uint32_t) len);
+		if (h->bHeaderLength != 0)
+			LOGI("invalid UVC header: len %u/%u\n", h->bHeaderLength, (uint32_t) len);
 		return;
 	}
 
@@ -156,10 +158,13 @@ void process_payload(struct rift_sensor_uvc_stream *stream, unsigned char *paylo
 
 	if (have_pts) {
 		pts = __le32_to_cpu(h->dwPresentationTime);
-		if (stream->frame_collected != 0 && pts != stream->cur_pts) {
+		/* Skip this warning for JPEG, where we only output
+		 * when we see the frame change: */
+		if (stream->frame_collected != 0 && pts != stream->cur_pts &&
+				stream->format != OHMD_VIDEO_FRAME_FORMAT_JPEG) {
 			printf("UVC PTS changed in-frame at %u bytes. Lost %u ms\n",
 			    stream->frame_collected,
-			    (pts - stream->cur_pts * 1000) / RIFT_SENSOR_CLOCK_FREQ);
+			    (pts - stream->cur_pts) * 1000 / RIFT_SENSOR_CLOCK_FREQ);
 			stream->cur_pts = pts;
 		}
 	}
@@ -174,9 +179,17 @@ void process_payload(struct rift_sensor_uvc_stream *stream, unsigned char *paylo
 		uint64_t time;
 
 		if (stream->frame_collected > 0) {
-			printf("UVC Dropping short frame: %u < %u (%d lost)\n",
-			    stream->frame_collected, stream->frame_size,
-			    stream->frame_size - stream->frame_collected);
+			if (!stream->skip_frame && stream->cur_frame != NULL && stream->frame_cb &&
+					stream->format == OHMD_VIDEO_FRAME_FORMAT_JPEG) {
+				stream->cur_frame->data_size = stream->frame_collected;
+				stream->frame_cb(stream, stream->cur_frame, stream->frame_cb_data);
+				stream->cur_frame = NULL;
+			}
+			else {
+				printf("UVC Dropping short frame: %u < %u (%d lost)\n",
+							stream->frame_collected, stream->frame_size,
+							stream->frame_size - stream->frame_collected);
+			}
 		}
 
 		/* Start of new frame */
@@ -213,12 +226,13 @@ void process_payload(struct rift_sensor_uvc_stream *stream, unsigned char *paylo
 		ohmd_video_frame *frame = stream->cur_frame;
 
 		if (frame) {
-			assert (frame->data_size == stream->frame_size);
+			assert (frame->data_block_size >= stream->frame_size);
 			frame->start_ts = time;
 			frame->pts = pts;
 			frame->stride = stream->stride;
 			frame->width = stream->width;
 			frame->height = stream->height;
+			frame->format = stream->format;
 		}
 
 #if VERBOSE_DEBUG
@@ -244,6 +258,7 @@ void process_payload(struct rift_sensor_uvc_stream *stream, unsigned char *paylo
 	stream->frame_collected += payload_len;
 
 	if (stream->frame_collected == stream->frame_size) {
+		stream->cur_frame->data_size = stream->frame_collected;
 		if (stream->frame_cb) {
 			stream->frame_cb(stream, stream->cur_frame, stream->frame_cb_data);
 			stream->cur_frame = NULL;
@@ -291,6 +306,12 @@ static void iso_transfer_cb(struct libusb_transfer *transfer)
 
 	/* Resubmit transfer */
 	for (i = 0; i < 5; i++) {
+		if (!stream->video_running) {
+			/* Not resubmitting. Reduce transfer count */
+			stream->active_transfers--;
+			return;
+		}
+
 		/* Sometimes this fails, and we retry */
 		ret = libusb_submit_transfer(transfer);
 		if (ret >= 0)
@@ -311,16 +332,11 @@ static void iso_transfer_cb(struct libusb_transfer *transfer)
 
 int rift_sensor_uvc_stream_setup (ohmd_context* ohmd_ctx,
 		libusb_context *usb_ctx, libusb_device_handle *devh,
+		struct libusb_device_descriptor *desc,
 		struct rift_sensor_uvc_stream *stream)
 {
-	libusb_device *dev = libusb_get_device(devh);
-	struct libusb_device_descriptor desc;
-	struct uvc_probe_commit_control control = {
-		.bFormatIndex = 1,
-		.bFrameIndex = 1,
-	};
-	int alt_setting;
 	int ret;
+	int alt_setting;
 	int num_packets;
 	int packet_size;
 
@@ -348,11 +364,14 @@ int rift_sensor_uvc_stream_setup (ohmd_context* ohmd_ctx,
 		return ret;
 	}
 
-	ret = libusb_get_device_descriptor(dev, &desc);
-	if (ret < 0)
-		return ret;
+	bool is_usb2 = (desc->bcdUSB < 0x300);
 
-	switch (desc.idProduct) {
+	struct uvc_probe_commit_control control = {
+		.bFormatIndex = 1,
+		.bFrameIndex = 1,
+	};
+
+	switch (desc->idProduct) {
 	case DK2_PID:
 		control.dwFrameInterval = __cpu_to_le32(166666);
 		control.dwMaxVideoFrameSize = __cpu_to_le32(752 * 480);
@@ -361,6 +380,7 @@ int rift_sensor_uvc_stream_setup (ohmd_context* ohmd_ctx,
 		stream->stride = 752;
 		stream->width = 752;
 		stream->height = 480;
+		stream->format = OHMD_VIDEO_FRAME_FORMAT_GRAY8;
 
 		num_packets = 32;
 		packet_size = 3060;
@@ -369,22 +389,37 @@ int rift_sensor_uvc_stream_setup (ohmd_context* ohmd_ctx,
 		esp570_setup_unknown_3(devh);
 		break;
 	case CV1_PID:
-		control.bFrameIndex = 4;
+		if (is_usb2) {
+			/* JPEG mode for USB 2 connection */
+			control.bFormatIndex = 2;
+			control.bFrameIndex = 2;
+			packet_size = 2048;
+			alt_setting = 2;
+			stream->format = OHMD_VIDEO_FRAME_FORMAT_JPEG;
+		} else {
+			control.bFrameIndex = 4;
+			packet_size = 16384;
+			alt_setting = 2;
+			stream->format = OHMD_VIDEO_FRAME_FORMAT_GRAY8;
+		}
+
 		control.dwFrameInterval = __cpu_to_le32(192000);
 		control.dwMaxVideoFrameSize = __cpu_to_le32(RIFT_SENSOR_FRAME_SIZE);
-		control.dwMaxPayloadTransferSize = __cpu_to_le16(3072);
+		control.dwMaxPayloadTransferSize = __cpu_to_le16(packet_size);
 		control.dwClockFrequency = __cpu_to_le32(RIFT_SENSOR_CLOCK_FREQ);
 
 		stream->stride = RIFT_SENSOR_WIDTH;
 		stream->width = RIFT_SENSOR_WIDTH;
 		stream->height = RIFT_SENSOR_HEIGHT;
 
-		packet_size = 16384;
-		alt_setting = 2;
+		if (rift_sensor_esp770u_init_regs(devh) < 0) {
+			LOGE("Failed to init CV1 sensor");
+			return -1;
+		}
 		break;
 	default:
 		printf("Unknown / unhandled USB device VID/PID 0x%04x / 0x%04x\n",
-			desc.idVendor, desc.idProduct);
+			desc->idVendor, desc->idProduct);
 		return -1;
 	}
 
@@ -407,12 +442,14 @@ int rift_sensor_uvc_stream_setup (ohmd_context* ohmd_ctx,
 		return ret;
 	}
 
-	control.dwFrameInterval = __le32_to_cpu(control.dwFrameInterval);
-	control.wDelay = __le16_to_cpu(control.wDelay);
-	control.dwMaxVideoFrameSize = __le32_to_cpu(control.dwMaxVideoFrameSize);
-	control.dwClockFrequency = __le32_to_cpu(control.dwClockFrequency);
-
-	control.dwMaxPayloadTransferSize = __le32_to_cpu(control.dwMaxPayloadTransferSize);
+	/* In JPEG mode, we have some extra init packets to send */
+	if (desc->idProduct == CV1_PID && is_usb2) {
+		ret = rift_sensor_esp770u_init_jpeg(devh);
+		if (ret < 0) {
+			LOGE("Failed to init CV1 sensor in JPEG mode");
+			return ret;
+		}
+	}
 
 	stream->alt_setting = alt_setting;
 	stream->frame_size = stream->stride * stream->height;
@@ -473,7 +510,8 @@ int rift_sensor_uvc_stream_start(rift_sensor_uvc_stream *stream, uint8_t min_fra
 	for (i = 0; i < min_frames; i++) {
 		ohmd_video_frame *frame = ohmd_alloc(stream->ohmd_ctx, sizeof (ohmd_video_frame));
 		frame->data = ohmd_alloc(stream->ohmd_ctx, stream->frame_size);
-		frame->data_size = stream->frame_size;
+		frame->data_block_size = stream->frame_size;
+		frame->data_size = 0;
 
 		frame->releasefn = (ohmd_video_frame_release_func) rift_sensor_uvc_stream_release_frame;
 		frame->owner = stream;
@@ -504,9 +542,7 @@ int rift_sensor_uvc_stream_stop(struct rift_sensor_uvc_stream *stream)
 
 	ret = libusb_set_interface_alt_setting(stream->devh, 1, 0);
 	if (ret) {
-		LOGW("Failed to clear USB alt setting to 0 for sensor");
-		stream->video_running = false;
-		return ret;
+		LOGW("Failed to clear USB alt setting to 0 for sensor errno %d (%s)", errno, strerror(errno));
 	}
 
 	libusb_lock_event_waiters(stream->usb_ctx);
@@ -561,6 +597,9 @@ rift_sensor_uvc_stream_release_frame(ohmd_video_frame *frame, rift_sensor_uvc_st
 {
 	assert(frame->owner == stream);
 	assert(stream->n_free_frames < stream->n_alloced_frames);
+	assert(frame->data_block_size == stream->frame_size);
+
+	frame->data_size = 0;
 
 	/* Put the frame back on the free queue */
 	ohmd_lock_mutex(stream->frames_lock);

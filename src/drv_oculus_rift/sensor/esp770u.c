@@ -24,12 +24,14 @@
 
 #define ESP_DEBUG 0
 
-#define esp770u_read_reg(d,r,v) rift_sensor_esp770u_read_reg((d),(r),(v))
-#define esp770u_write_reg(d,r,v) rift_sensor_esp770u_write_reg((d),(r),(v))
+#define esp770u_read_reg(d,r,v) rift_sensor_esp770u_read_reg((d),0xf0,(r),(v))
+#define esp770u_read_reg_f1(d,r,v) rift_sensor_esp770u_read_reg((d),0xf1,(r),(v))
+#define esp770u_write_reg(d,r,v) rift_sensor_esp770u_write_reg((d),0xf0,(r),(v))
+#define esp770u_write_reg_f1(d,r,v) rift_sensor_esp770u_write_reg((d),0xf1,(r),(v))
 
-int rift_sensor_esp770u_read_reg(libusb_device_handle *dev, uint8_t reg, uint8_t *val)
+int rift_sensor_esp770u_read_reg(libusb_device_handle *dev, uint8_t reg_block, uint8_t reg, uint8_t *val)
 {
-	unsigned char buf[4] = { 0x82, 0xf0, reg };
+	unsigned char buf[4] = { 0x82, reg_block, reg };
 	int ret;
 
 	ret = rift_sensor_uvc_set_cur(dev, 0, XU_ENTITY, REG_SEL, buf, sizeof buf);
@@ -39,35 +41,15 @@ int rift_sensor_esp770u_read_reg(libusb_device_handle *dev, uint8_t reg, uint8_t
 	if (ret < 0)
 		return ret;
 	if (buf[0] != 0x82 || buf[2] != 0x00)
-		fprintf(stderr, "read_reg(0x%x): %02x %02x %02x\n",
-			reg, buf[0], buf[1], buf[2]);
+		fprintf(stderr, "read_reg(0x%x,0x%x): %02x %02x %02x\n",
+			reg_block, reg, buf[0], buf[1], buf[2]);
 	*val = buf[1];
 	return ret;
 }
 
-#if ESP_DEBUG
-static int esp770u_read_reg_f1(libusb_device_handle *dev, uint8_t reg, uint8_t *val)
+int rift_sensor_esp770u_write_reg(libusb_device_handle *dev, uint8_t reg_block, uint8_t reg, uint8_t val)
 {
-	unsigned char buf[4] = { 0x82, 0xf1, reg };
-	int ret;
-
-	ret = rift_sensor_uvc_set_cur(dev, 0, XU_ENTITY, REG_SEL, buf, sizeof buf);
-	if (ret < 0)
-		return ret;
-	ret = rift_sensor_uvc_get_cur(dev, 0, XU_ENTITY, REG_SEL, buf, 3);
-	if (ret < 0)
-		return ret;
-	if (buf[0] != 0x82 || buf[2] != 0x00)
-		fprintf(stderr, "read_reg(0x%x): %02x %02x %02x\n",
-			reg, buf[0], buf[1], buf[2]);
-	*val = buf[1];
-	return ret;
-}
-#endif
-
-int rift_sensor_esp770u_write_reg(libusb_device_handle *dev, uint8_t reg, uint8_t val)
-{
-	unsigned char buf[4] = { 0x02, 0xf0, reg, val };
+	unsigned char buf[4] = { 0x02, reg_block, reg, val };
 	int ret;
 
 	ret = rift_sensor_uvc_set_cur(dev, 0, XU_ENTITY, REG_SEL, buf, sizeof buf);
@@ -76,9 +58,9 @@ int rift_sensor_esp770u_write_reg(libusb_device_handle *dev, uint8_t reg, uint8_
 	ret = rift_sensor_uvc_get_cur(dev, 0, XU_ENTITY, REG_SEL, buf, sizeof buf);
 	if (ret < 0)
 		return ret;
-	if (buf[0] != 0x02 || buf[1] != 0xf0 || buf[2] != reg || buf[3] != val)
-		fprintf(stderr, "write_reg(0x%x,0x%x): %02x %02x %02x %02x\n",
-			reg, val, buf[0], buf[1], buf[2], buf[3]);
+	if (buf[0] != 0x02 || buf[1] != reg_block || buf[2] != reg || buf[3] != val)
+		fprintf(stderr, "write_reg(0x%x,0x%x,0x%x): %02x %02x %02x %02x\n",
+			reg_block, reg, val, buf[0], buf[1], buf[2], buf[3]);
 	return ret;
 }
 
@@ -299,7 +281,7 @@ int rift_sensor_esp770u_init_regs(libusb_device_handle *devhandle)
 
 	ret = esp770u_write_reg(devhandle, 0x5a, 0x01); /* &= 0x02? */
 	if (ret < 0) return ret;
-        ret = esp770u_read_reg(devhandle, 0x5a, &val);
+	ret = esp770u_read_reg(devhandle, 0x5a, &val);
 	if (ret < 0) return ret;
 	if (val != 0x01) printf("unexpected 5a value: %02x\n", val);
 
@@ -342,7 +324,103 @@ int rift_sensor_esp770u_init_regs(libusb_device_handle *devhandle)
 		if (i % 16 == 15)
 			printf("\n");
 	}
+	printf("--------------------------------------\n");
 #endif
+
+	return ret;
+}
+
+/* Extra initialisation sent after UVC config when in USB2 / MJPEG mode */
+int rift_sensor_esp770u_init_jpeg(libusb_device_handle *devhandle)
+{
+	int ret = 0;
+	uint8_t val;
+
+	/* 0xf11f = 0x04 */
+	ret = esp770u_read_reg_f1(devhandle, 0x1f, &val);
+	if (ret < 0) return ret;
+	ret = esp770u_write_reg_f1(devhandle, 0x1f, 0x04);
+	if (ret < 0) return ret;
+
+	/* 0xf102 = 0x7f */
+	ret = esp770u_read_reg_f1(devhandle, 0x02, &val);
+	if (ret < 0) return ret;
+	ret = esp770u_write_reg_f1(devhandle, 0x02, 0x7f);
+	if (ret < 0) return ret;
+
+	/* 0xf101 = 0xff */
+	ret = esp770u_read_reg_f1(devhandle, 0x01, &val);
+	if (ret < 0) return ret;
+	ret = esp770u_write_reg_f1(devhandle, 0x01, 0xff);
+	if (ret < 0) return ret;
+
+	/* 0xf103 = 0xc0 */
+	ret = esp770u_read_reg_f1(devhandle, 0x03, &val);
+	if (ret < 0) return ret;
+	ret = esp770u_write_reg_f1(devhandle, 0x03, 0xc0);
+	if (ret < 0) return ret;
+
+	/* 0xf101 = 0xff, 2 times */
+	ret = esp770u_read_reg_f1(devhandle, 0x01, &val);
+	if (ret < 0) return ret;
+	ret = esp770u_write_reg_f1(devhandle, 0x01, 0xff);
+	if (ret < 0) return ret;
+	ret = esp770u_read_reg_f1(devhandle, 0x01, &val);
+	if (ret < 0) return ret;
+	ret = esp770u_write_reg_f1(devhandle, 0x01, 0xff);
+	if (ret < 0) return ret;
+
+	/* 0xf11e = 0x01 */
+	ret = esp770u_read_reg_f1(devhandle, 0x1e, &val);
+	if (ret < 0) return ret;
+	ret = esp770u_write_reg_f1(devhandle, 0x1e, 0x01);
+	if (ret < 0) return ret;
+
+	/* 0xf103 = 0xc0 */
+	ret = esp770u_read_reg_f1(devhandle, 0x03, &val);
+	if (ret < 0) return ret;
+	ret = esp770u_write_reg_f1(devhandle, 0x03, 0xc0);
+	if (ret < 0) return ret;
+
+	/* 0xf101 = 0xff, once */
+	ret = esp770u_read_reg_f1(devhandle, 0x01, &val);
+	if (ret < 0) return ret;
+	ret = esp770u_write_reg_f1(devhandle, 0x01, 0xff);
+	if (ret < 0) return ret;
+
+	/* 0xf102 = 0x7f again */
+	ret = esp770u_read_reg_f1(devhandle, 0x02, &val);
+	if (ret < 0) return ret;
+	ret = esp770u_write_reg_f1(devhandle, 0x02, 0x7f);
+	if (ret < 0) return ret;
+
+	/* 0xf101 = 0xff, 2 more times */
+	ret = esp770u_read_reg_f1(devhandle, 0x01, &val);
+	if (ret < 0) return ret;
+	ret = esp770u_write_reg_f1(devhandle, 0x01, 0xff);
+	if (ret < 0) return ret;
+	return ret;
+
+	/* 0xf102 = 0x7f, 2 more times */
+	ret = esp770u_read_reg_f1(devhandle, 0x02, &val);
+	if (ret < 0) return ret;
+	ret = esp770u_write_reg_f1(devhandle, 0x02, 0x7f);
+	if (ret < 0) return ret;
+	ret = esp770u_read_reg_f1(devhandle, 0x02, &val);
+	if (ret < 0) return ret;
+	ret = esp770u_write_reg_f1(devhandle, 0x02, 0x7f);
+	if (ret < 0) return ret;
+
+	/* Extra 64-byte fw writes, not sent for now - doesn't seem to matter:
+		Data Fragment: 1681030100012ed10040000000000000
+		Data Fragment: 070707070707070707070707070707070707070707070707070707070707070707070707…
+		Data Fragment: 16020100000000000000000000000000
+		Data Fragment: 16
+		Data Fragment: 1781030100012f160040000000000000
+		Data Fragment: 010101010101010101010101010101010101010101010101010101010101010101010101…
+		Data Fragment: 17020100000000000000000000000000
+		Data Fragment: 17
+	*/
 
 	return ret;
 }

@@ -47,7 +47,7 @@ static int ar0134_write_reg(libusb_device_handle *dev, uint16_t reg, uint16_t va
 }
 
 /* Sensor setup after stream start */
-int rift_sensor_ar0134_init(libusb_device_handle *devh)
+int rift_sensor_ar0134_init(libusb_device_handle *devh, bool usb2_mode)
 {
 	uint16_t val;
 	int ret;
@@ -65,7 +65,12 @@ int rift_sensor_ar0134_init(libusb_device_handle *devh)
 #endif
 
 	/* Read chip version and revision number registers */
-	ret = ar0134_read_reg(devh, 0x3000, &val);
+	for (int i = 0; i < 10; i++) {
+		ret = ar0134_read_reg(devh, 0x3000, &val);
+		if (ret < 0)
+			continue;
+		break;
+	}
 	if (ret < 0) return ret;
 	if (val != 0x2406)
 		fprintf(stderr, "This is not an AR0134 sensor: 0x%04x\n", val);
@@ -99,7 +104,10 @@ int rift_sensor_ar0134_init(libusb_device_handle *devh)
 
 	/* Set all gain values to the default, in USB2 mode 0x0007 is used
  	 * instead. */
-	ret = ar0134_write_reg(devh, 0x305e, 0x0020);
+	if (usb2_mode)
+		ret = ar0134_write_reg(devh, 0x305e, 0x0007);
+	else
+		ret = ar0134_write_reg(devh, 0x305e, 0x0020);
 	if (ret < 0) return ret;
 
 	/* This changes nothing, probably clear some already cleared bits. */
