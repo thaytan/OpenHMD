@@ -206,18 +206,22 @@ static void frame_captured_cb(rift_sensor_device *dev, ohmd_video_frame *vframe,
 	frame = POP_QUEUE(&sensor->capture_frame_q);
 	/* If there is no queue on the capture frame queue,
 	 * then the analysis threads got blocked for too long. Find
-	 * and reclaim a frame from one of the analysis queues */
+	 * and reclaim a frame from the one of the analysis queues */
+
+	/* Take from the fast queue first - it should have woken
+	 * up and processed any frame we gave it by now, so if there's
+	 * one pending things are quite blocked */
 	if (frame == NULL) {
-		frame = REWIND_QUEUE(&sensor->long_analysis_q);
-		if (frame) {
+		if ((frame = REWIND_QUEUE(&sensor->fast_analysis_q)) != NULL) {
 			release_capture_frame(sensor, frame);
 			frame = POP_QUEUE(&sensor->capture_frame_q);
 		}
 	}
 
+	/* Otherwise try and claim a pending frame from the long
+	 * analysis queue */
 	if (frame == NULL) {
-		frame = REWIND_QUEUE(&sensor->fast_analysis_q);
-		if (frame) {
+		if ((frame = REWIND_QUEUE(&sensor->long_analysis_q)) != NULL) {
 			release_capture_frame(sensor, frame);
 			frame = POP_QUEUE(&sensor->capture_frame_q);
 		}
@@ -432,6 +436,18 @@ static unsigned int long_analysis_thread(void *arg)
 	ohmd_lock_mutex (ctx->sensor_lock);
 	while (!ctx->shutdown) {
 			rift_sensor_analysis_frame *frame = POP_QUEUE(&ctx->long_analysis_q);
+
+			/* Always drain all pending frames and only analyse the newest */
+			do {
+				rift_sensor_analysis_frame *another_frame = POP_QUEUE(&ctx->long_analysis_q);
+				if (another_frame == NULL) {
+					break;
+				}
+
+				release_capture_frame(ctx, frame);
+				frame = another_frame;
+			} while (true);
+
 			if (frame != NULL) {
 				ctx->long_analysis_busy = true;
 				ohmd_unlock_mutex (ctx->sensor_lock);
