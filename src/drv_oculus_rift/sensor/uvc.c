@@ -199,19 +199,16 @@ void process_payload(struct rift_sensor_uvc_stream *stream, unsigned char *paylo
 			ohmd_unlock_mutex(stream->frames_lock);
 		}
 
-#if VERBOSE_DEBUG
-		int64_t dt;
-		if (stream->cur_frame)
-			dt = time - stream->cur_frame->start_ts;
-#endif
-
 		stream->frame_id = frame_id;
 		stream->cur_pts = pts;
 		stream->frame_collected = 0;
 		stream->skip_frame = false;
 
 		if (stream->cur_frame == NULL) {
-			LOGW("No frame provided for pixel data. Skipping frame");
+			if (stream->skip_frame_start == 0) {
+				LOGW("No frame provided for pixel data. Skipping frames");
+				stream->skip_frame_start = time;
+			}
 			stream->skip_frame = true;
 		}
 
@@ -225,9 +222,18 @@ void process_payload(struct rift_sensor_uvc_stream *stream, unsigned char *paylo
 			frame->width = stream->width;
 			frame->height = stream->height;
 			frame->format = stream->format;
+
+			if (stream->skip_frame_start != 0) {
+				LOGW("Got capture frame after %f sec", (stream->cur_frame->start_ts - stream->skip_frame_start) / 1000000000.0);
+				stream->skip_frame_start = 0;
+			}
 		}
 
 #if VERBOSE_DEBUG
+		int64_t dt = 0;
+		if (stream->cur_frame)
+			dt = time - stream->cur_frame->start_ts;
+
 		printf ("UVC dt %f PTS %f SCR %f delta %d\n",
 		    (double) (dt) / (1000000000.0),
 		    (double) (pts) / RIFT_SENSOR_CLOCK_FREQ,
@@ -348,6 +354,10 @@ int rift_sensor_uvc_stream_setup (ohmd_context* ohmd_ctx,
 	stream->usb_ctx = usb_ctx;
 	stream->devh = devh;
 	stream->video_running = false;
+
+	/* Skip the first frame */
+	stream->skip_frame = true;
+	stream->skip_frame_start = 0;
 
 	ret = libusb_set_auto_detach_kernel_driver(devh, 1);
 	if (ret < 0) {
