@@ -51,6 +51,11 @@
  * we force an update */
 #define POSE_LOST_ORIENT_THRESHOLD 100
 
+/* Length of time (milliseconds) that we are allowed to lose tracking because
+ * there's no free delay slots before we'll warn about it. 60ms is ~3 frames
+ */
+#define NO_FREE_DELAY_SLOT_THRESHOLD 60
+
 #define MIN_ROT_ERROR DEG_TO_RAD(25)
 #define MIN_POS_ERROR 0.1
 
@@ -104,6 +109,8 @@ struct rift_tracked_device_priv {
 	/* Account keeping for UKF fusion slots */
 	int delay_slot_index;
 	rift_tracker_pose_delay_slot delay_slots[NUM_POSE_DELAY_SLOTS];
+	/* Track the time we last started having no free delay slots (or 0 if never) */
+	uint64_t last_no_free_delay_slot;
 
 	/* The pose of the device relative to the IMU 3D space */
 	posef device_from_fusion;
@@ -1015,9 +1022,16 @@ rift_tracked_device_on_new_exposure(rift_tracked_device_priv *dev, rift_tracked_
 
 		/* Tell the kalman filter to prepare the delay slot */
 		rift_kalman_6dof_prepare_delay_slot(&dev->ukf_fusion, dev_info->device_time_ns, slot->slot_id);
+
+		/* Clear the last no-free-delay-slot tracking to avoid logging noise */
+		dev->last_no_free_delay_slot = 0;
 	}
 	else {
-		LOGW ("No free delay slot for dev %d, ts %llu", dev->base.id, (unsigned long long) dev->device_time_ns);
+		if (dev->last_no_free_delay_slot != 0 && (dev->device_time_ns - dev->last_no_free_delay_slot < (NO_FREE_DELAY_SLOT_THRESHOLD * 1000000UL))) {
+			LOGW("No free delay slot for dev %d @ ts %llu (for %ums now)", dev->base.id,
+				  (unsigned long long) dev->device_time_ns, NO_FREE_DELAY_SLOT_THRESHOLD);
+		}
+		dev->last_no_free_delay_slot = dev->device_time_ns;
 		dev_info->fusion_slot = -1;
 	}
 }
