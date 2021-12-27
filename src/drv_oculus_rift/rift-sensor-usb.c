@@ -187,6 +187,13 @@ rift_sensor_device *rift_sensor_usb_new (ohmd_context* ohmd_ctx, int id, const c
 	ret = rift_sensor_uvc_stream_setup (ohmd_ctx, usb_ctx, dev->usb_devh, &desc, &dev->uvc_stream);
 	ASSERT_MSG(ret >= 0, fail, "could not prepare for streaming\n");
 
+#if !HAVE_LIBJPEG
+	if (dev->uvc_stream.format == OHMD_VIDEO_FRAME_FORMAT_JPEG) {
+		LOGE("Sensor is connected to USB 2.0, but OpenHMD was compiled without libjpeg support. Please rebuild or connect to a USB 3.0 port");
+		goto fail;
+	}
+#endif
+
 	LOGV("Sensor %d - reading Calibration\n", id);
 	ret = rift_sensor_read_calibration(dev);
 	if (ret < 0) {
