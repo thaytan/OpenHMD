@@ -67,8 +67,10 @@ int rift_sensor_ar0134_init(libusb_device_handle *devh, bool usb2_mode)
 	/* Read chip version and revision number registers */
 	for (int i = 0; i < 10; i++) {
 		ret = ar0134_read_reg(devh, 0x3000, &val);
-		if (ret < 0)
+		if (ret < 0 || val != 0x2406) {
+			ohmd_sleep(0.005); /* 5ms sleep between retries */
 			continue;
+		}
 		break;
 	}
 	if (ret < 0) return ret;
