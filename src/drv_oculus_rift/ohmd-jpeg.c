@@ -234,10 +234,10 @@ static void
 ohmd_jpeg_release_frame(ohmd_video_frame *frame, ohmd_jpeg_decoder *jd)
 {
 	assert(frame->owner == jd);
-	assert(jd->n_free_frames < jd->n_alloced_frames);
 
 	/* Put the frame back on the free queue */
 	ohmd_lock_mutex(jd->frames_lock);
+	assert(jd->n_free_frames < jd->n_alloced_frames);
 	jd->free_frames[jd->n_free_frames++] = frame;
 	ohmd_unlock_mutex(jd->frames_lock);
 }
