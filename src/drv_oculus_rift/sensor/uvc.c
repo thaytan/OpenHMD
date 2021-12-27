@@ -144,12 +144,12 @@ void process_payload(struct rift_sensor_uvc_stream *stream, unsigned char *paylo
 	payload += h->bHeaderLength;
 	payload_len = len - h->bHeaderLength;
 	frame_id = h->bmHeaderInfo & 0x01;
-	is_eof = h->bmHeaderInfo & 0x02;
-	have_pts = h->bmHeaderInfo & 0x04;
+	is_eof = (h->bmHeaderInfo & 0x02) != 0;
+	have_pts = (h->bmHeaderInfo & 0x04) != 0;
 #if VERBOSE_DEBUG
-	have_scr = h->bmHeaderInfo & 0x08;
+	have_scr = (h->bmHeaderInfo & 0x08) != 0;
 #endif
-	error = h->bmHeaderInfo & 0x40;
+	error = (h->bmHeaderInfo & 0x40) != 0;
 
 	if (error) {
 		printf("UVC frame error\n");
@@ -179,17 +179,9 @@ void process_payload(struct rift_sensor_uvc_stream *stream, unsigned char *paylo
 		uint64_t time;
 
 		if (stream->frame_collected > 0) {
-			if (!stream->skip_frame && stream->cur_frame != NULL && stream->frame_cb &&
-					stream->format == OHMD_VIDEO_FRAME_FORMAT_JPEG) {
-				stream->cur_frame->data_size = stream->frame_collected;
-				stream->frame_cb(stream, stream->cur_frame, stream->frame_cb_data);
-				stream->cur_frame = NULL;
-			}
-			else {
-				printf("UVC Dropping short frame: %u < %u (%d lost)\n",
-							stream->frame_collected, stream->frame_size,
-							stream->frame_size - stream->frame_collected);
-			}
+			printf("UVC Dropping short frame: %u < %u (%d lost)\n",
+						stream->frame_collected, stream->frame_size,
+						stream->frame_size - stream->frame_collected);
 		}
 
 		/* Start of new frame */
@@ -257,7 +249,18 @@ void process_payload(struct rift_sensor_uvc_stream *stream, unsigned char *paylo
 	       payload_len);
 	stream->frame_collected += payload_len;
 
-	if (stream->frame_collected == stream->frame_size) {
+	/* For JPEG frames, check if we just saw the EOF marker, so we can
+	 * emit the frame immediately. Otherwise we end up waiting a few ms
+	 * longer until the next frame starts to see the frame_id change
+	 * before we know that this one finished */
+	if (stream->format == OHMD_VIDEO_FRAME_FORMAT_JPEG && stream->frame_collected >= 2) {
+		uint8_t *eof_marker = stream->cur_frame->data + stream->frame_collected - 2;
+		if (eof_marker[0] == 0xFF && eof_marker[1] == 0xD9) {
+			is_eof = true;
+		}
+	}
+
+	if (stream->frame_collected == stream->frame_size || is_eof) {
 		stream->cur_frame->data_size = stream->frame_collected;
 		if (stream->frame_cb) {
 			stream->frame_cb(stream, stream->cur_frame, stream->frame_cb_data);
