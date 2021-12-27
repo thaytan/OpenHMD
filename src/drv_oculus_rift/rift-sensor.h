@@ -72,6 +72,7 @@ struct rift_sensor_analysis_frame {
 rift_sensor_ctx * rift_sensor_new(ohmd_context* ohmd_ctx, int id, const char *serial_no,
 	rift_sensor_device *dev, rift_tracker_ctx *tracker);
 void rift_sensor_free (rift_sensor_ctx *sensor_ctx);
+const char *rift_sensor_serial_no (rift_sensor_ctx *sensor);
 bool rift_sensor_add_device (rift_sensor_ctx *ctx, rift_tracked_device *device);
 
 #endif

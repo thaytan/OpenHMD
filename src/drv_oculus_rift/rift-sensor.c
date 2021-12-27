@@ -608,3 +608,8 @@ static bool handle_found_pose (rift_sensor_ctx *sensor_ctx,
 
 	return ret;
 }
+
+const char *rift_sensor_serial_no (rift_sensor_ctx *sensor)
+{
+	return sensor->serial_no;
+}
