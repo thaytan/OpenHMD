@@ -87,13 +87,13 @@ int rift_sensor_ar0134_init(libusb_device_handle *devh, bool usb2_mode)
 	if (val != 0x0080)
 		fprintf(stderr, "Expected monochrome mode instead of 0x%04x\n", val);
 
-	/* Enable embedded register data and statistics. For now we can't use
+	/* Disable embedded register data and statistics. For now we can't use
 	 * this anyway. */
 	ret = ar0134_read_reg(devh, 0x3064, &val);
 	if (ret < 0) return ret;
 	if (val != 0x1882 && val != 0x1982)
 		printf("Unexpected embedded data control: %04x\n", val);
-	ret = ar0134_write_reg(devh, 0x3064, val | 0x0180);
+	ret = ar0134_write_reg(devh, 0x3064, val & ~0x0180);
 	if (ret < 0) return ret;
 
 	/* Set data pedestal (black level) to zero */
