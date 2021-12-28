@@ -1027,7 +1027,7 @@ rift_tracked_device_on_new_exposure(rift_tracked_device_priv *dev, rift_tracked_
 		dev->last_no_free_delay_slot = 0;
 	}
 	else {
-		if (dev->last_no_free_delay_slot != 0 && (dev->device_time_ns - dev->last_no_free_delay_slot < (NO_FREE_DELAY_SLOT_THRESHOLD * 1000000UL))) {
+		if (dev->last_no_free_delay_slot != 0 && (dev->device_time_ns - dev->last_no_free_delay_slot > (NO_FREE_DELAY_SLOT_THRESHOLD * 1000000UL))) {
 			LOGW("No free delay slot for dev %d @ ts %llu (for %ums now)", dev->base.id,
 				  (unsigned long long) dev->device_time_ns, NO_FREE_DELAY_SLOT_THRESHOLD);
 		}
