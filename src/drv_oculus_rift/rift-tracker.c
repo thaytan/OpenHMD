@@ -832,7 +832,7 @@ bool rift_tracked_device_model_pose_update(rift_tracked_device *dev_base, uint64
 }
 
 /* Called with the device lock held */
-void rift_tracked_device_get_model_pose_locked(rift_tracked_device_priv *dev, double ts, posef *pose, vec3f *pos_error, vec3f *rot_error)
+void rift_tracked_device_get_model_pose_locked(rift_tracked_device_priv *dev, uint32_t device_ts, posef *pose, vec3f *pos_error, vec3f *rot_error)
 {
 	posef imu_global_pose, model_pose;
 	vec3f global_pos_error, global_rot_error;
@@ -874,14 +874,6 @@ void rift_tracked_device_get_model_pose_locked(rift_tracked_device_priv *dev, do
 		dev->base.id,
 		pose->orient.x, pose->orient.y, pose->orient.z, pose->orient.w,
 		pose->pos.x, pose->pos.y, pose->pos.z);
-}
-
-void rift_tracked_device_get_model_pose(rift_tracked_device *dev_base, double ts, posef *pose, vec3f *pos_error, vec3f *rot_error)
-{
-	rift_tracked_device_priv *dev = (rift_tracked_device_priv *) (dev_base);
-	ohmd_lock_mutex (dev->device_lock);
-	rift_tracked_device_get_model_pose_locked(dev, ts, pose, pos_error, rot_error);
-	ohmd_unlock_mutex (dev->device_lock);
 }
 
 /* Called with the device lock held */
