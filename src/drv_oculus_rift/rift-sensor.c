@@ -67,7 +67,6 @@ struct rift_sensor_ctx_s
 	rift_pose_finder pf;
 
 	ohmd_mutex *sensor_lock;
-	ohmd_cond *new_frame_cond;
 
 	/* Protected by sensor_lock */
 	rift_tracked_device *devices[RIFT_MAX_TRACKED_DEVICES];
@@ -78,8 +77,13 @@ struct rift_sensor_ctx_s
 	int dropped_frames;
 	/* queue of frames awaiting fast analysis */
 	rift_sensor_frame_queue fast_analysis_q;
+	/* cond that's signalled when a frame is put in the fast queue */
+	ohmd_cond *fast_analysis_q_cond;
+
 	/* queue of frames awaiting long analysis */
 	rift_sensor_frame_queue long_analysis_q;
+	/* cond that's signalled when a frame is put in the long queue */
+	ohmd_cond *long_analysis_q_cond;
 
 	int shutdown;
 
@@ -238,7 +242,7 @@ static void frame_captured_cb(rift_sensor_device *dev, ohmd_video_frame *vframe,
 		vframe->start_ts, &frame->exposure_info, sensor->serial_no);
 
 	PUSH_QUEUE(&sensor->fast_analysis_q, frame);
-	ohmd_cond_broadcast (sensor->new_frame_cond);
+	ohmd_cond_signal(sensor->fast_analysis_q_cond);
 	ohmd_unlock_mutex(sensor->sensor_lock);
 	return;
 
@@ -321,12 +325,15 @@ rift_sensor_new(ohmd_context* ohmd_ctx, int id, const char *serial_no,
 	sensor_ctx->long_analysis_busy = false;
 
 	sensor_ctx->sensor_lock = ohmd_create_mutex(ohmd_ctx);
-	sensor_ctx->new_frame_cond = ohmd_create_cond(ohmd_ctx);
 
 	/* Initialise frame queues */
 	INIT_QUEUE(&sensor_ctx->capture_frame_q);
 	INIT_QUEUE(&sensor_ctx->fast_analysis_q);
 	INIT_QUEUE(&sensor_ctx->long_analysis_q);
+
+	/* Conds we use to wake queue waiters */
+	sensor_ctx->fast_analysis_q_cond = ohmd_create_cond(ohmd_ctx);
+	sensor_ctx->long_analysis_q_cond = ohmd_create_cond(ohmd_ctx);
 
 	/* Allocate capture frame buffers */
 	sensor_ctx->frames = ohmd_alloc(ohmd_ctx, NUM_CAPTURE_BUFFERS * sizeof (rift_sensor_analysis_frame));
@@ -389,7 +396,8 @@ rift_sensor_free (rift_sensor_ctx *sensor_ctx)
 	/* Shut down analysis threads */
 	ohmd_lock_mutex(sensor_ctx->sensor_lock);
 	sensor_ctx->shutdown = true;
-	ohmd_cond_broadcast(sensor_ctx->new_frame_cond);
+	ohmd_cond_broadcast(sensor_ctx->fast_analysis_q_cond);
+	ohmd_cond_broadcast(sensor_ctx->long_analysis_q_cond);
 	ohmd_unlock_mutex(sensor_ctx->sensor_lock);
 
 	if (sensor_ctx->fast_analysis_thread)
@@ -401,8 +409,10 @@ rift_sensor_free (rift_sensor_ctx *sensor_ctx)
 	if (sensor_ctx->sensor_lock)
 		ohmd_destroy_mutex(sensor_ctx->sensor_lock);
 
-	if (sensor_ctx->new_frame_cond)
-		ohmd_destroy_cond(sensor_ctx->new_frame_cond);
+	if (sensor_ctx->fast_analysis_q_cond)
+		ohmd_destroy_cond(sensor_ctx->fast_analysis_q_cond);
+	if (sensor_ctx->long_analysis_q_cond)
+		ohmd_destroy_cond(sensor_ctx->long_analysis_q_cond);
 
 #if HAVE_LIBJPEG
 	if (sensor_ctx->jpeg_decoder)
@@ -427,25 +437,32 @@ rift_sensor_free (rift_sensor_ctx *sensor_ctx)
 	free (sensor_ctx);
 }
 
+static rift_sensor_analysis_frame *
+get_latest_long_analysis_frame(rift_sensor_ctx *ctx) {
+	/* Always drain all pending frames and only analyse the newest */
+	rift_sensor_analysis_frame *frame = POP_QUEUE(&ctx->long_analysis_q);
+
+	do {
+		rift_sensor_analysis_frame *another_frame = POP_QUEUE(&ctx->long_analysis_q);
+		if (another_frame == NULL) {
+			break;
+		}
+
+		release_capture_frame(ctx, frame);
+		frame = another_frame;
+	} while (true);
+
+	return frame;
+}
+
 static unsigned int long_analysis_thread(void *arg)
 {
 	rift_sensor_ctx *ctx = arg;
 
 	ohmd_lock_mutex (ctx->sensor_lock);
+
+	rift_sensor_analysis_frame *frame = get_latest_long_analysis_frame(ctx);
 	while (!ctx->shutdown) {
-			rift_sensor_analysis_frame *frame = POP_QUEUE(&ctx->long_analysis_q);
-
-			/* Always drain all pending frames and only analyse the newest */
-			do {
-				rift_sensor_analysis_frame *another_frame = POP_QUEUE(&ctx->long_analysis_q);
-				if (another_frame == NULL) {
-					break;
-				}
-
-				release_capture_frame(ctx, frame);
-				frame = another_frame;
-			} while (true);
-
 			if (frame != NULL) {
 				ctx->long_analysis_busy = true;
 				ohmd_unlock_mutex (ctx->sensor_lock);
@@ -459,9 +476,13 @@ static unsigned int long_analysis_thread(void *arg)
 
 				/* Done with this frame - send it back to the capture thread */
 				release_capture_frame(ctx, frame);
+				frame = NULL;
 			}
-			if (!ctx->shutdown) {
-				ohmd_cond_wait(ctx->new_frame_cond, ctx->sensor_lock);
+			while (!ctx->shutdown && frame == NULL) {
+				/* Try and fetch another frame, otherwise sleep */
+				if ((frame = get_latest_long_analysis_frame(ctx)) != NULL)
+					break;
+				ohmd_cond_wait(ctx->long_analysis_q_cond, ctx->sensor_lock);
 			}
 	}
 	ohmd_unlock_mutex (ctx->sensor_lock);
@@ -539,8 +560,8 @@ static unsigned int fast_analysis_thread(void *arg)
 	rift_sensor_ctx *sensor = arg;
 
 	ohmd_lock_mutex (sensor->sensor_lock);
+	rift_sensor_analysis_frame *frame = POP_QUEUE(&sensor->fast_analysis_q);
 	while (!sensor->shutdown) {
-			rift_sensor_analysis_frame *frame = POP_QUEUE(&sensor->fast_analysis_q);
 			if (frame != NULL) {
 				ohmd_unlock_mutex (sensor->sensor_lock);
 				if (init_frame_analyse(sensor, frame))
@@ -565,13 +586,20 @@ static unsigned int fast_analysis_thread(void *arg)
 					}
 
 					PUSH_QUEUE(&sensor->long_analysis_q, frame);
+					ohmd_cond_signal(sensor->long_analysis_q_cond);
 				} else {
 					frame->long_analysis_start_ts = frame->long_analysis_finish_ts = frame->image_analysis_finish_ts;
 					release_capture_frame(sensor, frame);
 				}
+
+				frame = NULL;
 			}
-			if (!sensor->shutdown) {
-				ohmd_cond_wait(sensor->new_frame_cond, sensor->sensor_lock);
+
+			while (!sensor->shutdown && frame == NULL) {
+				/* Try and fetch another frame, otherwise sleep */
+				if ((frame = POP_QUEUE(&sensor->fast_analysis_q)) != NULL)
+					break;
+				ohmd_cond_wait(sensor->fast_analysis_q_cond, sensor->sensor_lock);
 			}
 	}
 	ohmd_unlock_mutex (sensor->sensor_lock);
