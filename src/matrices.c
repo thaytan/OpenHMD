@@ -103,7 +103,8 @@ matrix2d_copy (matrix2d *dest, const matrix2d *src)
 {
     MATRIX_CHECK(dest->rows == src->rows && dest->cols == src->cols, MATRIX_RESULT_INVALID);
 
-		if (dest->stride == src->stride) {
+		if (dest->stride == src->stride && dest->rows == dest->stride) {
+			/* Copying all rows, we can do it directly */
 			memcpy (dest->mem, src->mem, sizeof (double) * src->stride * src->cols);
 		}
 		else {
@@ -111,7 +112,8 @@ matrix2d_copy (matrix2d *dest, const matrix2d *src)
 			double *out_ptr = dest->mem;
 			int i;
 
-			/* Copy column by column because the src and dest have different stride */
+			/* Copy column by column because the src and dest have different stride
+			 * or we're not copying all rows in a sub-matrix */
 			for (i = 0; i < src->cols; i++) {
 				memcpy(out_ptr, in_ptr, sizeof(double) * src->rows);
 				out_ptr += dest->stride;
@@ -123,16 +125,34 @@ matrix2d_copy (matrix2d *dest, const matrix2d *src)
 }
 
 matrix_result
-matrix2d_submatrix_ref(const matrix2d *src, uint16_t x, uint16_t y, uint16_t rows, uint16_t cols, matrix2d *dest)
+matrix2d_copy_block_in_place(matrix2d *dest, uint16_t row, uint16_t col,
+		uint16_t rows, uint16_t cols, uint16_t dest_row, uint16_t dest_col)
 {
-    MATRIX_CHECK(x < src->rows && x + rows < src->rows, MATRIX_RESULT_INVALID);
-    MATRIX_CHECK(y < src->cols && y + cols < src->cols, MATRIX_RESULT_INVALID);
+  matrix2d tmp, tmp_dest;
+	matrix_result ret;
+
+  if ((ret = matrix2d_submatrix_ref(dest, row, col,
+	        rows, cols, &tmp)) != MATRIX_RESULT_OK)
+		return ret;
+
+  if ((ret = matrix2d_submatrix_ref(dest, dest_row, dest_col,
+			    rows, cols, &tmp_dest)) != MATRIX_RESULT_OK)
+		return ret;
+
+	return matrix2d_copy (&tmp_dest, &tmp);
+}
+
+matrix_result
+matrix2d_submatrix_ref(const matrix2d *src, uint16_t row, uint16_t col, uint16_t rows, uint16_t cols, matrix2d *dest)
+{
+    MATRIX_CHECK(row < src->rows && row + rows <= src->rows, MATRIX_RESULT_INVALID);
+    MATRIX_CHECK(col < src->cols && col + cols <= src->cols, MATRIX_RESULT_INVALID);
 
     dest->stride = src->stride;
     dest->rows = rows;
     dest->cols = cols;
 
-    dest->mem = &MATRIX2D_XY(src, x, y);
+    dest->mem = &MATRIX2D_XY(src, row, col);
 
     return MATRIX_RESULT_OK;
 }

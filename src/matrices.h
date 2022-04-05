@@ -32,10 +32,13 @@ matrix2d *matrix2d_dup (const matrix2d *mat);
 void matrix2d_free (matrix2d *mat);
 
 /* Create a sub-matrix that references memory from the owner and should not be freed */
-matrix_result matrix2d_submatrix_ref(const matrix2d *src, uint16_t x, uint16_t y, uint16_t rows, uint16_t cols, matrix2d *dest);
+matrix_result matrix2d_submatrix_ref(const matrix2d *src, uint16_t row, uint16_t col, uint16_t rows, uint16_t cols, matrix2d *dest);
 matrix_result matrix2d_column_ref(const matrix2d *src, uint16_t col, matrix2d *dest);
 
 matrix_result matrix2d_copy (matrix2d *dest, const matrix2d *src);
+matrix_result matrix2d_copy_block_in_place(matrix2d *dest, uint16_t row, uint16_t col,
+		uint16_t rows, uint16_t cols, uint16_t dest_row, uint16_t dest_col);
+
 matrix_result matrix2d_extract_row (matrix2d *dest, const matrix2d *src, const uint16_t m);
 matrix_result matrix2d_replace_row (matrix2d *dest, const uint16_t m, const matrix2d *src);
 
