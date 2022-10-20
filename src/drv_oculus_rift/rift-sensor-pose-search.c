@@ -14,7 +14,7 @@
 #include <assert.h>
 #include <inttypes.h>
 
-#include "rift-sensor.h"
+#include "rift-tracker.h"
 #include "rift-sensor-device.h"
 #include "rift-sensor-pose-search.h"
 
@@ -41,7 +41,8 @@ void rift_pose_finder_init(rift_pose_finder *pf, rift_sensor_camera_params *cali
 
 void rift_pose_finder_clear(rift_pose_finder *pf)
 {
-	correspondence_search_free(pf->cs);
+	if (pf->cs != NULL)
+		correspondence_search_free(pf->cs);
 }
 
 void rift_pose_finder_process_blobs_fast(rift_pose_finder *pf,
