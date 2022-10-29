@@ -138,6 +138,7 @@ void oquatd_normalize_me(quatd* me);
 double oquatd_get_length(const quatd* me);
 double oquatd_get_dot(const quatd* me, const quatd* q);
 void oquatd_inverse(quatd* me);
+void oquatd_decompose_swing_twist(const quatd *me, const vec3d *twist_axis, quatd *swing, quatd *twist);
 
 // filter queue
 #define FILTER_QUEUE_MAX_SIZE 256

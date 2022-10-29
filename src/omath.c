@@ -755,6 +755,14 @@ void oquatd_init_axis(quatd* me, const vec3d* vec, double angle)
 	me->w = cos(angle / 2.0f);
 }
 
+void oquatd_set(quatd* me, double x, double y, double z, double w)
+{
+	me->x = x;
+	me->y = y;
+	me->z = z;
+	me->w = w;
+}
+
 void oquatd_get_rotated(const quatd* me, const vec3d* vec, vec3d* out_vec)
 {
 	quatd q = {{vec->x * me->w + vec->z * me->y - vec->y * me->z,
@@ -873,6 +881,46 @@ void oquatd_diff(const quatd* me, const quatd* q, quatd* out_q)
 	quatd inv = *me;
 	oquatd_inverse(&inv);
 	oquatd_mult(&inv, q, out_q);
+}
+
+/* Take a rotation quat and decompose it into 2 rotations representing
+ * the rotation (twist) around the axis, and the 'swing' between the
+ * source rotation axis and the target.
+ *
+ * Both `me` and `twist_axis` inputs must be normalised.
+ *
+ * swing * twist gives back the original quat
+ * (e.g. oquatd_mult(&swing, &twist, &orig_q))
+ *
+ * See https://arxiv.org/pdf/1506.05481.pdf
+ */
+void oquatd_decompose_swing_twist(const quatd *me, const vec3d *twist_axis, quatd *swing, quatd *twist)
+{
+	quatd twist_inv;
+	vec3d orig_axis, projection;
+	float dot;
+
+	ovec3d_set(&orig_axis, me->x, me->y, me->z);
+
+	/* Calculate projection onto the twist axis */
+	dot = ovec3d_get_dot(&orig_axis, twist_axis);
+
+	ovec3d_multiply_scalar (twist_axis, dot, &projection);
+	oquatd_set(twist, projection.x, projection.y, projection.z, me->w);
+
+	if (oquatd_get_dot(twist, twist) < FLT_EPSILON) {
+		/* Singularity - 180 degree rotation and perpendicular
+		 * decomp axis */
+		oquatd_set(twist, 0.0, 0.0, 0.0, 1.0);
+	}
+	else {
+		oquatd_normalize_me(twist);
+	}
+
+	twist_inv = *twist;
+	oquatd_inverse(&twist_inv);
+	oquatd_mult(me, &twist_inv, swing);
+	oquatd_normalize_me(swing);
 }
 
 // filter queue
