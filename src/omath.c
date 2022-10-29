@@ -276,7 +276,7 @@ void oquatf_inverse(quatf* me)
 	// conjugate
 	for(int i = 0; i < 3; i++)
 		me->arr[i] = -me->arr[i];
-	
+
 	for(int i = 0; i < 4; i++)
 		me->arr[i] /= dot;
 }
@@ -863,7 +863,7 @@ void oquatd_inverse(quatd* me)
 	// conjugate
 	for(int i = 0; i < 3; i++)
 		me->arr[i] = -me->arr[i];
-	
+
 	for(int i = 0; i < 4; i++)
 		me->arr[i] /= dot;
 }
