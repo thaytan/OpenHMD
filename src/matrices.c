@@ -99,6 +99,22 @@ void matrix2d_free (matrix2d *mat)
 }
 
 matrix_result
+matrix2d_fill(matrix2d *dest, double val)
+{
+	int i, j;
+	double *dest_ptr = dest->mem;
+
+	for (j = 0; j < dest->cols; j++) {
+		for (i = 0; i < dest->rows; i++) {
+			dest_ptr[i] = val;
+		}
+		dest_ptr += dest->stride;
+	}
+
+	return MATRIX_RESULT_OK;
+}
+
+matrix_result
 matrix2d_copy (matrix2d *dest, const matrix2d *src)
 {
     MATRIX_CHECK(dest->rows == src->rows && dest->cols == src->cols, MATRIX_RESULT_INVALID);

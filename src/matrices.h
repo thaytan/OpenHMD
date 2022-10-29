@@ -31,6 +31,8 @@ matrix2d *matrix2d_alloc_identity (uint16_t rows);
 matrix2d *matrix2d_dup (const matrix2d *mat);
 void matrix2d_free (matrix2d *mat);
 
+matrix_result matrix2d_fill(matrix2d *dest, double val);
+
 /* Create a sub-matrix that references memory from the owner and should not be freed */
 matrix_result matrix2d_submatrix_ref(const matrix2d *src, uint16_t row, uint16_t col, uint16_t rows, uint16_t cols, matrix2d *dest);
 matrix_result matrix2d_column_ref(const matrix2d *src, uint16_t col, matrix2d *dest);
