@@ -3,6 +3,8 @@
 /*
  * OpenHMD - Free and Open Source API and drivers for immersive technology.
  */
+#define _XOPEN_SOURCE 700
+
 #include <strings.h>
 
 #include <spa/param/video/format-utils.h>
