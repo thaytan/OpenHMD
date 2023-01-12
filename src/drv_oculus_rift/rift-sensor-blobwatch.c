@@ -595,8 +595,19 @@ void blobwatch_update_labels(blobwatch *bw, blobservation *ob, int device_id)
 	blobservation *last_ob = bw->last_observation;
 	int i, l;
 
-	if (last_ob == NULL || last_ob == ob)
-		return; /* Nothing to do */
+	if (last_ob == NULL || last_ob == ob) {
+		/* No label transfers needed, increment the ID age */
+		if (!bw->flicker_enable) {
+			for (i = 0; i < ob->num_blobs; i++) {
+				struct blob *b = ob->blobs + i;
+				if (b->led_id != LED_INVALID_ID && b->led_id == b->prev_led_id)
+					b->pattern_age++;
+				else
+					b->pattern_age = 0;
+			}
+		}
+		return;
+	}
 
 	/* Clear all labels for the indicated device */
 	for (l = 0; l < last_ob->num_blobs; l++) {
@@ -619,6 +630,13 @@ void blobwatch_update_labels(blobwatch *bw, blobservation *ob, int device_id)
 				LOGV("Found matching blob %u - labelled with LED id %x\n",
 					b->blob_id, b->led_id);
 				new_b->led_id = b->led_id;
+
+				if (!bw->flicker_enable) {
+					if (new_b->led_id == new_b->prev_led_id)
+						new_b->pattern_age++;
+					else
+						new_b->pattern_age = 0;
+				}
 			}
 		}
 	}
