@@ -16,18 +16,21 @@
 #define RIFT_MAX_TRACKED_DEVICES 3
 
 /* Side-on angle at which LEDs become occluded */
-#define RIFT_LED_ANGLE 75
+#define RIFT_LED_ANGLE 82
 
 typedef struct rift_tracker_exposure_info rift_tracker_exposure_info;
 typedef struct rift_tracked_device_exposure_info rift_tracked_device_exposure_info;
 typedef struct rift_tracked_device_imu_calibration rift_tracked_device_imu_calibration;
 
 struct rift_tracked_device_exposure_info {
+	int device_index; /* Index into the devices array for this exposure info */
+
 	uint64_t device_time_ns; /* Device time this sensor exposure was captured */
 	int fusion_slot; /* Fusion slot assigned to the exposure, or -1 */
 
 	/* TRUE if we had a recent pose prior for this device at exposure time */
 	bool had_pose_lock;
+	uint64_t last_acquired_pose_lock_ts; /* Time at which we acquired pose lock */
 
 	/* World pose and error std dev at exposure time */
 	posef capture_pose;

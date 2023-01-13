@@ -23,7 +23,7 @@
 #include "rift-sensor-maths.h"
 #include "rift-sensor-opencv.h"
 
-static void update_device_and_blobs (rift_pose_finder *pf, rift_sensor_analysis_frame *frame,
+static int update_device_and_blobs (rift_pose_finder *pf, rift_sensor_analysis_frame *frame,
 	rift_tracked_device *dev, rift_sensor_frame_device_state *dev_state,
 	rift_tracked_device_exposure_info *exp_dev_info,
 	posef *obj_cam_pose);
@@ -35,8 +35,8 @@ void rift_pose_finder_init(rift_pose_finder *pf, rift_sensor_camera_params *cali
 	pf->calib = calib;
 	pf->cs = correspondence_search_new(calib);
 
-  pf->pose_cb = pose_cb;
-  pf->pose_cb_data = pose_cb_data;
+	pf->pose_cb = pose_cb;
+	pf->pose_cb_data = pose_cb_data;
 }
 
 void rift_pose_finder_clear(rift_pose_finder *pf)
@@ -51,59 +51,79 @@ void rift_pose_finder_process_blobs_fast(rift_pose_finder *pf,
 {
 	rift_tracker_exposure_info *exposure_info = &frame->exposure_info;
 	blobservation* bwobs = frame->bwobs;
+	bool have_unfound_devices = false;
+	int used_blobs = 0; /* Track how many blobs were matched to devices */
 	int d;
+
+	/* If we don't have a camera pose yet, skip straight to correspondence
+	 * search */
+	if (!pf->have_camera_pose) {
+		LOGV("Need camera pose - marking frame for long analysis");
+		frame->need_long_analysis = true;
+		return;
+	}
 
 	/* Only process the devices that were available when this frame was captured */
 	for (d = 0; d < frame->n_devices; d++) {
+		rift_tracked_device_exposure_info *exp_dev_info = exposure_info->devices + d;
 		rift_tracked_device *dev = devs[d];
 		rift_sensor_frame_device_state *dev_state = frame->capture_state + d;
-		rift_tracked_device_exposure_info *exp_dev_info = exposure_info->devices + d;
 		posef obj_world_pose, obj_cam_pose;
 
 		/* Get the latest pose estimate for this device */
 		if (!rift_tracked_device_get_latest_exposure_info_pose(dev, exp_dev_info)) {
-			LOGV ("Skipping fast analysis of device %d. No fusion slot assigned\n", d);
+			LOGV ("Skipping fast analysis of device %d. No fusion slot assigned", d);
 			continue;
 		}
 
 		obj_world_pose = dev_state->capture_world_pose;
 
-		LOGV ("Sensor %d Fusion provided pose for device %d, %f %f %f %f pos %f %f %f "
-			"pos_err %f %f %f rot_err %f %f %f had_pose_lock %d",
+		LOGV ("Sensor %d Fusion provided world pose for device %d, %f %f %f %f pos %f %f %f "
+			"pos_err_limit %f %f %f rot_err_limit %f %f %f had_pose_lock %d for %" PRId64 "ms",
 			pf->sensor_id, dev->id,
 			obj_world_pose.orient.x, obj_world_pose.orient.y, obj_world_pose.orient.z, obj_world_pose.orient.w,
 			obj_world_pose.pos.x, obj_world_pose.pos.y, obj_world_pose.pos.z,
 			exp_dev_info->pos_error.x, exp_dev_info->pos_error.y, exp_dev_info->pos_error.z,
 			exp_dev_info->rot_error.x, exp_dev_info->rot_error.y, exp_dev_info->rot_error.z,
-			exp_dev_info->had_pose_lock);
-
-		/* If we don't have a camera pose yet, skip straight to correspondence
-		 * search */
-		if (!pf->have_camera_pose) {
-			frame->need_long_analysis = true;
-			continue;
-		}
+			exp_dev_info->had_pose_lock,
+			exp_dev_info->had_pose_lock ? (exp_dev_info->device_time_ns - exp_dev_info->last_acquired_pose_lock_ts) / 1000000 : -1);
 
 		oposef_apply_inverse(&obj_world_pose, &pf->camera_pose, &obj_cam_pose);
 
-		LOGD ("Sensor %d Frame %d searching for matching pose for device %d, initial quat %f %f %f %f pos %f %f %f",
+		/* Calculate camera-relative prior error bounds */
+		quatf cam_orient_inverse = pf->camera_pose.orient;
+		vec3f obj_cam_pos_error, obj_cam_rot_error;
+
+		oquatf_inverse(&cam_orient_inverse);
+		oquatf_get_rotated_abs(&cam_orient_inverse, &exp_dev_info->rot_error, &obj_cam_rot_error);
+		oquatf_get_rotated_abs(&cam_orient_inverse, &exp_dev_info->pos_error, &obj_cam_pos_error);
+
+		LOGD ("Sensor %d Frame %d searching for matching cam pose for device %d, prior quat %f %f %f %f pos %f %f %f "
+			"pos_err_limit %f %f %f rot_err_limit %f %f %f",
 			pf->sensor_id, frame->id, dev->id,
 			obj_cam_pose.orient.x, obj_cam_pose.orient.y, obj_cam_pose.orient.z, obj_cam_pose.orient.w,
-			obj_cam_pose.pos.x, obj_cam_pose.pos.y, obj_cam_pose.pos.z);
+			obj_cam_pose.pos.x, obj_cam_pose.pos.y, obj_cam_pose.pos.z,
+			obj_cam_pos_error.x, obj_cam_pos_error.y, obj_cam_pos_error.z,
+			obj_cam_rot_error.x, obj_cam_rot_error.y, obj_cam_rot_error.z);
 
 		dev_state->final_cam_pose = obj_cam_pose;
 
 		rift_evaluate_pose_with_prior(&dev_state->score, &obj_cam_pose,
-			true, &obj_cam_pose, &exp_dev_info->pos_error, &exp_dev_info->rot_error,
+			true, &dev_state->final_cam_pose, &obj_cam_pos_error, &obj_cam_rot_error,
 			frame->bwobs->blobs, frame->bwobs->num_blobs,
 			dev->id, dev->leds->points, dev->leds->num_points,
 			pf->calib, NULL);
 
-		if (POSE_HAS_FLAGS(&dev_state->score, RIFT_POSE_MATCH_GOOD)) {
-			LOGD("Sensor %d already had good pose match for device %d matched %u blobs of %u",
-				pf->sensor_id, dev->id, dev_state->score.matched_blobs, dev_state->score.visible_leds);
+		if (POSE_HAS_FLAGS(&dev_state->score, RIFT_POSE_MATCH_GOOD|RIFT_POSE_MATCH_LED_IDS)) {
+			LOGD("Sensor %d already had good pose match for device %d match_flags 0x%x matched %u blobs of %u visible LEDs",
+				pf->sensor_id, dev->id, dev_state->score.match_flags,
+			  dev_state->score.matched_blobs, dev_state->score.visible_leds);
 		} else {
 			int num_blobs = 0;
+
+			LOGD("Sensor %d no expected pose match for device %d match_flags 0x%x matched %u blobs of %u visible LEDs",
+				pf->sensor_id, dev->id, dev_state->score.match_flags,
+			  dev_state->score.matched_blobs, dev_state->score.visible_leds);
 
 			/* See if we still have enough labelled blobs to try to re-acquire the pose without a
 			 * full search */
@@ -115,38 +135,43 @@ void rift_pose_finder_process_blobs_fast(rift_pose_finder *pf,
 			}
 
 			if (num_blobs > 4) {
+				LOGD("Sensor %d trying to reacquire device %d from %u blobs (of %u expected). Prior only matched %d",
+					pf->sensor_id, dev->id, num_blobs, dev_state->score.visible_leds, dev_state->score.matched_blobs);
+
 				estimate_initial_pose (bwobs->blobs, bwobs->num_blobs,
 					dev->id, dev->leds->points, dev->leds->num_points, pf->calib,
 					&obj_cam_pose, NULL, NULL, true);
 
 				rift_evaluate_pose_with_prior(&dev_state->score, &obj_cam_pose,
-					true, &dev_state->final_cam_pose, &exp_dev_info->pos_error, &exp_dev_info->rot_error,
+					true, &dev_state->final_cam_pose, &obj_cam_pos_error, &obj_cam_rot_error,
 					bwobs->blobs, bwobs->num_blobs,
 					dev->id, dev->leds->points, dev->leds->num_points, pf->calib,
 					NULL);
 
 				if (POSE_HAS_FLAGS(&dev_state->score, RIFT_POSE_MATCH_GOOD)) {
-					LOGD("Sensor %d re-acquired match for device %d matched %u blobs of %u",
-						pf->sensor_id, dev->id, dev_state->score.matched_blobs, dev_state->score.visible_leds);
+					LOGD("Sensor %d re-acquired match for device %d matched %u blobs of %u - quat %f %f %f %f pos %f %f %f",
+						pf->sensor_id, dev->id, dev_state->score.matched_blobs, dev_state->score.visible_leds,
+						obj_cam_pose.orient.x, obj_cam_pose.orient.y, obj_cam_pose.orient.z, obj_cam_pose.orient.w,
+						obj_cam_pose.pos.x, obj_cam_pose.pos.y, obj_cam_pose.pos.z
+					);
 				}
-#if LOGLEVEL == 0
+#if LOGLEVEL <= 1
 				else {
 					quatf orient_diff;
-					vec3f pos_error, orient_error;
-
-					ovec3f_subtract(&obj_cam_pose.pos, &dev_state->final_cam_pose.pos, &pos_error);
 
 					oquatf_diff(&obj_cam_pose.orient, &dev_state->final_cam_pose.orient, &orient_diff);
 					oquatf_normalize_me(&orient_diff);
-					oquatf_to_rotation(&orient_diff, &orient_error);
 
-					LOGD("Sensor %d device %d had %d prior blobs, but failed match. Yielded pose %f %f %f %f pos %f %f %f (match %d of %d) rot_error %f %f %f pos_error %f %f %f",
-						pf->sensor_id, dev->id, num_blobs,
+					LOGD("Sensor %d device %d had %d prior blobs, but failed match with flags 0x%x. Yielded pose %f %f %f %f pos %f %f %f (match %d of %d) rot_error %f %f %f pos_error %f %f %f orient_diff %f %f %f %f matched %u blobs",
+						pf->sensor_id, dev->id, num_blobs, dev_state->score.match_flags,
 						obj_cam_pose.orient.x, obj_cam_pose.orient.y, obj_cam_pose.orient.z, obj_cam_pose.orient.w,
 						obj_cam_pose.pos.x, obj_cam_pose.pos.y, obj_cam_pose.pos.z,
 						dev_state->score.matched_blobs, dev_state->score.visible_leds,
-						orient_error.x, orient_error.y, orient_error.z,
-						pos_error.x, pos_error.y, pos_error.z);
+						dev_state->score.orient_error.x, dev_state->score.orient_error.y,
+						dev_state->score.orient_error.z,
+						dev_state->score.pos_error.x, dev_state->score.pos_error.y, dev_state->score.pos_error.z,
+						orient_diff.x, orient_diff.y, orient_diff.z, orient_diff.w,
+						dev_state->score.matched_blobs);
 				}
 #endif
 			}
@@ -154,13 +179,39 @@ void rift_pose_finder_process_blobs_fast(rift_pose_finder *pf,
 
 		/* If we got at least a good match, pass it on for consideration by the fusion */
 		if (POSE_HAS_FLAGS(&dev_state->score, RIFT_POSE_MATCH_GOOD)) {
-			update_device_and_blobs (pf, frame, dev, dev_state, exp_dev_info, &obj_cam_pose);
-		} else {
-			/* Didn't find this device - send the frame for long analysis */
-			LOGD("Sensor %d frame %d needs full search for device %d - sending to long analysis thread",
-				pf->sensor_id, frame->id, dev->id);
+			used_blobs += update_device_and_blobs (pf, frame, dev, dev_state, exp_dev_info, &obj_cam_pose);
+		}
+
+		if (!dev_state->found_device_pose)
+			have_unfound_devices = true;
+	}
+
+	if (have_unfound_devices) {
+		/* If we have enough unmatched blobs, and unfound online devices,
+		 * send the frame for long analysis */
+		int unused_blobs = bwobs->num_blobs - used_blobs;
+
+		if (unused_blobs > 4) {
+			LOGD("Sensor %d - frame has %d unused blobs and needs long analysis - sending",
+				pf->sensor_id, unused_blobs);
+
 			frame->need_long_analysis = true;
-			continue;
+
+#if LOGLEVEL == 0
+			/* Log which device(s) we didn't find */
+			for (d = 0; d < frame->n_devices; d++) {
+				rift_sensor_frame_device_state *dev_state = frame->capture_state + d;
+
+				if (dev_state->found_device_pose)
+					continue;
+
+				LOGD("Sensor %d frame %d with %d unmatched blobs needs full search for device %d",
+					pf->sensor_id, frame->id, unused_blobs, devs[d]->id);
+			}
+#endif
+		}
+		else {
+			LOGD("Sensor %d - frame has only %d unused blobs (need at least 5) and needs long analysis - not sending", pf->sensor_id, unused_blobs);
 		}
 	}
 }
@@ -192,7 +243,7 @@ void rift_pose_finder_process_blobs_long(rift_pose_finder *pf, rift_sensor_analy
 				continue; /* We already found a pose for this device */
 
 			if (!rift_tracked_device_get_latest_exposure_info_pose(dev, exp_dev_info)) {
-				LOGV ("Skipping long analysis of device %d. No fusion slot assigned\n", d);
+				LOGV ("Skipping long analysis of device %d. No fusion slot assigned", d);
 				continue;
 			}
 
@@ -205,7 +256,7 @@ void rift_pose_finder_process_blobs_long(rift_pose_finder *pf, rift_sensor_analy
 				search_flags |= CS_FLAG_DEEP_SEARCH;
 
 			if (exp_dev_info->fusion_slot == -1) {
-				LOGV ("Sensor %d Skipping long analysis of device %d. No fusion slot assigned\n", pf->sensor_id, d);
+				LOGV ("Sensor %d Skipping long analysis of device %d. No fusion slot assigned", pf->sensor_id, d);
 				continue;
 			}
 
@@ -215,7 +266,7 @@ void rift_pose_finder_process_blobs_long(rift_pose_finder *pf, rift_sensor_analy
 				if (dev_state->gravity_error_rad < DEG_TO_RAD(30)) {
 					search_flags |= CS_FLAG_MATCH_GRAVITY;
 					do_aligned_checks = true;
-					pose_tolerance = OHMD_MAX(2 * dev_state->gravity_error_rad, DEG_TO_RAD(10));
+					pose_tolerance = OHMD_MAX(2 * dev_state->gravity_error_rad, DEG_TO_RAD(22.5));
 				}
 
 				oposef_apply_inverse(&dev_state->capture_world_pose, &pf->camera_pose, &obj_cam_pose);
@@ -226,7 +277,7 @@ void rift_pose_finder_process_blobs_long(rift_pose_finder *pf, rift_sensor_analy
 			if (POSE_HAS_FLAGS(&dev_state->score, RIFT_POSE_MATCH_GOOD) && had_strong_matches) {
 				/* We have a good pose match for this device, that we found on the first
 				 * pass. If any other device found a strong match though, then that may
-				 * have claimed blobs we were relying on  - so re-check our pose and possibly start again */
+				 * have claimed blobs we were relying on - so re-check our pose and possibly start again */
 				if (search_flags & CS_FLAG_HAVE_POSE_PRIOR) {
 					rift_evaluate_pose_with_prior(&dev_state->score, &obj_cam_pose,
 						do_aligned_checks, &dev_state->final_cam_pose, &exp_dev_info->pos_error, &exp_dev_info->rot_error,
@@ -247,24 +298,24 @@ void rift_pose_finder_process_blobs_long(rift_pose_finder *pf, rift_sensor_analy
 			}
 
 			if (search_flags & CS_FLAG_DEEP_SEARCH) {
-				LOGD("Sensor %d deep search for device %d\n", pf->sensor_id, dev->id);
+				LOGD("Sensor %d deep search for device %d", pf->sensor_id, dev->id);
 			}
 
 			if (correspondence_search_find_one_pose (pf->cs, dev->id, search_flags, &obj_cam_pose,
 					&exp_dev_info->pos_error, &exp_dev_info->rot_error,
 					&pf->cam_gravity_vector, pose_tolerance, &dev_state->score)) {
 				if (do_aligned_checks) {
-					LOGD("Got aligned pose %f, %f, %f, %f for device %d with tolerance %f!",
+					LOGD("Got aligned pose %f, %f, %f, %f for device %d with tolerance %f deg",
 						obj_cam_pose.orient.x, obj_cam_pose.orient.y, obj_cam_pose.orient.z, obj_cam_pose.orient.w,
 						d, RAD_TO_DEG(pose_tolerance));
 				}
 			}
 			else if (do_aligned_checks) {
-				LOGD("No aligned pose for device %d with tolerance %f!", d, RAD_TO_DEG(pose_tolerance));
+				LOGD("No aligned pose for device %d with tolerance %f deg", d, RAD_TO_DEG(pose_tolerance));
 			}
 
-			LOGV("Sensor %d Frame %d - doing long search with flags 0x%x for device %d matched %u blobs of %u from %d (%s match)",
-				pf->sensor_id, frame->id, search_flags, dev->id,
+			LOGV("Sensor %d Frame %d - doing long search with flags 0x%x for device %d match_flags 0x%x matched %u blobs of %u from %d (%s match)",
+				pf->sensor_id, frame->id, search_flags, dev->id, dev_state->score.match_flags,
 				dev_state->score.matched_blobs, dev_state->score.visible_leds, bwobs->num_blobs,
 				POSE_HAS_FLAGS(&dev_state->score, RIFT_POSE_MATCH_GOOD) ? "good" : "bad");
 
@@ -282,13 +333,14 @@ void rift_pose_finder_process_blobs_long(rift_pose_finder *pf, rift_sensor_analy
 	}
 }
 
-static void
+static int
 update_device_and_blobs (rift_pose_finder *pf, rift_sensor_analysis_frame *frame,
 	rift_tracked_device *dev, rift_sensor_frame_device_state *dev_state,
 	rift_tracked_device_exposure_info *exp_dev_info,
 	posef *obj_cam_pose)
 {
 	blobservation* bwobs = frame->bwobs;
+	int ret = 0;
 
 	/* Clear existing blob IDs for this device, then
 	 * back project LED ids into blobs if we find them and the dot product
@@ -335,25 +387,13 @@ update_device_and_blobs (rift_pose_finder *pf, rift_sensor_analysis_frame *frame
 	}
 
 	if (POSE_HAS_FLAGS(score, RIFT_POSE_MATCH_GOOD)) {
-		LOGV("Sensor %d Found %s pose match - %u LEDs matched %u visible ones flags %x\n",
+		LOGV("Sensor %d Found %s pose match - %u LEDs matched %u visible ones flags 0x%x",
 			pf->sensor_id, POSE_HAS_FLAGS(score, RIFT_POSE_MATCH_STRONG) ? "strong" : "good",
 			score->matched_blobs, score->visible_leds, score->match_flags);
 
-		if (pf->have_camera_pose) {
-			/* The pose we found is the transform from object coords to camera-relative coords.
-			 * Our camera pose stores the transform from camera to world, and what we
-			 * need to give the fusion is transform from object->world.
-			 *
-			 * To get the transform from object->world, take object->camera pose, and apply
-			 * the camera->world pose. */
-			oposef_apply(&pose, &pf->camera_pose, &pose);
-
-			assert (pf->pose_cb != NULL);
-
-			dev_state->found_device_pose = pf->pose_cb (pf->pose_cb_data, dev, frame, &pose, score);
-		}
 		/* Arbitrary 25 degree threshold for gravity vector matches the minimum error */
-		else if (dev->id == 0 && oquatf_get_length (&capture_pose->orient) > 0.9 && dev_state->gravity_error_rad <= DEG_TO_RAD(25.0)) {
+		if (!pf->have_camera_pose && dev->id == 0 &&
+		    oquatf_get_length (&capture_pose->orient) > 0.9 && dev_state->gravity_error_rad <= DEG_TO_RAD(25.0)) {
 			/* No camera pose yet. If this is the HMD, we had an IMU pose at capture time,
 			 * and the fusion has a good gravity vector from the IMU, use it to
 			 * initialise the camera (world->camera) pose using the current headset pose.
@@ -384,17 +424,37 @@ update_device_and_blobs (rift_pose_finder *pf, rift_sensor_analysis_frame *frame
 
 			pf->have_camera_pose = true;
 		}
-		else if (dev->id == 0) {
+
+		if (!pf->have_camera_pose) {
 			LOGD("Sensor %d No camera pose yet - gravity error is %f degrees rot_error (%f, %f, %f)",
 			    pf->sensor_id, RAD_TO_DEG(dev_state->gravity_error_rad),
 			    exp_dev_info->rot_error.x, exp_dev_info->rot_error.y, exp_dev_info->rot_error.z);
+			return score->matched_blobs;
 		}
 
+		// rift_dump_pose_leds (&pose, dev->id, dev->leds->points, dev->leds->num_points, pf->calib);
+
+		/* The pose we found is the transform from object coords to camera-relative coords.
+		 * Our camera pose stores the transform from camera to world, and what we
+		 * need to give the fusion is transform from object->world.
+		 *
+		 * To get the transform from object->world, take object->camera pose, and apply
+		 * the camera->world pose. */
+		oposef_apply(&pose, &pf->camera_pose, &pose);
+
+		assert (pf->pose_cb != NULL);
+
+		if (pf->pose_cb (pf->pose_cb_data, dev, frame, &pose, score)) {
+			dev_state->found_device_pose = true;
+			ret = score->matched_blobs;
+		}
 	}
 	else {
-		LOGV("Sensor %d Failed pose match - only %u LEDs matched %u visible ones",
-			pf->sensor_id, score->matched_blobs, score->visible_leds);
+		LOGV("Sensor %d Failed pose match for dev %d with match_flags 0x%x - only %u LEDs matched %u visible ones",
+			pf->sensor_id, dev->id, score->match_flags, score->matched_blobs, score->visible_leds);
 		rift_clear_blob_labels (bwobs->blobs, bwobs->num_blobs, dev->id);
 	}
+
+	return ret;
 }
 

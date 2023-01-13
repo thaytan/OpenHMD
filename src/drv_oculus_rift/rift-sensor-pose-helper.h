@@ -24,9 +24,10 @@ typedef struct {
 typedef enum {
 	RIFT_POSE_MATCH_GOOD     = 0x1, /* A reasonable pose match - most LEDs matched to within a few pixels error */
 	RIFT_POSE_MATCH_STRONG   = 0x2, /* A strong pose match is a match with very low error */
-	RIFT_POSE_MATCH_POSITION = 0x4, /* The position of the pose matched the prior well */
-	RIFT_POSE_MATCH_ORIENT   = 0x8, /* The orientation of the pose matched the prior well */
-	RIFT_POSE_HAD_PRIOR      = 0x10, /* If a pose prior was supplied when calculating the score, then rot/trans_error are set */
+	RIFT_POSE_MATCH_POSITION = 0x10, /* The position of the pose matched the prior well */
+	RIFT_POSE_MATCH_ORIENT   = 0x20, /* The orientation of the pose matched the prior well */
+	RIFT_POSE_HAD_PRIOR      = 0x100, /* If a pose prior was supplied when calculating the score, then rot/trans_error are set */
+	RIFT_POSE_MATCH_LED_IDS  = 0x200, /* The LED IDs on the blobs all matched the LEDs we thought (or were unassigned) */
 } rift_pose_match_flags;
 
 #define POSE_SET_FLAG(score,f) ((score)->match_flags |= (f))
@@ -61,6 +62,10 @@ void rift_evaluate_pose_with_prior (rift_pose_metrics *score, posef *pose,
 
 void rift_mark_matching_blobs (posef *pose,
 	struct blob *blobs, int num_blobs,
+	int device_id, rift_led *leds, int num_leds,
+	rift_sensor_camera_params *calib);
+
+void rift_dump_pose_leds (posef *pose,
 	int device_id, rift_led *leds, int num_leds,
 	rift_sensor_camera_params *calib);
 
