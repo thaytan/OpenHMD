@@ -282,22 +282,22 @@ correspondence_search_project_pose (correspondence_search_t *cs, led_search_mode
 		}
 	}
 
-  rift_pose_metrics score;
+	rift_pose_metrics score;
 
-  /* Check how many LEDs have matching blobs in this pose,
-   * if there's enough we have a good match */
-  /* FIXME: It would be better to be able to pass a list of undistorted
-   * blob points */
-  if (mi->search_flags & CS_FLAG_HAVE_POSE_PRIOR) {
-    rift_evaluate_pose_with_prior (&score, pose,
-        false, &mi->pose_prior, mi->pos_error_thresh, mi->rot_error_thresh,
-        cs->blobs, cs->num_points,
-        mi->id, leds->points, leds->num_points, cs->calib, NULL);
-  }
-  else {
-    rift_evaluate_pose (&score, pose, cs->blobs, cs->num_points,
-        mi->id, leds->points, leds->num_points, cs->calib, NULL);
-  }
+	/* Check how many LEDs have matching blobs in this pose,
+	 * if there's enough we have a good match */
+	/* FIXME: It would be better to be able to pass a list of undistorted
+	 * blob points */
+	if (mi->search_flags & CS_FLAG_HAVE_POSE_PRIOR) {
+		rift_evaluate_pose_with_prior (&score, pose,
+		    false, &mi->pose_prior, mi->pos_error_thresh, mi->rot_error_thresh,
+		    cs->blobs, cs->num_points,
+		    mi->id, leds, cs->calib, NULL);
+	}
+	else {
+		rift_evaluate_pose (&score, pose, cs->blobs, cs->num_points,
+		    mi->id, leds, cs->calib, NULL);
+	}
 
   /* If this pose is any good, test it further */
   if (POSE_HAS_FLAGS(&score, RIFT_POSE_MATCH_GOOD)) {

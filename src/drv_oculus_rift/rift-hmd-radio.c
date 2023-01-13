@@ -319,6 +319,7 @@ static int rift_touch_parse_calibration(char *json_in,
 		for (j = 0; j < 6; j++)
 			point[j] = nx_json_item (array, j);
 
+		led->id = i;
 		led->pos.x = point[0]->dbl_value;
 		led->pos.y = point[1]->dbl_value;
 		led->pos.z = point[2]->dbl_value;

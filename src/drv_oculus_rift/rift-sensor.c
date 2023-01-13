@@ -534,16 +534,12 @@ static bool init_frame_analyse(rift_sensor_ctx *sensor, rift_sensor_analysis_fra
 	for (d = 0; d < exposure_info->n_devices; d++) {
 		rift_sensor_frame_device_state *dev_state = frame->capture_state + d;
 		const rift_tracked_device_exposure_info *exp_dev_info = exposure_info->devices + d;
-		const vec3f *rot_error = &exp_dev_info->rot_error;
-
-		dev_state->capture_world_pose = exp_dev_info->capture_pose;
-
-		/* Compute gravity error from XZ error range */
-		dev_state->gravity_error_rad = OHMD_MAX(rot_error->x, rot_error->z);
 
 		/* Mark the score as un-evaluated to start */
 		dev_state->score.match_flags = 0;
 		dev_state->found_device_pose = false;
+
+		rift_pose_finder_exp_info_to_dev_state (&sensor->pf, exp_dev_info, dev_state);
 	}
 	frame->n_devices = exposure_info->n_devices;
 

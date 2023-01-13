@@ -49,24 +49,24 @@ typedef struct {
 
 void rift_evaluate_pose (rift_pose_metrics *score, posef *pose,
 	struct blob *blobs, int num_blobs,
-	int device_id, rift_led *leds, int num_leds,
+	int device_id, rift_leds *leds_model,
 	rift_sensor_camera_params *calib,
 	rift_rect_t *out_bounds);
 
 void rift_evaluate_pose_with_prior (rift_pose_metrics *score, posef *pose,
 	bool prior_must_match, posef *pose_prior, const vec3f *pos_error_thresh, const vec3f *rot_error_thresh,
 	struct blob *blobs, int num_blobs,
-	int device_id, rift_led *leds, int num_leds,
+	int device_id, rift_leds *leds_model,
 	rift_sensor_camera_params *calib,
 	rift_rect_t *out_bounds);
 
 void rift_mark_matching_blobs (posef *pose,
 	struct blob *blobs, int num_blobs,
-	int device_id, rift_led *leds, int num_leds,
+	int device_id, rift_leds *leds_model,
 	rift_sensor_camera_params *calib);
 
 void rift_dump_pose_leds (posef *pose,
-	int device_id, rift_led *leds, int num_leds,
+	int device_id, rift_leds *leds_model,
 	rift_sensor_camera_params *calib);
 
 void rift_clear_blob_labels (struct blob *blobs, int num_blobs, int device_id);

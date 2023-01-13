@@ -844,6 +844,7 @@ rift_leds_init (rift_leds *leds, uint8_t num_points)
 {
 	leds->points = calloc(num_points, sizeof(rift_led));
 	leds->num_points = num_points;
+	leds->radius_mm = 4 / 1000.0;
 }
 
 void
@@ -900,6 +901,7 @@ static int rift_get_led_info(rift_hmd_t *priv)
 			ovec3f_multiply_scalar(&priv->imu.pos, 1.0/1000000.0, &priv->imu.pos); /* convert to metres */
 		} else if (pos.flags == 2) {
 			rift_led *led = &priv->leds.points[pos.index];
+			led->id = pos.index;
 			led->pos.x = (float)pos.pos_x;
 			led->pos.y = (float)pos.pos_y;
 			led->pos.z = (float)pos.pos_z;

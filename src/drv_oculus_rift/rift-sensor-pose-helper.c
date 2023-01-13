@@ -127,7 +127,7 @@ check_pose_prior(rift_pose_metrics *score, posef *pose, posef *pose_prior, const
 
 static void
 get_visible_leds_and_bounds (posef *pose,
-	int device_id, rift_led *leds, int num_leds,
+	int device_id, rift_leds *leds_model,
 	rift_sensor_camera_params *calib,
 	struct visible_led_info *visible_led_points, int *num_visible_leds,
 	rift_rect_t *bounds)
@@ -135,9 +135,9 @@ get_visible_leds_and_bounds (posef *pose,
 	vec3f led_out_points[MAX_OBJECT_LEDS];
 	bool first_visible = true;
 	int i;
-
-	/* FIXME: Pass LED size in the model */
-	const double led_radius_mm = 4.0 / 1000.0;
+	rift_led *leds = leds_model->points;
+	const int num_leds = leds_model->num_points;
+	const double led_radius_mm = leds_model->radius_mm;
 
 	/* Project HMD LEDs into the distorted image space */
 	rift_project_points(leds, num_leds, calib, pose, led_out_points);
@@ -210,7 +210,7 @@ get_visible_leds_and_bounds (posef *pose,
 void rift_evaluate_pose_with_prior (rift_pose_metrics *score, posef *pose,
 	bool prior_must_match, posef *pose_prior, const vec3f *pos_error_thresh, const vec3f *rot_error_thresh,
 	struct blob *blobs, int num_blobs,
-	int device_id, rift_led *leds, int num_leds,
+	int device_id, rift_leds *leds_model,
 	rift_sensor_camera_params *calib,
 	rift_rect_t *out_bounds)
 {
@@ -225,7 +225,7 @@ void rift_evaluate_pose_with_prior (rift_pose_metrics *score, posef *pose,
 	rift_rect_t bounds = { 0, };
 	int i;
 
-	assert (num_leds > 0);
+	assert (leds_model->num_points > 0);
 	assert (num_blobs > 0);
 	assert (score != NULL);
 
@@ -235,7 +235,7 @@ void rift_evaluate_pose_with_prior (rift_pose_metrics *score, posef *pose,
 	score->unmatched_blobs = 0;
 	score->visible_leds = 0;
 
-	get_visible_leds_and_bounds (pose, device_id, leds, num_leds, calib, visible_led_points, &score->visible_leds, &bounds);
+	get_visible_leds_and_bounds (pose, device_id, leds_model, calib, visible_led_points, &score->visible_leds, &bounds);
 
 	if (score->visible_leds < 5)
 		goto done;
@@ -261,9 +261,8 @@ void rift_evaluate_pose_with_prior (rift_pose_metrics *score, posef *pose,
 			if (match_led_index >= 0) {
 				if (b->led_id != LED_INVALID_ID) {
 					struct visible_led_info *led_info = visible_led_points + match_led_index;
-					/* FIXME: Get the ID directly from the LED */
 					rift_led *match_led = led_info->led;
-					int led_index = match_led - leds;
+					int led_index = match_led->id;
 					if (b->led_id != LED_MAKE_ID (device_id, led_index)) {
 						printf("mismatched LED id %d/%d blob %d (@ %f,%f) has %d/%d\n",
 						    device_id, led_index, i, b->x, b->y, device_id, LED_LOCAL_ID (b->led_id));
@@ -340,12 +339,12 @@ done:
 
 void rift_evaluate_pose (rift_pose_metrics *score, posef *pose,
 	struct blob *blobs, int num_blobs,
-	int device_id, rift_led *leds, int num_leds,
+	int device_id, rift_leds *leds_model,
 	rift_sensor_camera_params *calib,
 	rift_rect_t *out_bounds)
 {
 	rift_evaluate_pose_with_prior (score, pose, false, NULL, NULL, NULL,
-	    blobs, num_blobs, device_id, leds, num_leds, calib, out_bounds);
+	    blobs, num_blobs, device_id, leds_model, calib, out_bounds);
 }
 
 void rift_clear_blob_labels (struct blob *blobs, int num_blobs, int device_id)
@@ -365,7 +364,7 @@ void rift_clear_blob_labels (struct blob *blobs, int num_blobs, int device_id)
 
 void rift_mark_matching_blobs (posef *pose,
 	struct blob *blobs, int num_blobs,
-	int device_id, rift_led *leds, int num_leds,
+	int device_id, rift_leds *leds_model,
 	rift_sensor_camera_params *calib)
 {
 	/*
@@ -379,10 +378,10 @@ void rift_mark_matching_blobs (posef *pose,
 	rift_rect_t bounds = { 0, };
 	int i;
 
-	assert (num_leds > 0);
+	assert (leds_model->num_points > 0);
 	assert (num_blobs > 0);
 
-	get_visible_leds_and_bounds (pose, device_id, leds, num_leds, calib, visible_led_points, &num_visible_leds, &bounds);
+	get_visible_leds_and_bounds (pose, device_id, leds_model, calib, visible_led_points, &num_visible_leds, &bounds);
 
 	//printf ("Bounding box for pose is %f,%f -> %f,%f\n", bounds.left, bounds.top, bounds.right, bounds.bottom);
 
@@ -403,8 +402,7 @@ void rift_mark_matching_blobs (posef *pose,
 				struct visible_led_info *led_info = visible_led_points + match_led_index;
 				rift_led *match_led = led_info->led;
 
-				/* FIXME: Get the ID directly from the LED */
-				int led_index = match_led - leds;
+				int led_index = match_led->id;
 				if (b->led_id != LED_INVALID_ID)
 					b->prev_led_id = b->led_id;
 				b->led_id = LED_MAKE_ID (device_id, led_index);
@@ -426,8 +424,7 @@ void rift_mark_matching_blobs (posef *pose,
 		struct visible_led_info *led_info = visible_led_points + i;
 		if (!led_info->matched) {
 			rift_led *match_led = led_info->led;
-			/* FIXME: Get the ID directly from the LED */
-			int led_index = match_led - leds;
+			int led_index = match_led->id;
 			LOGI("No blob for device %d LED %d @ %f,%f size %f px angle %f", device_id, led_index, led_info->pos_px.x, led_info->pos_px.y,
 			    2*led_info->led_radius_px, RAD_TO_DEG (acosf (led_info->facing_dot)));
 		}
@@ -472,7 +469,7 @@ bool rift_score_is_better_pose (rift_pose_metrics *old_score, rift_pose_metrics 
 }
 
 void rift_dump_pose_leds (posef *pose,
-  int device_id, rift_led *leds, int num_leds,
+  int device_id, rift_leds *leds_model,
   rift_sensor_camera_params *calib)
 {
 	/*
@@ -485,9 +482,9 @@ void rift_dump_pose_leds (posef *pose,
 	rift_rect_t bounds = { 0, };
 	int i;
 
-	assert (num_leds > 0);
+	assert (leds_model->num_points > 0);
 
-	get_visible_leds_and_bounds (pose, device_id, leds, num_leds, calib, visible_led_points, &num_visible_leds, &bounds);
+	get_visible_leds_and_bounds (pose, device_id, leds_model, calib, visible_led_points, &num_visible_leds, &bounds);
 
 	LOGI("Dumping LEDs Device %d orient %f %f %f %f pos %f %f %f", device_id,
 	    pose->orient.x, pose->orient.y, pose->orient.z, pose->orient.w,
@@ -497,8 +494,7 @@ void rift_dump_pose_leds (posef *pose,
 	for (i = 0; i < num_visible_leds; i++) {
 		struct visible_led_info *led_info = visible_led_points + i;
 		rift_led *match_led = led_info->led;
-		/* FIXME: Get the ID directly from the LED */
-		int led_index = match_led - leds;
+		int led_index = match_led->id;
 
 		LOGI("Device %d LED %d @ %f,%f size %f px angle %f", device_id, led_index, led_info->pos_px.x, led_info->pos_px.y,
 		   2*led_info->led_radius_px, RAD_TO_DEG (acosf (led_info->facing_dot)));

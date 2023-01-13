@@ -44,5 +44,7 @@ void rift_pose_finder_process_blobs_fast(rift_pose_finder *pf, rift_sensor_analy
 	rift_tracked_device **devs);
 void rift_pose_finder_process_blobs_long(rift_pose_finder *pf, rift_sensor_analysis_frame *frame,
 	rift_tracked_device **devs);
+void rift_pose_finder_exp_info_to_dev_state (rift_pose_finder *pf,
+  const rift_tracked_device_exposure_info *exp_dev_info, rift_sensor_frame_device_state *dev_state);
 
 #endif

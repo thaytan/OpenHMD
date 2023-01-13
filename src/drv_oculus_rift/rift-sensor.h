@@ -20,10 +20,14 @@ typedef struct rift_sensor_frame_device_state rift_sensor_frame_device_state;
 typedef struct rift_sensor_analysis_frame rift_sensor_analysis_frame;
 
 struct rift_sensor_frame_device_state {
-	posef capture_world_pose;
+	/* Predicted device pose and error bounds from fusion, in camera space */
+	posef capture_cam_pose;
+	vec3f obj_cam_pos_error;
+	vec3f	obj_cam_rot_error;
 	float gravity_error_rad; /* Gravity vector uncertainty in radians 0..M_PI */
-	posef final_cam_pose;
+
 	bool found_device_pose; /* Set to true when the device was found in this exposure */
+	posef final_cam_pose;
 	rift_pose_metrics score;
 };
 

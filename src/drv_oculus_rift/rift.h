@@ -176,6 +176,7 @@ typedef struct {
 } pkt_led_pattern_report;
 
 typedef struct {
+	int id;
 	// Relative position in micrometers
 	vec3f pos;
 	// Normal
@@ -187,6 +188,7 @@ typedef struct {
 typedef struct {
 	rift_led *points;
 	uint8_t num_points;
+	float radius_mm;
 } rift_leds;
 
 typedef struct {
