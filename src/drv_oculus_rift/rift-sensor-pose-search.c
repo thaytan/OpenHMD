@@ -59,14 +59,20 @@ void rift_pose_finder_exp_info_to_dev_state (rift_pose_finder *pf,
 		oquatf_inverse(&cam_orient_inverse);
 
 		oquatf_get_rotated_abs(&cam_orient_inverse, &exp_dev_info->rot_error, &dev_state->obj_cam_rot_error);
+#if 0
 		oquatf_get_rotated_abs(&cam_orient_inverse, &exp_dev_info->pos_error, &dev_state->obj_cam_pos_error);
+#else
+		dev_state->obj_cam_pos_error = exp_dev_info->pos_error;
+#endif
 
-    /* TEST: rot error to at least 20 degrees */
+#if 0
+		/* TEST: rot error to at least 20 degrees */
 		int a;
 		for (a = 0; a < 3; a++) {
 			if (dev_state->obj_cam_rot_error.arr[a] < DEG_TO_RAD(20))
 				dev_state->obj_cam_rot_error.arr[a] = DEG_TO_RAD(20);
 		}
+#endif
 }
 
 void rift_pose_finder_process_blobs_fast(rift_pose_finder *pf,
@@ -288,7 +294,7 @@ void rift_pose_finder_process_blobs_long(rift_pose_finder *pf, rift_sensor_analy
 				if (dev_state->gravity_error_rad < DEG_TO_RAD(30)) {
 					search_flags |= CS_FLAG_MATCH_GRAVITY;
 					do_aligned_checks = true;
-					pose_tolerance = OHMD_MAX(2 * dev_state->gravity_error_rad, DEG_TO_RAD(22.5));
+					pose_tolerance = OHMD_MAX(2 * dev_state->gravity_error_rad, DEG_TO_RAD(30));
 				}
 
 				search_flags |= CS_FLAG_HAVE_POSE_PRIOR;
