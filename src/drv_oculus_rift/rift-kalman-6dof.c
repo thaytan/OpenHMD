@@ -197,8 +197,10 @@ static bool process_func(const ukf_base *ukf, const double dt, const matrix2d *X
 #elif MOTION_MODEL == 2
 	/* Position - hybrid model using constant-V for IMU data gaps */
 	/* If dt is < the threshold, use constant accel, otherwise switch to constant velocity,
-	 * because we are missing some IMU updates and acceleration vals are definitely wrong */
-	if (dt < HYBRID_MOTION_THRESHOLD) {
+	 * because we are missing some IMU updates and acceleration vals are definitely wrong.
+	 * Only do the update if we have seen a 6dof pose update from a camera. Before that,
+	 * only do 3dof tracking */
+	if (filter_state->saw_pose_update && dt < HYBRID_MOTION_THRESHOLD) {
 		/* Constant acceleration model */
 		if (dt >= 0) {
 			MATRIX2D_Y(X, STATE_POSITION)   += dt * MATRIX2D_Y(X_prior, STATE_VELOCITY)   + 0.5 * dt * dt * global_accel.x;
@@ -622,6 +624,20 @@ static bool pose_sum_func(const unscented_transform *ut, const matrix2d *Y, cons
 	return true;
 }
 
+static void rift_kalman_6dof_reinit(rift_kalman_6dof_filter *state)
+{
+	/* Initialise the prior covariance / uncertainty - particularly around the biases,
+	 * where we assume they are close to 0 somewhere */
+	matrix2d_fill(state->ukf.P_prior, 0.0);
+	int i;
+
+	for (i = COV_ACCEL_BIAS; i < COV_ACCEL_BIAS + 3; i++)
+		MATRIX2D_XY(state->ukf.P_prior, i, i) = IMU_ACCEL_BIAS_NOISE_INITIAL;
+
+	for (i = COV_GYRO_BIAS; i < COV_GYRO_BIAS + 3; i++)
+		MATRIX2D_XY(state->ukf.P_prior, i, i) = IMU_GYRO_BIAS_NOISE_INITIAL;
+}
+
 void rift_kalman_6dof_init(rift_kalman_6dof_filter *state, posef *init_pose, int num_delay_slots)
 {
 	int i, d;
@@ -629,6 +645,7 @@ void rift_kalman_6dof_init(rift_kalman_6dof_filter *state, posef *init_pose, int
 	assert(num_delay_slots <= MAX_DELAY_SLOTS);
 
 	state->first_update = true;
+	state->saw_pose_update = false;
 	state->num_delay_slots = num_delay_slots;
 
 	const int STATE_SIZE = BASE_STATE_SIZE + (num_delay_slots * DELAY_SLOT_STATE_SIZE);
@@ -759,6 +776,7 @@ rift_kalman_6dof_update(rift_kalman_6dof_filter *state, uint64_t time, ukf_measu
 		if (!ukf_base_commit(&state->ukf)) {
 			LOGE ("Failed to commit UKF prediction at time %llu (dt %f)",
 					(unsigned long long) state->current_ts, NS_TO_SEC(dt));
+			rift_kalman_6dof_reinit(state);
 			return;
 		}
 	}
@@ -827,6 +845,7 @@ void rift_kalman_6dof_pose_update(rift_kalman_6dof_filter *state, uint64_t time,
 	MATRIX2D_Y(m->z, POSE_MEAS_ORIENTATION+2) = pose->orient.z;
 	MATRIX2D_Y(m->z, POSE_MEAS_ORIENTATION+3) = pose->orient.w;
 
+	state->saw_pose_update = true;
 	rift_kalman_6dof_update(state, time, m);
 }
 

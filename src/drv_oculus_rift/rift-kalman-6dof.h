@@ -44,6 +44,7 @@ struct rift_kalman_6dof_filter {
   /* Current time tracking */
   bool first_update;
   uint64_t current_ts;
+  bool saw_pose_update;
 
   /* Control vector (gyro reading) */
   vec3d ang_vel;
