@@ -345,6 +345,14 @@ rift_tracker_new (ohmd_context* ohmd_ctx,
 
 		posef camera_pose;
 		if (rift_tracker_config_get_sensor_pose(&tracker_ctx->config, (char *) serial, &camera_pose)) {
+			LOGI("Loaded pose for sensor %s from room store: "
+			    "\"pos\" : [ %f, %f, %f ], \"orient\" : [ %f, %f, %f, %f ]",
+			    serial,
+			    camera_pose.pos.x, camera_pose.pos.y,
+			    camera_pose.pos.z, camera_pose.orient.x,
+			    camera_pose.orient.y, camera_pose.orient.z,
+			    camera_pose.orient.w);
+
 			/* Add the room offset to the camera pose we give the sensor */
 			oposef_apply(&camera_pose, &room_pose_offset, &camera_pose);
 			rift_sensor_set_pose(sensor_ctx, &camera_pose);
