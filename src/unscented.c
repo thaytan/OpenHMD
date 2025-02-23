@@ -183,7 +183,6 @@ ut_compute_sigma_points(const unscented_transform *ut, matrix2d *sigmas, const m
   if (matrix2d_cholesky_in_place (ut->P_root) != MATRIX_RESULT_OK) {
 		print_mat("covariance", cov);
     print_mat("Cholesky decomposition failed on P_root", ut->P_root);
-		abort();
     return false;
   }
 
