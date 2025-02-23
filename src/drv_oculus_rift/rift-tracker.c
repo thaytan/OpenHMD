@@ -108,6 +108,7 @@ struct rift_tracked_device_priv {
 	rift_kalman_6dof_filter ukf_fusion;
 
 	/* Account keeping for UKF fusion slots */
+	int n_delay_slots;
 	int delay_slot_index;
 	rift_tracker_pose_delay_slot delay_slots[NUM_POSE_DELAY_SLOTS];
 	/* Track the time we last started having no free delay slots (or 0 if never) */
@@ -193,13 +194,14 @@ rift_tracker_add_device (rift_tracker_ctx *ctx, int device_id, posef *imu_pose, 
 	next_dev = ctx->devices + ctx->n_devices;
 
 	next_dev->base.id = device_id;
-	rift_kalman_6dof_init(&next_dev->ukf_fusion, &init_pose, NUM_POSE_DELAY_SLOTS);
+	next_dev->n_delay_slots = ctx->n_sensors != 0 ? NUM_POSE_DELAY_SLOTS : 0;
+	rift_kalman_6dof_init(&next_dev->ukf_fusion, &init_pose, next_dev->n_delay_slots);
 	next_dev->last_acquired_pose_lock_ts = next_dev->last_reported_pose = next_dev->last_observed_orient_ts = next_dev->last_observed_pose_ts = next_dev->device_time_ns = 0;
 
 	exp_filter_pose_init(&next_dev->pose_output_filter);
 
 	/* Init delay slot bookkeeping */
-	for (s = 0; s < NUM_POSE_DELAY_SLOTS; s++) {
+	for (s = 0; s < next_dev->n_delay_slots; s++) {
 		rift_tracker_pose_delay_slot *slot = next_dev->delay_slots + s;
 
 		slot->slot_id = s;
@@ -961,12 +963,12 @@ static rift_tracker_pose_delay_slot *
 find_free_delay_slot(rift_tracked_device_priv *dev)
 {
 	/* Pose observation delay slots */
-	for (int i = 0; i < NUM_POSE_DELAY_SLOTS; i++) {
+	for (int i = 0; i < dev->n_delay_slots; i++) {
 		int slot_no = dev->delay_slot_index;
 		rift_tracker_pose_delay_slot *slot = dev->delay_slots + slot_no;
 
 		/* Cycle through the free delay slots */
-		dev->delay_slot_index = (slot_no+1) % NUM_POSE_DELAY_SLOTS;
+		dev->delay_slot_index = (slot_no+1) % dev->n_delay_slots;
 
 		if (slot->use_count == 0)
 			return slot;
@@ -980,7 +982,7 @@ static rift_tracker_pose_delay_slot *
 reclaim_delay_slot(rift_tracked_device_priv *dev)
 {
 	/* Pose observation delay slots */
-	for (int i = 0; i < NUM_POSE_DELAY_SLOTS; i++) {
+	for (int i = 0; i < dev->n_delay_slots; i++) {
 		rift_tracker_pose_delay_slot *slot = dev->delay_slots + i;
 
 		/* If a slot already received a pose observation, use that one */
@@ -1000,7 +1002,7 @@ get_matching_delay_slot(rift_tracked_device_priv *dev, rift_tracked_device_expos
 	rift_tracker_pose_delay_slot *slot = NULL;
 	int slot_no = dev_info->fusion_slot;
 
-	if (slot_no >= 0 && slot_no < NUM_POSE_DELAY_SLOTS) {
+	if (slot_no >= 0 && slot_no < dev->n_delay_slots) {
 		slot = dev->delay_slots + slot_no;
 	}
 
