@@ -260,12 +260,12 @@ static void handle_tracker_sensor_msg(rift_hmd_t* priv, uint64_t local_ts, unsig
 
 		/* If the rift isn't applying calibration, we should */
 		if (!(priv->sensor_config.flags & RIFT_SCF_USE_CALIBRATION)) {
-				/* Apply the rotation matrix first, and then add the provided factory offsets */
+				/* Subtract offset, then apply rotation matrix first */
+				ovec3f_subtract(&gyro, &priv->imu_calibration.gyro_offset, &gyro);
 				ovec3f_multiply_mat3x3(&raw_gyro, priv->imu_calibration.gyro_matrix, &gyro);
-				ovec3f_add(&gyro, &priv->imu_calibration.gyro_offset, &gyro);
 
+				ovec3f_subtract(&accel, &priv->imu_calibration.accel_offset, &accel);
 				ovec3f_multiply_mat3x3(&raw_accel, priv->imu_calibration.accel_matrix, &accel);
-				ovec3f_add(&accel, &priv->imu_calibration.accel_offset, &accel);
 		}
 		else {
 				gyro = raw_gyro;
@@ -390,13 +390,13 @@ static void handle_touch_controller_message(rift_hmd_t *hmd, uint64_t local_ts,
 	vec3f gyro;
 	vec3f accel;
 
-	/* For controllers, we apply the rotation matrix first,
-	 * and then add the provided factory offsets */
+	/* Subtract the factory bias calibration from raw IMU,
+         * then apply the rotation / cross-axis correction */
+	ovec3f_subtract(&gyro, &c->gyro_offset, &gyro);
 	ovec3f_multiply_mat3x3(&raw_gyro, c->gyro_matrix, &gyro);
-	ovec3f_add(&gyro, &c->gyro_offset, &gyro);
 
+	ovec3f_subtract(&accel, &c->accel_offset, &accel);
 	ovec3f_multiply_mat3x3(&raw_accel, c->accel_matrix, &accel);
-	ovec3f_add(&accel, &c->accel_offset, &accel);
 
 	rift_tracked_device_imu_update(touch->tracked_dev, local_ts, device_ts, dt_s, &gyro, &accel, &mag);
 	touch->last_timestamp = msg->touch.timestamp;
