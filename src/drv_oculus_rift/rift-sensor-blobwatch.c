@@ -172,8 +172,10 @@ compute_greysum(blobwatch *bw, uint8_t *frame, struct extent *e, int end_y, floa
 		pixels += bw->width;
 	}
 
-	*led_x = (float) (greysum_x) / greysum_total - 1;
-	*led_y = (float) (greysum_y) / greysum_total - 1;
+  /* Shift back by half a pixel on exit, so pixels are weighted
+   * from their centers */
+	*led_x = (float) (greysum_x) / greysum_total - 0.5;
+	*led_y = (float) (greysum_y) / greysum_total - 0.5;
 }
 
 /*
