@@ -544,6 +544,17 @@ select_k_blobs_from_n (correspondence_search_t *cs, cs_model_info_t *mi, rift_le
     if (k == 1) {
         output_list[0] = candidate_list[0];
         check_led_against_model_subset (cs, mi, result_list, model_leds, depth);
+        
+				// Short circuit if we found a strong pose match already
+				if ((mi->match_flags & RIFT_POSE_MATCH_STRONG) && (mi->search_flags & CS_FLAG_STOP_FOR_STRONG_MATCH)) {
+				        return;
+				}
+				
+				if (n > 1) {
+				        select_k_blobs_from_n(cs, mi, model_leds, result_list, output_list, candidate_list + 1, 1,
+				                              n - 1, depth + 1);
+				}
+
         return;
     }
 
@@ -634,6 +645,16 @@ select_k_leds_from_n (correspondence_search_t *cs,
         swap_list[3] = result_list[3];
 
         check_led_match (cs, mi, swap_list, depth);
+
+        // Short circuit if we found a strong pose match already
+        if ((mi->match_flags & RIFT_POSE_MATCH_STRONG) && (mi->search_flags & CS_FLAG_STOP_FOR_STRONG_MATCH)) {
+                return;
+        }
+ 
+        // Skip branch: try remaining candidates so all C(n,3) combinations are covered
+        if (n > 1) {
+                select_k_leds_from_n(cs, mi, result_list, output_list, candidate_list + 1, 1, n - 1, depth + 1);
+        }
 
         return;
     }
