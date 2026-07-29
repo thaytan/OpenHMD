@@ -14,6 +14,8 @@
 
 #define MAX_OBJECT_LEDS 64
 
+#define WORST_REPROJECTION_ERROR 10.0
+
 typedef struct {
  double left;
  double top;

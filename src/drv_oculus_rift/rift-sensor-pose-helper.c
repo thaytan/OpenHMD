@@ -47,6 +47,11 @@ static int find_best_matching_led (struct visible_led_info *led_points, int num_
 		double dy = fabs(pos_px->y - blob->y);
 		double sqerror = dx*dx + dy*dy;
 
+		// If the blob is much larger than the LED in either dimension, don't match
+		if (blob->width > led_info->led_radius_px * 4 || blob->height > led_info->led_radius_px * 4) {
+			continue;
+		}
+
 		/* Check if the LED falls within the bounding box
 		 * is closer to the camera (smaller Z), or is at least
 		 * led_radius closer to the blob center */
@@ -244,6 +249,7 @@ void rift_evaluate_pose_with_prior (rift_pose_metrics *score, posef *pose,
 
 	/* Iterate the blobs and see which ones are within the bounding box and have a matching LED */
 	bool all_led_ids_matched = true;
+	int blobs_outside_bounds = 0;
 
 	for (i = 0; i < num_blobs; i++) {
 		struct blob *b = blobs + i;
@@ -253,28 +259,32 @@ void rift_evaluate_pose_with_prior (rift_pose_metrics *score, posef *pose,
 		if (led_object_id != LED_INVALID_ID && led_object_id != device_id)
 			continue;
 
-		if (b->x >= bounds.left && b->y >= bounds.top &&
-			b->x < bounds.right && b->y < bounds.bottom) {
-			double sqerror;
+		// Ignore blobs that are outside the pose bounding box
+		if (b->x < bounds.left || b->y < bounds.top || b->x > bounds.right ||
+		    b->y > bounds.bottom) {
+			blobs_outside_bounds++;
+			continue;
+		}
 
-			int match_led_index = find_best_matching_led (visible_led_points, score->visible_leds, b, &sqerror);
-			if (match_led_index >= 0) {
-				if (b->led_id != LED_INVALID_ID) {
-					struct visible_led_info *led_info = visible_led_points + match_led_index;
-					rift_led *match_led = led_info->led;
-					int led_index = match_led->id;
-					if (b->led_id != LED_MAKE_ID (device_id, led_index)) {
-						printf("mismatched LED id %d/%d blob %d (@ %f,%f) has %d/%d\n",
-						    device_id, led_index, i, b->x, b->y, device_id, LED_LOCAL_ID (b->led_id));
-						all_led_ids_matched = false;
-					}
+		double sqerror;
+
+		int match_led_index = find_best_matching_led (visible_led_points, score->visible_leds, b, &sqerror);
+		if (match_led_index >= 0) {
+			if (b->led_id != LED_INVALID_ID) {
+				struct visible_led_info *led_info = visible_led_points + match_led_index;
+				rift_led *match_led = led_info->led;
+				int led_index = match_led->id;
+				if (b->led_id != LED_MAKE_ID (device_id, led_index)) {
+					printf("mismatched LED id %d/%d blob %d (@ %f,%f) has %d/%d\n",
+					    device_id, led_index, i, b->x, b->y, device_id, LED_LOCAL_ID (b->led_id));
+					all_led_ids_matched = false;
 				}
-
-				score->reprojection_error += sqerror;
-				score->matched_blobs++;
-			} else {
-				score->unmatched_blobs++;
 			}
+
+			score->reprojection_error += sqerror;
+			score->matched_blobs++;
+		} else {
+			score->unmatched_blobs++;
 		}
 	}
 
@@ -283,6 +293,12 @@ void rift_evaluate_pose_with_prior (rift_pose_metrics *score, posef *pose,
 
 	if (all_led_ids_matched)
 		score->match_flags |= RIFT_POSE_MATCH_LED_IDS;
+
+	// If blobs were outside the pose bounding box, this is a degenerate P3P solution that doesn't explain all
+	// observations. Penalize it with worst error to prevent selection
+	if (blobs_outside_bounds > 0 && score->matched_blobs <= 3) {
+		score->reprojection_error = WORST_REPROJECTION_ERROR;
+	}
 
 	double error_per_led = score->reprojection_error / score->matched_blobs;
 
@@ -443,7 +459,7 @@ bool rift_score_is_better_pose (rift_pose_metrics *old_score, rift_pose_metrics 
 		return true;
 
 	double new_error_per_led = new_score->reprojection_error / new_score->matched_blobs;
-	double best_error_per_led = 10.0;
+	double best_error_per_led = WORST_REPROJECTION_ERROR;
 
 	if (old_score->matched_blobs > 0)
 		best_error_per_led = old_score->reprojection_error / old_score->matched_blobs;
@@ -458,10 +474,14 @@ bool rift_score_is_better_pose (rift_pose_metrics *old_score, rift_pose_metrics 
 			new_score->reprojection_error < old_score->reprojection_error)
 		return true; /* else, prefer closer reprojection with at least as many matches*/
 
-	/* If both scores have pose priors, prefer the one where the orientation better matches the prior */
+	// If both scores have pose priors, prefer the one where the orientation better matches the prior
+	// BUT only if reprojection error is comparable (within 20%)
 	if (POSE_HAS_FLAGS(old_score, RIFT_POSE_HAD_PRIOR) && POSE_HAS_FLAGS(new_score, RIFT_POSE_HAD_PRIOR)) {
-		if (ovec3f_get_length(&new_score->orient_error) < ovec3f_get_length(&old_score->orient_error)) {
-			return true;
+		if (old_score->matched_blobs == new_score->matched_blobs &&
+		    new_score->reprojection_error < old_score->reprojection_error * 1.2) {
+			if (ovec3f_get_length(&new_score->orient_error) < ovec3f_get_length(&old_score->orient_error)) {
+				return true;
+			}
 		}
 	}
 
