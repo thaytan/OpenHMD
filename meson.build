@@ -38,13 +38,14 @@ if not dep_libusb.found()
 	dep_libusb = proj_hidapi.get_variable('libusb_dep')
 endif
 dep_threads = dependency('threads')
-dep_opencv = dependency('opencv4', required: false)
+dep_opencv = dependency('opencv', required: false)
 if not dep_opencv.found()
-	# On Windows, search via cmake
-        dep_opencv = dependency('opencv', method: 'cmake', modules: ['opencv_core'])
+	# search via cmake for OpenCV5
+        dep_opencv = dependency('OpenCV', method: 'cmake', modules: ['opencv_core', 'opencv_calib'])
 endif
 if not dep_opencv.found()
-	dep_opencv = dependency('opencv')
+        # Try OpenCV4
+        dep_opencv = dependency('OpenCV', method: 'cmake', modules: ['opencv_core', 'opencv_calib3d'])
 endif
 
 dep_jpeg = dependency('libjpeg', required: false)

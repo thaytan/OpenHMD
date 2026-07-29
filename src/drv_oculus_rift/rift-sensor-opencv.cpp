@@ -3,10 +3,16 @@
  * Copyright 2015 Philipp Zabel
  * SPDX-License-Identifier:	LGPL-2.0+ or BSL-1.0
  */
+#include "opencv2/core/version.hpp"
+
+#if CV_VERSION_MAJOR >= 5
+#include <opencv2/calib3d.hpp>
+#else
 #include <opencv2/calib3d/calib3d.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
 #if CV_MAJOR_VERSION >= 4
 #include <opencv2/calib3d/calib3d_c.h>
+#endif
 #endif
 #include <iostream>
 
@@ -246,7 +252,6 @@ extern "C" bool refine_pose(struct blob *blobs, int num_blobs,
 	int i, j;
 	int num_leds = 0;
 	uint64_t taken = 0;
-	int flags = cv::SOLVEPNP_ITERATIVE;
 	cv::Mat cameraK = cv::Mat(3, 3, CV_64FC1, calib->camera_matrix.m);
 	cv::Mat distCoeffs;
 	cv::Mat dummyK = cv::Mat::eye(3, 3, CV_64FC1);
@@ -327,10 +332,10 @@ extern "C" bool refine_pose(struct blob *blobs, int num_blobs,
 	}
 
 // OpenCV 3.4.7 introduced a method to go straight to refining the pose with LM:
-#if CV_VERSION_MAJOR > 4 || (CV_VERSION_MAJOR == 3 && CV_VERSION_MINOR > 4) || (CV_VERSION_MAJOR == 3 && CV_VERSION_MINOR == 4 && CV_VERSION_REVISION >= 7) 
-	if (!cv::solvePnPRefineLM (list_points3d, list_points2d_undistorted, dummyK, dummyD, rvec, tvec))
-		return false;
+#if CV_VERSION_MAJOR >= 4 || (CV_VERSION_MAJOR == 3 && CV_VERSION_MINOR > 4) || (CV_VERSION_MAJOR == 3 && CV_VERSION_MINOR == 4 && CV_VERSION_REVISION >= 7) 
+	cv::solvePnPRefineLM (list_points3d, list_points2d_undistorted, dummyK, dummyD, rvec, tvec);
 #else
+	int flags = cv::SOLVEPNP_ITERATIVE;
 	if (!cv::solvePnP(list_points3d, list_points2d_undistorted, dummyK, dummyD, rvec, tvec,
 			   true, flags))
 		return false;
