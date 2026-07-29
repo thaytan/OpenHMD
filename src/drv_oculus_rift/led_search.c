@@ -3,6 +3,7 @@
 #include <stdio.h>
 
 #include "led_search.h"
+#include "rift-tracker-common.h"
 
 /* Set to 0 to use 3D euclidean distance to sort neighbours,
  * 1 to use orthographic projected 2D distance if the anchor LED is forward-facing */
@@ -78,8 +79,11 @@ led_search_candidate_t *led_search_candidate_new (rift_led *led, rift_leds *led_
       if (cur == led)
         continue; // Don't put the current LED in its own neighbour list
       
-      if (ovec3f_get_dot(&led->dir, &cur->dir) <= 0)
-        continue; // Normals are more than 90 degrees apart - these are mutually exclusive LEDs
+      // Normals are more apart than the sum of the visibility angles of the LEDs
+      float angle_between_leds_rad = acosf(ovec3f_get_dot(&led->dir, &cur->dir));
+      if (angle_between_leds_rad > (RIFT_LED_ANGLE + RIFT_LED_ANGLE)) {
+        continue; // Normals are more than 2 LED-visibility-angles apart - these are mutually exclusive LEDs
+      }
 
       c->neighbours[c->num_neighbours++] = cur;
   }
